@@ -11,6 +11,7 @@ import SummaryStat from "../../components/dashboard/SummaryStat";
 import { compactCount, lakh, pctText } from "../../components/dashboard/format";
 import type { DashboardData, DashboardFilters } from "../../components/dashboard/types";
 import { palette } from "../../theme/tokens";
+import type { Branch, Team } from "../../types";
 
 interface TrailSummary {
   ptps_pending_value: number;
@@ -46,7 +47,13 @@ export default function ManagementDashboardPage() {
   const { token } = theme.useToken();
   const [month, setMonth] = useState<Dayjs>(dayjs());
   const [companyId, setCompanyId] = useState<string>();
+  const [branchId, setBranchId] = useState<string>();
+  const [teamId, setTeamId] = useState<string>();
+  const [agentId, setAgentId] = useState<string>();
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [agentOptions, setAgentOptions] = useState<{ id: string; full_name: string }[]>([]);
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [trail, setTrail] = useState<TrailSummary | null>(null);
@@ -73,6 +80,18 @@ export default function ManagementDashboardPage() {
 
   useEffect(() => {
     api.get("/companies").then((r) => setCompanies(r.data.companies)).catch(() => undefined);
+    api.get("/branches").then((r) => setBranches(r.data.branches)).catch(() => undefined);
+    api.get("/teams").then((r) => setTeams(r.data.teams)).catch(() => undefined);
+    api
+      .get("/employees")
+      .then((r) =>
+        setAgentOptions(
+          (r.data.employees as { id: string; full_name: string; is_active: boolean; capabilities: string[] }[])
+            .filter((e) => e.is_active && (e.capabilities.includes("telecaller") || e.capabilities.includes("field_agent")))
+            .map((e) => ({ id: e.id, full_name: e.full_name })),
+        ),
+      )
+      .catch(() => undefined);
   }, []);
 
   // A collection an agent just recorded won't otherwise appear on a
@@ -83,8 +102,8 @@ export default function ManagementDashboardPage() {
   }, []);
 
   const filters: DashboardFilters = useMemo(
-    () => ({ month: month.format("YYYY-MM"), company_id: companyId }),
-    [month, companyId],
+    () => ({ month: month.format("YYYY-MM"), company_id: companyId, branch_id: branchId, team_id: teamId, agent_id: agentId }),
+    [month, companyId, branchId, teamId, agentId],
   );
 
   useEffect(() => {
@@ -100,24 +119,25 @@ export default function ManagementDashboardPage() {
 
     const baseParams: Record<string, string> = { month: filters.month };
     if (companyId) baseParams.company_id = companyId;
+    if (branchId) baseParams.branch_id = branchId;
+    if (teamId) baseParams.team_id = teamId;
+    if (agentId) baseParams.agent_id = agentId;
+
+    const scopeParams: Record<string, string> = {
+      ...(companyId ? { company_id: companyId } : {}),
+      ...(branchId ? { branch_id: branchId } : {}),
+      ...(teamId ? { team_id: teamId } : {}),
+      ...(agentId ? { agent_id: agentId } : {}),
+    };
 
     Promise.all([
       api.get("/reports/dashboard", { params: baseParams }),
       api.get("/reports/trail", {
-        params: {
-          from: monthStart.format("YYYY-MM-DD"),
-          to: monthEnd.format("YYYY-MM-DD"),
-          ...(companyId ? { company_id: companyId } : {}),
-        },
+        params: { from: monthStart.format("YYYY-MM-DD"), to: monthEnd.format("YYYY-MM-DD"), ...scopeParams },
       }),
       api.get("/reports/agents", { params: baseParams }),
       api.get("/reports/trend", {
-        params: {
-          from: monthStart.format("YYYY-MM-DD"),
-          to: trendTo.format("YYYY-MM-DD"),
-          granularity: "day",
-          ...(companyId ? { company_id: companyId } : {}),
-        },
+        params: { from: monthStart.format("YYYY-MM-DD"), to: trendTo.format("YYYY-MM-DD"), granularity: "day", ...scopeParams },
       }),
       api.get("/employees", { params: { is_active: "true" } }),
       api.get("/customers", { params: { status: "active", limit: 1 } }),
@@ -139,7 +159,7 @@ export default function ManagementDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [filters, month, companyId, refreshTick]);
+  }, [filters, month, companyId, branchId, teamId, agentId, refreshTick]);
 
   const outstandingBalance = data ? Math.max(data.collection.pos_total - data.collection.mtd_amount, 0) : null;
 
@@ -173,6 +193,45 @@ export default function ManagementDashboardPage() {
             options={companies.map((c) => ({ value: c.id, label: c.name }))}
           />
           <DatePicker picker="month" allowClear={false} value={month} onChange={(m) => m && setMonth(m)} />
+          {/* This page previously had no branch/team/agent narrowing at all
+              -- every KPI here was always agency-wide regardless of what a
+              caller might expect from a "Management Dashboard". The server
+              still clamps a branch_manager to their own branch/teams
+              (resolveReportScope) if they view this page; these selects
+              just make the agency-wide drill-down actually reachable. */}
+          <Select
+            style={{ width: 170 }}
+            title="All branches" placeholder="All branches"
+            allowClear
+            value={branchId}
+            onChange={(v) => {
+              setBranchId(v ?? undefined);
+              setTeamId(undefined);
+              setAgentId(undefined);
+            }}
+            options={branches.map((b) => ({ value: b.id, label: b.name }))}
+          />
+          <Select
+            style={{ width: 170 }}
+            title="All teams" placeholder="All teams"
+            allowClear
+            value={teamId}
+            onChange={(v) => {
+              setTeamId(v ?? undefined);
+              setAgentId(undefined);
+            }}
+            options={teams.map((t) => ({ value: t.id, label: t.name }))}
+          />
+          <Select
+            style={{ width: 190 }}
+            title="All agents" placeholder="All agents"
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            value={agentId}
+            onChange={(v) => setAgentId(v ?? undefined)}
+            options={agentOptions.map((a) => ({ value: a.id, label: a.full_name }))}
+          />
         </Space>
       </div>
 

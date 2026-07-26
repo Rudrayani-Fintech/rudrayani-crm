@@ -21,7 +21,13 @@ export interface BreakdownRow {
   label: string;
   allocated_amount: number;
   allocated_count: number;
+  /** Money collected against this row's allocated book, regardless of who collected it. */
   collected_amount: number;
+  /** Money collected by staff belonging to this branch/team/agent -- can differ
+   *  from collected_amount for multi-branch telecallers, mid-month reallocation,
+   *  or a manager recording on an agent's behalf. Same as collected_amount for
+   *  company/product/bucket rows. */
+  collected_by_own_staff_amount: number;
   resolution_pct: number | null;
   rollback_pct: number | null;
   normalization_pct: number | null;
@@ -107,6 +113,20 @@ export default function BreakdownTable({
             align: "right",
             render: (v: number) => <span className="money">{lakh(v)}</span>,
           },
+          ...(dimension === "branch" || dimension === "team" || dimension === "agent"
+            ? [
+                {
+                  title: "Collected (own staff)",
+                  dataIndex: "collected_by_own_staff_amount",
+                  align: "right" as const,
+                  render: (v: number, row: BreakdownRow) => (
+                    <span className="money" style={v !== row.collected_amount ? { color: "#d4380d" } : undefined}>
+                      {lakh(v)}
+                    </span>
+                  ),
+                },
+              ]
+            : []),
           {
             title: "Resolution",
             dataIndex: "resolution_pct",

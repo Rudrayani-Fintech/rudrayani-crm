@@ -18,6 +18,8 @@
     "migrate:create": "node-pg-migrate -m migrations create --migration-file-language sql",
     "seed:dispositions": "tsx src/migrations/seed_disposition_codes.ts",
     "purge:pings": "tsx src/jobs/purge_old_location_pings.ts",
+    "mark:broken-ptps": "tsx src/jobs/mark_broken_ptps.ts",
+    "refresh:dpd": "tsx src/jobs/refresh_dpd.ts",
     "seed:admin": "tsx src/migrations/seed_admin.ts",
     "seed:demo": "tsx src/migrations/seed_demo.ts",
     "seed:payments": "tsx src/migrations/seed_payments.ts",

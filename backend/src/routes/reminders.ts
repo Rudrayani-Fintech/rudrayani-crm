@@ -6,6 +6,7 @@ import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesOf } from "../types/user";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { refreshNextActionDate } from "../services/ptp-service";
 import { agentBranchClamp, customerWriteScopeClamp, resolveBranchClamp } from "../services/scope";
 
 const router = Router();
@@ -66,6 +67,11 @@ router.post(
         body.client_key ?? null,
       ],
     );
+    if (rows[0].customer_id) {
+      // A fresh reminder's date may now be the earliest known follow-up
+      // for this customer.
+      await refreshNextActionDate(pool, rows[0].customer_id as string);
+    }
     res.status(201).json({ reminder: rows[0] });
   }),
 );
@@ -186,6 +192,11 @@ router.patch(
       [...params, body.status],
     );
     if (!rows[0]) throw new HttpError(404, "Reminder not found");
+    if (rows[0].customer_id) {
+      // Resolving/cancelling a reminder may have removed the earliest
+      // known follow-up source for this customer.
+      await refreshNextActionDate(pool, rows[0].customer_id as string);
+    }
     res.json({ reminder: rows[0] });
   }),
 );

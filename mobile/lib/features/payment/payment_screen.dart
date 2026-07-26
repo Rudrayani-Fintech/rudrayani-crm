@@ -6,7 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
+import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
 import '../worklist/worklist_provider.dart';
 
@@ -90,8 +92,10 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
               filename: 'proof.jpg', contentType: DioMediaType('image', 'jpeg')),
       });
 
+      String? receiptNo;
       try {
-        await api.postForm('/payments', form);
+        final res = await api.postForm('/payments', form);
+        receiptNo = (res.data['payment'] as Map<String, dynamic>?)?['receipt_no'] as String?;
       } catch (e) {
         if (!isOfflineError(e)) rethrow;
         // No network — persist the photo outside the picker cache and queue.
@@ -120,17 +124,143 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       if (mounted) {
         ref.invalidate(worklistProvider);
         ref.invalidate(dispositionCodesProvider);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment recorded!'), backgroundColor: AppColors.success),
-        );
-        context.pop();
-        if (_closeCustomer) context.pop(); // also pop customer detail
+        // A receipt number only exists once the server has actually
+        // inserted the row (never true on the offline-queue path above) --
+        // previously the flow ended here with just a SnackBar and nothing
+        // to hand the customer, despite the mobile dashboard already
+        // labelling a KPI "Receipts Generated" for an artifact that never
+        // existed.
+        if (receiptNo != null) {
+          final customer = ref.read(customerByIdProvider(widget.customerId)).valueOrNull;
+          await _showReceiptSheet(receiptNo: receiptNo, amount: amount, customer: customer);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Payment recorded!'), backgroundColor: AppColors.success),
+          );
+        }
+        if (mounted) {
+          context.pop();
+          if (_closeCustomer) context.pop(); // also pop customer detail
+        }
       }
     } catch (e) {
       setState(() => _error = e.toString().replaceFirst('DioException', '').trim());
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// India-only heuristic matching the rest of this app's phone handling
+  /// (see customer_detail_screen.dart's tel: intent): a bare 10-digit
+  /// number gets the country code prefixed for wa.me, which requires it.
+  String _whatsappDigits(String mobileNumber) {
+    final digits = mobileNumber.replaceAll(RegExp(r'\D'), '');
+    if (digits.length == 10) return '91$digits';
+    return digits;
+  }
+
+  Future<void> _shareReceipt({
+    required String receiptNo,
+    required double amount,
+    required String? customerName,
+    required String? mobileNumber,
+    required bool viaWhatsApp,
+  }) async {
+    final message = 'Receipt $receiptNo\n'
+        '₹${amount.toStringAsFixed(2)} received'
+        '${customerName != null ? ' from $customerName' : ''}.\n'
+        'Thank you — Rudrayani Fintech';
+    final uri = viaWhatsApp && mobileNumber != null
+        ? Uri.parse('https://wa.me/${_whatsappDigits(mobileNumber)}?text=${Uri.encodeComponent(message)}')
+        : Uri(
+            scheme: 'sms',
+            path: mobileNumber,
+            queryParameters: {'body': message},
+          );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(viaWhatsApp ? 'WhatsApp is not installed' : 'Cannot open messaging app')),
+      );
+    }
+  }
+
+  Future<void> _showReceiptSheet({
+    required String receiptNo,
+    required double amount,
+    required Customer? customer,
+  }) {
+    final mobileNumber = customer?.mobileNumber;
+    final hasPhone = mobileNumber != null && mobileNumber.isNotEmpty;
+    return showModalBottomSheet(
+      context: context,
+      isDismissible: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(Icons.check_circle, color: AppColors.success, size: 48),
+              const SizedBox(height: 8),
+              const Text('Payment recorded', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              const SizedBox(height: 4),
+              Text(
+                receiptNo,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 14, color: AppColors.textSecondary).tabular,
+              ),
+              const SizedBox(height: 20),
+              if (hasPhone) ...[
+                SizedBox(
+                  height: AppDimens.tapTarget,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.chat),
+                    label: const Text('Share receipt on WhatsApp'),
+                    onPressed: () => _shareReceipt(
+                      receiptNo: receiptNo,
+                      amount: amount,
+                      customerName: customer?.customerName,
+                      mobileNumber: mobileNumber,
+                      viaWhatsApp: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: AppDimens.tapTarget,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.sms),
+                    label: const Text('Share receipt via SMS'),
+                    onPressed: () => _shareReceipt(
+                      receiptNo: receiptNo,
+                      amount: amount,
+                      customerName: customer?.customerName,
+                      mobileNumber: mobileNumber,
+                      viaWhatsApp: false,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              SizedBox(
+                height: AppDimens.tapTarget,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.onPrimary,
+                  ),
+                  child: const Text('Done'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override

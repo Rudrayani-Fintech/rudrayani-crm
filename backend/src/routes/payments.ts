@@ -6,6 +6,8 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { detectPaymentNormalization } from "../services/bucket-movement-service";
+import { markOldestPendingPtpKept, refreshNextActionDate } from "../services/ptp-service";
+import { nextReceiptNo } from "../services/receipt-service";
 import { listDeposits } from "../services/report-service";
 import { customerWriteScopeClamp } from "../services/scope";
 import { getStorage } from "../services/storage/storage-provider";
@@ -121,9 +123,13 @@ router.post(
       // right IST calendar day only by coincidence of the 5.5h offset,
       // while every report boundary elsewhere in the codebase anchors to
       // IST midnight. Anchor the same way here for one consistent contract.
+      // Payments previously had no human-readable receipt number at all --
+      // just a UUID -- despite the mobile app already labelling a KPI
+      // "Receipts Generated" for an artifact that didn't exist.
+      const receiptNo = await nextReceiptNo(client, req.user!.branch_id);
       const payRes = await client.query(
-        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key, exceeds_due_amount, type)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date::timestamp AT TIME ZONE 'Asia/Kolkata', now()), $7, $8, $9)
+        `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key, exceeds_due_amount, type, receipt_no)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date::timestamp AT TIME ZONE 'Asia/Kolkata', now()), $7, $8, $9, $10)
          RETURNING *`,
         [
           body.customer_id,
@@ -135,6 +141,7 @@ router.post(
           body.client_key ?? null,
           exceedsDueAmount,
           body.type,
+          receiptNo,
         ],
       );
 
@@ -146,6 +153,13 @@ router.post(
       }
 
       await detectPaymentNormalization(client, body.customer_id, payRes.rows[0].id);
+      // Nothing previously ever wrote ptps.status -- every PTP sat at
+      // 'pending' forever, so ptps_kept/ptps_broken/ptp_conversion_pct
+      // (the trail report's core KPI) were permanently zero.
+      await markOldestPendingPtpKept(client, body.customer_id, payRes.rows[0].id, body.amount);
+      // The PTP that was just resolved may have been the earliest source
+      // for next_action_date -- recompute from what's left pending.
+      await refreshNextActionDate(client, body.customer_id);
 
       await client.query("COMMIT");
       res.status(201).json({

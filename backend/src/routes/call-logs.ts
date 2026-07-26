@@ -10,6 +10,7 @@ import {
   missingRequiredFields,
   type DispositionCodeRow,
 } from "../services/disposition-service";
+import { refreshNextActionDate } from "../services/ptp-service";
 import { customerWriteScopeClamp } from "../services/scope";
 
 const router = Router();
@@ -125,6 +126,9 @@ router.post(
           ],
         );
         ptp = ptpRes.rows[0];
+        // A fresh PTP's promised_date may now be the earliest known
+        // follow-up for this customer.
+        await refreshNextActionDate(client, body.customer_id);
       }
 
       await client.query("COMMIT");

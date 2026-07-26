@@ -18,7 +18,15 @@ export const authenticate = asyncHandler(
 
     let payload: jwt.JwtPayload;
     try {
-      payload = jwt.verify(header.slice("Bearer ".length), env.JWT_SECRET) as jwt.JwtPayload;
+      // Pin the algorithm explicitly -- without this, jsonwebtoken accepts
+      // whatever alg the token header claims, which (depending on library
+      // version/config) can include unsigned "none" tokens or let an
+      // attacker who knows the JWT_SECRET is HMAC swap in an RS256 token
+      // verified against the secret-as-public-key. Tokens are always
+      // signed HS256 by signAccessToken() in auth-service.ts.
+      payload = jwt.verify(header.slice("Bearer ".length), env.JWT_SECRET, {
+        algorithms: ["HS256"],
+      }) as jwt.JwtPayload;
     } catch {
       throw new HttpError(401, "Invalid or expired access token");
     }

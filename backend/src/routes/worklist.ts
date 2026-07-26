@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { agentBranchClamp, resolveBranchClamp } from "../services/scope";
+import { istMonthStart } from "../utils/ist";
 
 /**
  * The agent's worklist — "Today's Allocation" (build brief Section 8): every
@@ -73,6 +74,12 @@ router.get(
       conditions += ` AND c.bucket = $${params.length}`;
     }
 
+    // Bare `date_trunc('month', now())` resolves in the DB session's UTC
+    // clock, misclassifying "this month" for the first ~5.5h of every IST
+    // day. Bind the IST month start explicitly instead.
+    params.push(istMonthStart());
+    const monthParam = params.length;
+
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
@@ -110,7 +117,7 @@ router.get(
               SELECT EXISTS(
                 SELECT 1 FROM bucket_movements m
                  WHERE m.customer_id = c.id AND m.trigger = 'payment'
-                   AND m.month = date_trunc('month', now())
+                   AND m.month = $${monthParam}::date
               ) AS normalized_pending
          ) bm ON true
         WHERE ${conditions}
@@ -168,13 +175,13 @@ router.get(
               SELECT EXISTS(
                 SELECT 1 FROM bucket_movements m
                  WHERE m.customer_id = c.id AND m.trigger = 'payment'
-                   AND m.month = date_trunc('month', now())
+                   AND m.month = $3::date
               ) AS normalized_pending
          ) bm ON true
         WHERE c.id = $2
           AND (c.assigned_agent_id = $1 OR c.assigned_field_agent_id = $1)
           AND c.status = 'active'`,
-      [req.user!.id, id],
+      [req.user!.id, id, istMonthStart()],
     );
     const customer = rows[0];
     if (!customer) throw new HttpError(404, "Customer not found");

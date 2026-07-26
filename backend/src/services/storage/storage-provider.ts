@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { env } from "../../config/env";
 
 /**
@@ -12,6 +12,13 @@ import { env } from "../../config/env";
 export interface StorageProvider {
   save(prefix: string, extension: string, data: Buffer): Promise<string>;
   read(key: string): Promise<Buffer>;
+  /**
+   * Best-effort cleanup for a key whose DB row never committed (e.g. a
+   * payment/field-visit/attachment transaction that rolled back after the
+   * file was already written). Callers should not let a delete failure mask
+   * the original error -- swallow and log, don't rethrow.
+   */
+  delete(key: string): Promise<void>;
 }
 
 const KEY_PATTERN = /^[a-z0-9_-]+\/[a-f0-9-]+\.[a-z0-9]+$/;
@@ -31,6 +38,15 @@ export class LocalDiskStorage implements StorageProvider {
   async read(key: string): Promise<Buffer> {
     if (!KEY_PATTERN.test(key)) throw new Error(`Invalid storage key: ${key}`);
     return fs.readFile(path.join(this.rootDir, key));
+  }
+
+  async delete(key: string): Promise<void> {
+    if (!KEY_PATTERN.test(key)) return;
+    try {
+      await fs.unlink(path.join(this.rootDir, key));
+    } catch {
+      // Already gone -- nothing to clean up.
+    }
   }
 }
 
@@ -73,6 +89,16 @@ export class S3CompatibleStorage implements StorageProvider {
     const chunks: Buffer[] = [];
     for await (const chunk of res.Body as AsyncIterable<Buffer>) chunks.push(chunk);
     return Buffer.concat(chunks);
+  }
+
+  async delete(key: string): Promise<void> {
+    if (!KEY_PATTERN.test(key)) return;
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+    } catch {
+      // Already gone, or the delete itself failed -- not worth failing the
+      // request over an orphaned object; nothing downstream references it.
+    }
   }
 }
 

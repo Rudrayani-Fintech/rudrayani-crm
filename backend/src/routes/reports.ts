@@ -197,27 +197,41 @@ const dateRangeSchema = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "from must be YYYY-MM-DD"),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "to must be YYYY-MM-DD"),
   company_id: z.string().uuid().optional(),
+  branch_id: z.string().uuid().optional(),
   team_id: z.string().uuid().optional(),
   agent_id: z.string().uuid().optional(),
   product: z.string().trim().min(1).max(200).optional(),
   bucket: z.string().trim().min(1).max(200).optional(),
 });
 
+/**
+ * Shared scope clamp for the three free-date-range endpoints below
+ * (/deposits-range, /trail, /trend). These used to hand-roll their own
+ * "if full view: use filters as-is" branch, which never clamped branch_id
+ * for a branch_manager (who holds reports.view, so hasFullView() is true
+ * for them too) -- a branch_manager could see, or explicitly request,
+ * agency-wide financial data through these three routes alone. Routing
+ * through resolveReportScope() -- the same function /dashboard already
+ * trusts -- clamps branch_id to the manager's own branch and 403s on an
+ * explicit request for a branch they don't manage, instead of silently
+ * honouring it.
+ */
+async function resolveDateRangeScope(
+  req: Request,
+  filters: Omit<ReportFilters, "month">,
+): Promise<Omit<ReportFilters, "month">> {
+  const full = await hasFullView(req);
+  const resolved = await resolveReportScope(req.user!, { ...filters, month: "2000-01-01" }, full);
+  const { month: _month, ...scope } = resolved.filters;
+  return scope;
+}
+
 /** Deposits collected/deposited in a free date range (event-level, range-compatible). */
 router.get(
   "/deposits-range",
   asyncHandler(async (req, res) => {
     const { from, to, ...filters } = dateRangeSchema.parse(req.query);
-    const full = await hasFullView(req);
-    let scope: Omit<ReportFilters, "month">;
-    if (full) {
-      scope = filters;
-    } else {
-      if (filters.agent_id && filters.agent_id !== req.user!.id) {
-        throw new HttpError(403, "You can only view your own deposits");
-      }
-      scope = { ...filters, agent_id: req.user!.id, team_id: undefined };
-    }
+    const scope = await resolveDateRangeScope(req, filters);
     const result = await depositsByRange(req.user!.agency_id, from, to, scope);
     res.json(result);
   }),
@@ -228,17 +242,7 @@ router.get(
   "/trail",
   asyncHandler(async (req, res) => {
     const { from, to, ...filters } = dateRangeSchema.parse(req.query);
-    const full = await hasFullView(req);
-    // Same scope clamp as everything else -- just applied to a date range, not a month.
-    let scope: Omit<ReportFilters, "month">;
-    if (full) {
-      scope = filters;
-    } else {
-      if (filters.agent_id && filters.agent_id !== req.user!.id) {
-        throw new HttpError(403, "You can only view your own trail activity");
-      }
-      scope = { ...filters, agent_id: req.user!.id, team_id: undefined };
-    }
+    const scope = await resolveDateRangeScope(req, filters);
     const result = await trailAnalytics(req.user!.agency_id, from, to, scope);
     res.json(result);
   }),
@@ -255,16 +259,7 @@ router.get(
     const { from, to, granularity, ...filters } = dateRangeSchema
       .extend({ granularity: z.enum(["day", "week"]).default("day") })
       .parse(req.query);
-    const full = await hasFullView(req);
-    let scope: Omit<ReportFilters, "month">;
-    if (full) {
-      scope = filters;
-    } else {
-      if (filters.agent_id && filters.agent_id !== req.user!.id) {
-        throw new HttpError(403, "You can only view your own collection trend");
-      }
-      scope = { ...filters, agent_id: req.user!.id, team_id: undefined };
-    }
+    const scope = await resolveDateRangeScope(req, filters);
     const points = await collectionTrend(req.user!.agency_id, from, to, granularity, scope);
     res.json({ from, to, granularity, points });
   }),

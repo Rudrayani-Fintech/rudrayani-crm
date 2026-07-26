@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
+import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler";
 import allocationRoutes from "./routes/allocations";
@@ -41,12 +42,40 @@ export function createApp() {
   const app = express();
 
   app.use(helmet());
-  app.use(cors());
+
+  const allowedOrigins = env.CORS_ORIGIN?.split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  if (allowedOrigins?.length) {
+    app.use(cors({ origin: allowedOrigins }));
+  } else {
+    if (env.NODE_ENV === "production") {
+      logger.warn(
+        "CORS_ORIGIN is not set -- allowing requests from any origin. " +
+          "Set CORS_ORIGIN to the web portal's URL(s) to restrict this.",
+      );
+    }
+    app.use(cors());
+  }
+
   app.use(express.json());
   app.use(
     pinoHttp({
       logger,
       autoLogging: { ignore: (req) => req.url === "/api/health" },
+      // Access/refresh tokens (and, via req.body on error, login/employee
+      // passwords) would otherwise flow into every request log line as-is.
+      redact: {
+        paths: [
+          'req.headers.authorization',
+          'req.headers.cookie',
+          'req.body.password',
+          'req.body.new_password',
+          'req.body.otp',
+          'req.body.refresh_token',
+        ],
+        censor: "[redacted]",
+      },
     }),
   );
 

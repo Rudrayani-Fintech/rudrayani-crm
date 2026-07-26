@@ -103,7 +103,24 @@ export async function refresh(refreshToken: string) {
     [sha256(refreshToken)],
   );
   const row = rows[0];
-  if (!row || row.revoked_at || row.expires_at < new Date() || !row.is_active) {
+  if (!row) throw new HttpError(401, "Invalid or expired refresh token");
+
+  if (row.revoked_at) {
+    // Refresh tokens are single-use (rotated below on every successful
+    // refresh) -- a revoked token being presented again means either a
+    // client bug or, more likely, a stolen-but-since-rotated token being
+    // replayed. Either way, don't just 401 this one request: revoke every
+    // active session for the user so a leaked token can't keep riding
+    // along after the legitimate client has already moved to the next one.
+    logger.warn({ userId: row.user_id }, "Revoked refresh token reused -- revoking all sessions for user");
+    await pool.query(
+      "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+      [row.user_id],
+    );
+    throw new HttpError(401, "Session revoked -- please log in again");
+  }
+
+  if (row.expires_at < new Date() || !row.is_active) {
     throw new HttpError(401, "Invalid or expired refresh token");
   }
   // Device binding: a token issued for a device that is no longer the active
@@ -151,8 +168,9 @@ export async function requestPasswordOtp(phone: string): Promise<{ devOtp?: stri
     phone,
     `Your Rudrayani CRM password reset OTP is ${otp}. Valid for ${env.OTP_EXPIRY_MINUTES} minutes.`,
   );
-  // Outside production the OTP is returned so the flow is testable without SMS.
-  return env.NODE_ENV !== "production" ? { devOtp: otp } : {};
+  // Explicit opt-in only (ALLOW_OTP_ECHO), not NODE_ENV -- a misconfigured
+  // NODE_ENV value used to be enough to leak OTPs into every response.
+  return env.ALLOW_OTP_ECHO ? { devOtp: otp } : {};
 }
 
 export async function resetPasswordWithOtp(

@@ -5,6 +5,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { customerWriteScopeClamp } from "../services/scope";
 import { getStorage } from "../services/storage/storage-provider";
 
 /**
@@ -60,10 +61,14 @@ router.post(
       }
     }
 
+    // Previously checked only agency_id -- any user with calls.log could
+    // record a field visit against any customer in the agency.
+    const scopeParams: unknown[] = [body.customer_id, req.user!.agency_id];
+    const scopeClause = await customerWriteScopeClamp(req.user!, scopeParams, "c");
     const cust = await pool.query(
       `SELECT c.id FROM customers c JOIN companies co ON co.id = c.company_id
-        WHERE c.id = $1 AND co.agency_id = $2 AND c.status = 'active'`,
-      [body.customer_id, req.user!.agency_id],
+        WHERE c.id = $1 AND co.agency_id = $2 AND c.status = 'active' ${scopeClause}`,
+      scopeParams,
     );
     if (!cust.rows[0]) throw new HttpError(404, "Customer not found or already closed");
 
@@ -78,30 +83,39 @@ router.post(
     const signatureKey = await saveImage(signature, "signatures");
 
     const hasGps = body.lat !== undefined && body.lng !== undefined;
-    const { rows } = await pool.query(
-      `INSERT INTO field_visits
-         (customer_id, agent_id, photo_url, signature_url, remark, location, client_key)
-       VALUES ($1, $2, $3, $4, $5,
-               CASE WHEN $6::boolean
-                    THEN ST_SetSRID(ST_MakePoint($7::float8, $8::float8), 4326)::geography
-                    ELSE NULL END,
-               $9)
-       RETURNING id, customer_id, agent_id, remark, created_at,
-                 (photo_url IS NOT NULL) AS has_photo,
-                 (signature_url IS NOT NULL) AS has_signature`,
-      [
-        body.customer_id,
-        req.user!.id,
-        photoKey,
-        signatureKey,
-        body.remark ?? null,
-        hasGps,
-        body.lng ?? null,
-        body.lat ?? null,
-        body.client_key ?? null,
-      ],
-    );
-    res.status(201).json({ field_visit: rows[0] });
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO field_visits
+           (customer_id, agent_id, photo_url, signature_url, remark, location, client_key)
+         VALUES ($1, $2, $3, $4, $5,
+                 CASE WHEN $6::boolean
+                      THEN ST_SetSRID(ST_MakePoint($7::float8, $8::float8), 4326)::geography
+                      ELSE NULL END,
+                 $9)
+         RETURNING id, customer_id, agent_id, remark, created_at,
+                   (photo_url IS NOT NULL) AS has_photo,
+                   (signature_url IS NOT NULL) AS has_signature`,
+        [
+          body.customer_id,
+          req.user!.id,
+          photoKey,
+          signatureKey,
+          body.remark ?? null,
+          hasGps,
+          body.lng ?? null,
+          body.lat ?? null,
+          body.client_key ?? null,
+        ],
+      );
+      res.status(201).json({ field_visit: rows[0] });
+    } catch (err) {
+      // The photo/signature were already written to storage before this
+      // INSERT -- if the row never lands, clean them up rather than leaving
+      // orphaned files with nothing referencing them.
+      if (photoKey) await getStorage().delete(photoKey);
+      if (signatureKey) await getStorage().delete(signatureKey);
+      throw err;
+    }
   }),
 );
 

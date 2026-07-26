@@ -150,24 +150,37 @@ router.get(
 router.get(
   "/branches",
   asyncHandler(async (req, res) => {
-    // Union structured branch IDs with freetext branch values
+    // A branch_manager previously got every branch name in the agency here
+    // (no clamp at all) -- enough to enumerate the whole org structure from
+    // what's meant to be a scoped filter dropdown. Clamp the same way every
+    // other customer-scoped route does.
+    // Both SELECT halves of the UNION are one query against one params
+    // array -- $1 (agency_id) is shared, then each customerBranchClamp()
+    // call appends its own pair of positional params for that half only.
+    const clamp = await resolveBranchClamp(req.user!);
+    const params: unknown[] = [req.user!.agency_id];
+    const structuredClamp = customerBranchClamp(clamp, params, "c");
+    params.push(req.user!.agency_id);
+    const agencyIdParam2 = params.length;
+    const freetextClamp = customerBranchClamp(clamp, params, "c");
     const { rows } = await pool.query(
       `SELECT DISTINCT b.id::text AS value, b.name AS label
        FROM customers c
        JOIN companies co ON co.id = c.company_id
        JOIN branches b ON b.id = c.branch_id
-       WHERE co.agency_id = $1
+       WHERE co.agency_id = $1 ${structuredClamp}
        UNION
        SELECT DISTINCT UPPER(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch'))) AS value,
                        UPPER(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch'))) AS label
        FROM customers c
        JOIN companies co ON co.id = c.company_id
-       WHERE co.agency_id = $1
+       WHERE co.agency_id = $${agencyIdParam2}
          AND c.branch_id IS NULL
          AND COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch') IS NOT NULL
          AND TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')) != ''
+         ${freetextClamp}
        ORDER BY label`,
-      [req.user!.agency_id],
+      params,
     );
     res.json({ branches: rows });
   }),

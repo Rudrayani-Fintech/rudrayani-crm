@@ -120,3 +120,43 @@ export function agentBranchClamp(clamp: BranchClamp, params: unknown[], alias: s
   const n = params.length;
   return ` AND (${alias}.branch_id = $${n} OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = ${alias}.id AND tb.branch_id = $${n}))`;
 }
+
+/**
+ * AND-able write-path scope clamp for customer-linked records (call logs,
+ * payments, field visits, attachments, reminders). Before this existed,
+ * those five routes checked only `co.agency_id`, so any authenticated user
+ * holding the relevant permission (calls.log, payments.record, ...) could
+ * write against ANY customer in the agency -- an agent in Branch A could
+ * record a collection against Branch B's customer and it would count
+ * toward their own numbers.
+ *
+ * A write is allowed when the customer is assigned to the caller directly
+ * (as primary or field agent) -- the common case for every agent -- OR,
+ * for a branch_manager, when the customer's assigned agent (primary or
+ * field) falls within the branch they manage, mirroring the same "team"
+ * visibility rule the worklist already uses for reads. agency_admin /
+ * operations_manager get resolveBranchClamp()'s null and are unrestricted.
+ *
+ * Returns "" for admin/ops (no restriction). Pushes params as needed.
+ */
+export async function customerWriteScopeClamp(
+  user: {
+    id: string;
+    is_agency_admin: boolean;
+    is_operations_manager: boolean;
+  },
+  params: unknown[],
+  customerAlias = "c",
+): Promise<string> {
+  const clamp = await resolveBranchClamp(user);
+  if (!clamp) return "";
+  params.push(user.id);
+  const selfN = params.length;
+  const agentMatch = agentBranchClamp(clamp, params, "wsc_agent").replace(/^ AND /, "");
+  const fieldAgentMatch = agentBranchClamp(clamp, params, "wsc_field_agent").replace(/^ AND /, "");
+  return ` AND (
+    ${customerAlias}.assigned_agent_id = $${selfN} OR ${customerAlias}.assigned_field_agent_id = $${selfN}
+    OR EXISTS (SELECT 1 FROM users wsc_agent WHERE wsc_agent.id = ${customerAlias}.assigned_agent_id AND ${agentMatch})
+    OR EXISTS (SELECT 1 FROM users wsc_field_agent WHERE wsc_field_agent.id = ${customerAlias}.assigned_field_agent_id AND ${fieldAgentMatch})
+  )`;
+}

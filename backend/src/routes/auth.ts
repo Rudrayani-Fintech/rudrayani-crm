@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate } from "../middleware/authenticate";
+import { loginRateLimiter, otpRequestRateLimiter } from "../middleware/rate-limit";
 import * as authService from "../services/auth-service";
 import { permissionsFor } from "../services/permission-service";
 import { capabilitiesOf, publicUser } from "../types/user";
@@ -19,6 +20,7 @@ const loginSchema = z.object({
 
 router.post(
   "/login",
+  loginRateLimiter,
   asyncHandler(async (req, res) => {
     const body = loginSchema.parse(req.body);
     res.json(await authService.login(body.phone, body.password, body.device_id));
@@ -48,6 +50,7 @@ const otpRequestSchema = z.object({ phone: phoneSchema });
 
 router.post(
   "/otp/request",
+  otpRequestRateLimiter,
   asyncHandler(async (req, res) => {
     const body = otpRequestSchema.parse(req.body);
     const result = await authService.requestPasswordOtp(body.phone);

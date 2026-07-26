@@ -12,7 +12,7 @@ import {
 } from "antd";
 import { DownloadOutlined, SettingOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import AgentDetailDrawer from "../components/AgentDetailDrawer";
@@ -119,7 +119,13 @@ export default function DashboardPage() {
     [month, companyId, branchId, teamId, agentId, product, bucket, status, myWork, user],
   );
 
+  // Guards against rapid filter changes painting stale numbers: if the
+  // agent/team/branch selects change quickly, an earlier, slower request
+  // can resolve AFTER a newer one and overwrite fresh data with stale data.
+  // Only the response from the most recently issued load() is applied.
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     try {
       const params: Record<string, string> = { month: filters.month };
@@ -127,21 +133,34 @@ export default function DashboardPage() {
         if (filters[key]) params[key] = filters[key]!;
       }
       const res = await api.get("/reports/dashboard", { params });
+      if (seq !== loadSeq.current) return;
       setData(res.data);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       message.error(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [filters]);
 
   useEffect(() => {
     void load();
-    // A collection an agent just recorded won't otherwise appear on a
-    // dashboard tab left open until a filter changes -- poll so it does.
-    const interval = setInterval(() => void load(), 60_000);
-    return () => clearInterval(interval);
   }, [load]);
+
+  // A collection an agent just recorded won't otherwise appear on a
+  // dashboard tab left open until a filter changes -- poll so it does.
+  // Kept in a separate, dependency-free effect so the poll timer itself
+  // isn't torn down and restarted on every filter change (it previously
+  // was, since `load`'s identity changes with `filters`) -- the ref always
+  // points at the latest load(), so each tick still uses current filters.
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
+  useEffect(() => {
+    const interval = setInterval(() => void loadRef.current(), 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const exportExcel = async () => {
     setExporting(true);
@@ -307,6 +326,25 @@ export default function DashboardPage() {
                     setAgentId(undefined);
                   }}
                   options={teams.map((t) => ({ value: t.id, label: t.name }))}
+                />
+              </>
+            )}
+            {data?.scope.clamped_to === "branch" && (
+              <>
+                {/* The server clamps to this branch regardless of what's sent
+                    (or not sent) here -- shown as fixed context, not a filter,
+                    since a branch_manager can't widen past their own branch. */}
+                <Tag>{myBranch?.name ?? "Your branch"}</Tag>
+                <Select
+                  style={{ width: 170 }}
+                  title="All teams" placeholder="All teams"
+                  allowClear
+                  value={teamId}
+                  onChange={(v) => {
+                    setTeamId(v ?? undefined);
+                    setAgentId(undefined);
+                  }}
+                  options={myBranchTeams.map((t) => ({ value: t.id, label: t.name }))}
                 />
               </>
             )}

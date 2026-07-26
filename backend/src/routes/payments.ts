@@ -7,6 +7,7 @@ import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { detectPaymentNormalization } from "../services/bucket-movement-service";
 import { listDeposits } from "../services/report-service";
+import { customerWriteScopeClamp } from "../services/scope";
 import { getStorage } from "../services/storage/storage-provider";
 
 /**
@@ -68,25 +69,6 @@ router.post(
       }
     }
 
-    const custRes = await pool.query(
-      `SELECT c.id, c.status, c.due_amount FROM customers c
-         JOIN companies co ON co.id = c.company_id
-        WHERE c.id = $1 AND co.agency_id = $2`,
-      [body.customer_id, agencyId],
-    );
-    if (!custRes.rows[0]) throw new HttpError(404, "Customer not found in this agency");
-    if (custRes.rows[0].status === "closed") throw new HttpError(400, "Customer is already closed");
-    if (custRes.rows[0].status === "recalled") {
-      throw new HttpError(400, "Customer was recalled by the lender -- no longer collectible here");
-    }
-
-    // Stamped server-side from the customer's actual due_amount, ignoring
-    // whatever the client believes — a reliable ops signal even if a future
-    // client build forgets to show the warning (product decision: never
-    // block on this, just flag it for later spot-checking).
-    const dueAmount = custRes.rows[0].due_amount as string | null;
-    const exceedsDueAmount = dueAmount != null && body.amount > Number(dueAmount);
-
     let photoKey: string | null = null;
     if (req.file) {
       const ext = PHOTO_EXTENSIONS[req.file.mimetype];
@@ -97,9 +79,44 @@ router.post(
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+
+      // Previously read outside the transaction (TOCTOU: a concurrent
+      // close/recall could land in the gap between this check and the
+      // INSERT below) and scoped by agency_id only -- any user holding
+      // payments.record could record a payment against any customer in the
+      // agency, not just one assigned to them or their branch. FOR UPDATE
+      // serializes concurrent writers on this row; the scope clamp
+      // restricts which customers this caller may pay against at all.
+      const scopeParams: unknown[] = [body.customer_id, agencyId];
+      const scopeClause = await customerWriteScopeClamp(req.user!, scopeParams, "c");
+      const custRes = await client.query(
+        `SELECT c.id, c.status, c.due_amount FROM customers c
+           JOIN companies co ON co.id = c.company_id
+          WHERE c.id = $1 AND co.agency_id = $2 ${scopeClause}
+          FOR UPDATE OF c`,
+        scopeParams,
+      );
+      if (!custRes.rows[0]) throw new HttpError(404, "Customer not found in this agency");
+      if (custRes.rows[0].status === "closed") throw new HttpError(400, "Customer is already closed");
+      if (custRes.rows[0].status === "recalled") {
+        throw new HttpError(400, "Customer was recalled by the lender -- no longer collectible here");
+      }
+
+      // Stamped server-side from the customer's actual due_amount, ignoring
+      // whatever the client believes — a reliable ops signal even if a future
+      // client build forgets to show the warning (product decision: never
+      // block on this, just flag it for later spot-checking).
+      const dueAmount = custRes.rows[0].due_amount as string | null;
+      const exceedsDueAmount = dueAmount != null && body.amount > Number(dueAmount);
+
+      // A bare `$6::date` cast to timestamptz is anchored to UTC midnight of
+      // that date, not IST midnight -- it happened to still land on the
+      // right IST calendar day only by coincidence of the 5.5h offset,
+      // while every report boundary elsewhere in the codebase anchors to
+      // IST midnight. Anchor the same way here for one consistent contract.
       const payRes = await client.query(
         `INSERT INTO payments (customer_id, collected_by_user_id, amount, mode, photo_proof_url, paid_at, client_key, exceeds_due_amount, type)
-         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date, now()), $7, $8, $9)
+         VALUES ($1, $2, $3, $4, $5, COALESCE($6::date::timestamp AT TIME ZONE 'Asia/Kolkata', now()), $7, $8, $9)
          RETURNING *`,
         [
           body.customer_id,
@@ -130,6 +147,10 @@ router.post(
       });
     } catch (err) {
       await client.query("ROLLBACK");
+      // The photo was already written to storage before this transaction --
+      // if the row never committed (genuine failure, or this request lost
+      // a client_key race to a concurrent retry), it's orphaned either way.
+      if (photoKey) await getStorage().delete(photoKey);
       // Two retries raced: the other one won, answer with its row.
       if (
         body.client_key &&

@@ -6,7 +6,7 @@ import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesOf } from "../types/user";
 import { capabilitiesHavePermission } from "../services/permission-service";
-import { agentBranchClamp, resolveBranchClamp } from "../services/scope";
+import { agentBranchClamp, customerWriteScopeClamp, resolveBranchClamp } from "../services/scope";
 
 const router = Router();
 router.use(authenticate, requirePermission("reminders.manage"));
@@ -40,11 +40,15 @@ router.post(
     }
 
     if (body.customer_id) {
+      // Previously checked only agency_id -- any user with reminders.manage
+      // could create a reminder against any customer in the agency.
+      const scopeParams: unknown[] = [body.customer_id, req.user!.agency_id];
+      const scopeClause = await customerWriteScopeClamp(req.user!, scopeParams, "c");
       const { rows } = await pool.query(
         `SELECT 1 FROM customers c
            JOIN companies co ON co.id = c.company_id
-          WHERE c.id = $1 AND co.agency_id = $2`,
-        [body.customer_id, req.user!.agency_id],
+          WHERE c.id = $1 AND co.agency_id = $2 ${scopeClause}`,
+        scopeParams,
       );
       if (rows.length === 0) throw new HttpError(404, "Customer not found");
     }

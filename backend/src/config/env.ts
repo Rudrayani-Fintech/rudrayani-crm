@@ -18,6 +18,23 @@ const envSchema = z.object({
   OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
   UPLOAD_DIR: z.string().default("uploads"),
 
+  // Comma-separated list of allowed origins for the web portal (e.g.
+  // "https://app.rudrayanifintechs.com"). Unset = every origin is allowed,
+  // which is what this API ran with for a long time -- kept as the default
+  // so deploying this change can't itself lock out the live portal, but a
+  // startup warning nudges the operator to set this in production.
+  CORS_ORIGIN: z.string().optional(),
+
+  // Returns the password-reset OTP in the /auth/otp/request response body
+  // (for local testing without a real SMS provider). Previously gated on
+  // `NODE_ENV !== "production"` -- one misconfigured/misspelled NODE_ENV
+  // value (e.g. "staging") silently turned this on. Explicit opt-in,
+  // defaulting to off regardless of NODE_ENV.
+  ALLOW_OTP_ECHO: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
+
   // Optional S3-compatible storage (e.g. Cloudflare R2). When all four are
   // set, getStorage() uses it instead of local disk -- needed on hosts that
   // don't persist local disk across deploys/restarts (Render, Fly, Vercel).

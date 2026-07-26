@@ -10,6 +10,7 @@ import {
   missingRequiredFields,
   type DispositionCodeRow,
 } from "../services/disposition-service";
+import { customerWriteScopeClamp } from "../services/scope";
 
 const router = Router();
 router.use(authenticate, requirePermission("calls.log"));
@@ -62,11 +63,17 @@ router.post(
       }
     }
 
+    // Previously checked only agency_id -- any authenticated user with
+    // calls.log could log against any customer in the agency. Clamp to
+    // customers actually assigned to the caller (or, for a branch_manager,
+    // to their branch).
+    const params: unknown[] = [body.customer_id, agencyId];
+    const scopeClause = await customerWriteScopeClamp(req.user!, params, "c");
     const custRes = await pool.query(
       `SELECT c.id, c.assigned_agent_id FROM customers c
          JOIN companies co ON co.id = c.company_id
-        WHERE c.id = $1 AND co.agency_id = $2 AND c.status = 'active'`,
-      [body.customer_id, agencyId],
+        WHERE c.id = $1 AND co.agency_id = $2 AND c.status = 'active' ${scopeClause}`,
+      params,
     );
     if (!custRes.rows[0]) throw new HttpError(404, "Customer not found or already closed");
 

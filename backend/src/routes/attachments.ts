@@ -5,7 +5,9 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { customerWriteScopeClamp } from "../services/scope";
 import { getStorage } from "../services/storage/storage-provider";
+import type { UserRow } from "../types/user";
 
 /**
  * Generic supporting documents against a customer (KYC docs, agreements, ID
@@ -34,11 +36,15 @@ const uploadBody = z.object({
   client_key: z.string().uuid().optional(),
 });
 
-async function assertCustomerInScope(customerId: string, agencyId: string): Promise<void> {
+// Previously checked only agency_id -- any user with calls.log could
+// attach a document to any customer in the agency.
+async function assertCustomerInScope(customerId: string, user: UserRow): Promise<void> {
+  const params: unknown[] = [customerId, user.agency_id];
+  const scopeClause = await customerWriteScopeClamp(user, params, "c");
   const { rows } = await pool.query(
     `SELECT 1 FROM customers c JOIN companies co ON co.id = c.company_id
-      WHERE c.id = $1 AND co.agency_id = $2`,
-    [customerId, agencyId],
+      WHERE c.id = $1 AND co.agency_id = $2 ${scopeClause}`,
+    params,
   );
   if (rows.length === 0) throw new HttpError(404, "Customer not found");
 }
@@ -61,7 +67,7 @@ router.post(
       }
     }
 
-    await assertCustomerInScope(body.customer_id, req.user!.agency_id);
+    await assertCustomerInScope(body.customer_id, req.user!);
 
     const file = req.file;
     if (!file) throw new HttpError(400, "No file uploaded");
@@ -69,25 +75,32 @@ router.post(
     if (!meta) throw new HttpError(400, "Only JPEG, PNG, WebP images or PDF documents are allowed");
 
     const fileKey = await getStorage().save("attachments", meta.ext, file.buffer);
-    const { rows } = await pool.query(
-      `INSERT INTO attachments
-         (agency_id, customer_id, uploaded_by, kind, file_key, file_name, mime_type, size_bytes, note, client_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING *`,
-      [
-        req.user!.agency_id,
-        body.customer_id,
-        req.user!.id,
-        meta.kind,
-        fileKey,
-        file.originalname,
-        file.mimetype,
-        file.size,
-        body.note ?? null,
-        body.client_key ?? null,
-      ],
-    );
-    res.status(201).json({ attachment: rows[0] });
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO attachments
+           (agency_id, customer_id, uploaded_by, kind, file_key, file_name, mime_type, size_bytes, note, client_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING *`,
+        [
+          req.user!.agency_id,
+          body.customer_id,
+          req.user!.id,
+          meta.kind,
+          fileKey,
+          file.originalname,
+          file.mimetype,
+          file.size,
+          body.note ?? null,
+          body.client_key ?? null,
+        ],
+      );
+      res.status(201).json({ attachment: rows[0] });
+    } catch (err) {
+      // The file was already written to storage before this INSERT -- if
+      // the row never lands, clean it up rather than leaving an orphan.
+      await getStorage().delete(fileKey);
+      throw err;
+    }
   }),
 );
 

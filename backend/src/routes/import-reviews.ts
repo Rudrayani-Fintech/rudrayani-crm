@@ -5,6 +5,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { istMonthStart } from "../utils/ist";
 
 /**
  * Discrepancy review queue (Phase 7): additions, removals, and reactivations
@@ -125,8 +126,8 @@ router.get(
         ),
         pool.query(
           `SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM payments
-            WHERE customer_id = $1 AND paid_at >= date_trunc('month', now())`,
-          [item.customer_id],
+            WHERE customer_id = $1 AND paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')`,
+          [item.customer_id, istMonthStart()],
         ),
         pool.query(
           `SELECT customer_name, bucket, due_amount, pos, emi, status, custom_fields,

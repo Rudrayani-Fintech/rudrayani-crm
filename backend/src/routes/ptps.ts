@@ -6,6 +6,7 @@ import { authenticate, requirePermission } from "../middleware/authenticate";
 import { capabilitiesOf } from "../types/user";
 import { capabilitiesHavePermission } from "../services/permission-service";
 import { agentBranchClamp, resolveBranchClamp } from "../services/scope";
+import { istToday } from "../utils/ist";
 
 const router = Router();
 router.use(authenticate, requirePermission("calls.log"));
@@ -81,7 +82,7 @@ router.get(
     const q = z
       .object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() })
       .parse(req.query);
-    const dueBy = q.date ?? new Date().toISOString().slice(0, 10);
+    const dueBy = q.date ?? istToday();
 
     const seesAll = await capabilitiesHavePermission(
       capabilitiesOf(req.user!),

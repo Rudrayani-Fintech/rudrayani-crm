@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { istMonthStart } from "../utils/ist";
 
 /**
  * Bucket movement events (Phase 7): the lender's file stays the authoritative
@@ -58,10 +59,17 @@ export async function detectPaymentNormalization(
     return; // both missing -- undetectable, not an error
   }
 
+  // Bare `date_trunc('month', now())` resolves in the DB session's timezone
+  // (UTC), so a payment in the first ~5.5h of an IST day was compared
+  // against the wrong month boundary. Compute the IST month start in JS and
+  // bind it, matching the `$N::date::timestamp AT TIME ZONE` idiom used for
+  // report queries elsewhere.
+  const monthStart = istMonthStart();
+
   const paidRes = await client.query(
     `SELECT COALESCE(SUM(amount), 0)::numeric AS total FROM payments
-      WHERE customer_id = $1 AND paid_at >= date_trunc('month', now())`,
-    [customerId],
+      WHERE customer_id = $1 AND paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')`,
+    [customerId, monthStart],
   );
   if (Number(paidRes.rows[0].total) < threshold) return;
 
@@ -75,9 +83,9 @@ export async function detectPaymentNormalization(
     `INSERT INTO bucket_movements
        (customer_id, company_id, from_bucket, to_bucket, from_canonical, to_canonical,
         trigger, month, payment_id)
-     VALUES ($1, $2, $3, $4, $5, 0, 'payment', date_trunc('month', now()), $6)
+     VALUES ($1, $2, $3, $4, $5, 0, 'payment', $6::date, $7)
      ON CONFLICT (customer_id, month) WHERE trigger = 'payment' DO NOTHING`,
-    [customerId, cust.company_id, cust.bucket, currentBucketLabel, bucketRow.canonical_bucket, paymentId],
+    [customerId, cust.company_id, cust.bucket, currentBucketLabel, bucketRow.canonical_bucket, monthStart, paymentId],
   );
 }
 

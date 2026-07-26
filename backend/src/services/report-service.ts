@@ -1,6 +1,7 @@
 import { pool } from "../config/db";
 import { HttpError } from "../middleware/error-handler";
 import type { UserRow } from "../types/user";
+import { istToday } from "../utils/ist";
 
 /**
  * Performance report engine (Phase 5). The allocated book for month M is
@@ -22,7 +23,6 @@ import type { UserRow } from "../types/user";
  * the month); collected money belongs to payments.collected_by_user_id.
  */
 
-const IST = "Asia/Kolkata";
 export const REPORT_METRICS = [
   "resolution",
   "rollback",
@@ -231,20 +231,20 @@ export interface MonthDays {
 export function monthDays(month: string, now = new Date()): MonthDays {
   const [y, m] = month.split("-").map(Number);
   const inMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  const istNow = new Date(now.toLocaleString("en-US", { timeZone: IST }));
-  const curY = istNow.getFullYear();
-  const curM = istNow.getMonth() + 1;
+  // istToday() (Intl-backed, en-CA -> 'YYYY-MM-DD') replaces a fragile
+  // locale-string round-trip through `new Date(...)`, whose parsing is not
+  // guaranteed stable across Node/ICU builds.
+  const [curY, curM, curD] = istToday(now).split("-").map(Number);
   if (y < curY || (y === curY && m < curM)) return { in_month: inMonth, elapsed: inMonth, left: 0 };
   if (y > curY || (y === curY && m > curM)) return { in_month: inMonth, elapsed: 0, left: inMonth };
-  const elapsed = istNow.getDate();
-  return { in_month: inMonth, elapsed, left: inMonth - elapsed };
+  return { in_month: inMonth, elapsed: curD, left: inMonth - curD };
 }
 
 /** Is `month` ('YYYY-MM' or 'YYYY-MM-01') the current calendar month in IST? */
 function isCurrentMonth(month: string, now = new Date()): boolean {
   const [y, m] = month.split("-").map(Number);
-  const istNow = new Date(now.toLocaleString("en-US", { timeZone: IST }));
-  return y === istNow.getFullYear() && m === istNow.getMonth() + 1;
+  const [curY, curM] = istToday(now).split("-").map(Number);
+  return y === curY && m === curM;
 }
 
 /** WHERE fragments for the snapshot base under the resolved filters. */
@@ -1543,11 +1543,30 @@ export async function trailAnalytics(
   to: string,
   filters: Omit<ReportFilters, "month">,
 ): Promise<TrailAnalytics> {
-  const conditions = ["co.agency_id = $1", "cl.created_at >= $2::date", "cl.created_at < ($3::date + interval '1 day')"];
+  // Unlike every other date-range query in this file (e.g. depositsByRange
+  // above), this comparison had no `AT TIME ZONE 'Asia/Kolkata'` -- so the
+  // trail report's day boundaries were UTC while the dashboard's were IST,
+  // misattributing calls made in the last ~5.5h of an IST day to the next
+  // day's report.
+  const conditions = [
+    "co.agency_id = $1",
+    "cl.created_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')",
+    "cl.created_at < (($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')",
+  ];
   const params: unknown[] = [agencyId, from, to];
   if (filters.company_id) {
     params.push(filters.company_id);
     conditions.push(`c.company_id = $${params.length}`);
+  }
+  // `u` (cl.agent_id) is already joined in every query below -- branch_id
+  // was previously silently ignored here, which is how a branch_manager's
+  // scope clamp (branch_id set, team_id undefined) fell through to
+  // agency-wide trail data despite resolveReportScope() having narrowed it.
+  if (filters.branch_id) {
+    params.push(filters.branch_id);
+    conditions.push(
+      `(u.branch_id = $${params.length} OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = u.id AND tb.branch_id = $${params.length}))`,
+    );
   }
   if (filters.team_id) {
     params.push(filters.team_id);

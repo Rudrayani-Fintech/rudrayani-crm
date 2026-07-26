@@ -5,6 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { scopeFilter } from "../services/scope";
+import { istToday } from "../utils/ist";
 
 const router = Router();
 router.use(authenticate, requirePermission("tracking.view"));
@@ -244,7 +245,7 @@ router.get(
     const q = z
       .object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() })
       .parse(req.query);
-    const date = q.date ?? new Date().toISOString().slice(0, 10);
+    const date = q.date ?? istToday();
 
     const scope = await scopeFilter(me);
     const params: unknown[] = [me.agency_id, date];

@@ -45,9 +45,8 @@ export interface ReportFilters {
 }
 
 export interface ResolvedScope {
-  clampedTo: "agency" | "branch" | "team" | "teams" | "self";
+  clampedTo: "agency" | "branch" | "self";
   filters: ReportFilters;
-  scopeTeamIds?: string[] | null; // For multi-team TLs when no specific team is requested
 }
 
 /**
@@ -82,6 +81,21 @@ export async function resolveReportScope(
     if (requested.branch_id && requested.branch_id !== branchId) {
       throw new HttpError(403, "You do not manage this branch");
     }
+    // Previously this unconditionally set team_id: undefined below,
+    // silently discarding whatever team the manager had selected -- the
+    // dashboard just re-showed branch-wide numbers with no indication the
+    // filter did nothing. Validate instead of dropping: a team inside the
+    // branch they manage is honoured, one outside it is rejected, the same
+    // way an out-of-branch branch_id is rejected just above.
+    if (requested.team_id) {
+      const teamRes = await pool.query<{ branch_id: string }>(
+        "SELECT branch_id FROM teams WHERE id = $1",
+        [requested.team_id],
+      );
+      if (!teamRes.rows[0] || teamRes.rows[0].branch_id !== branchId) {
+        throw new HttpError(403, "That team is not in a branch you manage");
+      }
+    }
     // Not yet assigned to a branch (optional-at-creation) -> sees nothing,
     // same sentinel-UUID pattern used elsewhere for "no scope yet" rather
     // than a 500 or an accidental agency-wide fallthrough.
@@ -90,7 +104,6 @@ export async function resolveReportScope(
       filters: {
         ...requested,
         branch_id: branchId ?? "00000000-0000-0000-0000-000000000000",
-        team_id: undefined,
       },
     };
   }
@@ -99,27 +112,6 @@ export async function resolveReportScope(
     clampedTo: "self",
     filters: { ...requested, agent_id: user.id, branch_id: undefined, team_id: undefined },
   };
-}
-
-/**
- * Build team_id WHERE clause for multi-team TL support.
- * Returns the WHERE fragment and updates params array.
- *
- * Handles two scenarios:
- * 1. Single team: team_id = $N
- * 2. Multi-team TL with scopeTeamIds: team_id = ANY($N) where $N is array
- * 3. No team restriction: null (no clause added)
- */
-function buildTeamClause(scope: ResolvedScope, params: unknown[]): string | null {
-  if (scope.scopeTeamIds?.length) {
-    params.push(scope.scopeTeamIds);
-    return `s.assigned_team_id = ANY($${params.length})`;
-  }
-  if (scope.filters.team_id) {
-    params.push(scope.filters.team_id);
-    return `s.assigned_team_id = $${params.length}`;
-  }
-  return null;
 }
 
 /**
@@ -175,52 +167,6 @@ function reportBranchClause(
   return `(${parts.join(" OR ")})`;
 }
 
-/**
- * Build report WHERE conditions with multi-team TL support.
- * Like baseConditions() but replaces the team clause with buildTeamClause()
- * to handle scopeTeamIds from multi-team TLs.
- */
-function buildReportConditions(scope: ResolvedScope, params: unknown[]): string[] {
-  const conditions: string[] = [];
-  const filters = scope.filters;
-
-  if (filters.company_id) {
-    params.push(filters.company_id);
-    conditions.push(`s.company_id = $${params.length}`);
-  }
-  if (filters.branch_id) {
-    conditions.push(reportBranchClause(filters.branch_id, params, "c", "tm", ["s.assigned_agent_id"]));
-  }
-
-  // Team handling with multi-team support
-  const teamClause = buildTeamClause(scope, params);
-  if (teamClause) conditions.push(teamClause);
-
-  if (filters.agent_id) {
-    params.push(filters.agent_id);
-    conditions.push(`s.assigned_agent_id = $${params.length}`);
-  }
-  if (filters.product) {
-    params.push(filters.product);
-    conditions.push(
-      `(lower(s.product) = lower($${params.length}) OR EXISTS (
-          SELECT 1 FROM products pr
-           WHERE pr.company_id = s.company_id
-             AND lower(pr.raw_label) = lower(s.product)
-             AND lower(pr.canonical_label) = lower($${params.length})))`,
-    );
-  }
-  if (filters.bucket) {
-    params.push(filters.bucket);
-    conditions.push(`lower(s.bucket) = lower($${params.length})`);
-  }
-  if (filters.status) {
-    params.push(filters.status);
-    conditions.push(`c.status = $${params.length}`);
-  }
-  return conditions;
-}
-
 export interface MonthDays {
   in_month: number;
   elapsed: number;
@@ -247,6 +193,30 @@ function isCurrentMonth(month: string, now = new Date()): boolean {
   return y === curY && m === curM;
 }
 
+/**
+ * `customer_month_snapshots.assigned_team_id` is only ever populated as the
+ * assigned agent's own team_id AT ALLOCATION TIME (allocations.ts) -- it's
+ * NULL for any customer whose agent wasn't grouped into a team when
+ * allocated, and stays stale forever after that agent later moves teams. A
+ * bare `s.assigned_team_id = $N` therefore silently collapses to zero rows
+ * for both cases -- selecting a team on the dashboard either showed nothing
+ * or, worse, kept showing the PREVIOUS team's numbers for an agent who
+ * moved. This ORs in the assigned agent's CURRENT team membership (scalar
+ * team_id, or the telecaller_teams junction for multi-team members) so a
+ * team filter reflects reality instead of an allocation-time snapshot --
+ * mirrors reportBranchClause()'s own "only ever widen, never narrow" fix
+ * for the identical problem on branch_id.
+ */
+function reportTeamClause(teamId: string, params: unknown[]): string {
+  params.push(teamId);
+  const n = params.length;
+  return `(s.assigned_team_id = $${n} OR EXISTS (
+    SELECT 1 FROM users rtc_agent WHERE rtc_agent.id = s.assigned_agent_id
+      AND (rtc_agent.team_id = $${n}
+           OR EXISTS (SELECT 1 FROM telecaller_teams tt WHERE tt.user_id = rtc_agent.id AND tt.team_id = $${n}))
+  ))`;
+}
+
 /** WHERE fragments for the snapshot base under the resolved filters. */
 function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
   const conditions: string[] = [];
@@ -258,8 +228,7 @@ function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
     conditions.push(reportBranchClause(filters.branch_id, params, "c", "tm", ["s.assigned_agent_id"]));
   }
   if (filters.team_id) {
-    params.push(filters.team_id);
-    conditions.push(`s.assigned_team_id = $${params.length}`);
+    conditions.push(reportTeamClause(filters.team_id, params));
   }
   if (filters.agent_id) {
     params.push(filters.agent_id);
@@ -592,11 +561,9 @@ async function classify(
   agencyId: string,
   filters: ReportFilters,
   useTransition: boolean,
-  scope?: ResolvedScope,
 ): Promise<ClassifiedAggregates> {
   const params: unknown[] = [agencyId, filters.month, useTransition];
-  // Use buildReportConditions if scope provided (handles multi-team), else fallback to baseConditions
-  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
+  const conditions = baseConditions(filters, params);
   const { rows } = await pool.query(
     `WITH ${classifiedCtes(conditions)}
      SELECT ${AGGREGATE_SELECT} FROM class`,
@@ -771,55 +738,6 @@ function paymentConditions(filters: ReportFilters, params: unknown[]): string[] 
   return conditions;
 }
 
-/**
- * Payment conditions with multi-team TL support.
- * Like paymentConditions() but replaces team_id with buildTeamClause()
- * to handle scopeTeamIds from multi-team TLs.
- * Note: Uses cu.team_id since we're checking collector's team, not customer's allocation.
- */
-function buildPaymentConditions(scope: ResolvedScope, params: unknown[]): string[] {
-  const conditions: string[] = [];
-  const filters = scope.filters;
-
-  if (filters.company_id) {
-    params.push(filters.company_id);
-    conditions.push(`c.company_id = $${params.length}`);
-  }
-  if (filters.agent_id) {
-    params.push(filters.agent_id);
-    conditions.push(`p.collected_by_user_id = $${params.length}`);
-  }
-
-  // Team handling with multi-team support (collector's team)
-  if (scope.scopeTeamIds?.length) {
-    params.push(scope.scopeTeamIds);
-    conditions.push(`cu.team_id = ANY($${params.length})`);
-  } else if (filters.team_id) {
-    params.push(filters.team_id);
-    conditions.push(`cu.team_id = $${params.length}`);
-  }
-
-  if (filters.branch_id) {
-    params.push(filters.branch_id);
-    conditions.push(`cu.branch_id = $${params.length}`);
-  }
-  if (filters.product) {
-    params.push(filters.product);
-    conditions.push(
-      `(lower(c.product) = lower($${params.length}) OR EXISTS (
-          SELECT 1 FROM products pr
-           WHERE pr.company_id = c.company_id
-             AND lower(pr.raw_label) = lower(c.product)
-             AND lower(pr.canonical_label) = lower($${params.length})))`,
-    );
-  }
-  if (filters.bucket) {
-    params.push(filters.bucket);
-    conditions.push(`lower(c.bucket) = lower($${params.length})`);
-  }
-  return conditions;
-}
-
 export interface DepositTotals {
   collected: number;
   deposited: number;
@@ -858,10 +776,9 @@ export async function depositsByRange(
 export async function depositTotals(
   agencyId: string,
   filters: ReportFilters,
-  scope?: ResolvedScope,
 ): Promise<DepositTotals> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
+  const conditions = paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount), 0)::float AS collected,
@@ -893,10 +810,9 @@ export async function depositTotals(
 export async function collectedToday(
   agencyId: string,
   filters: ReportFilters,
-  scope?: ResolvedScope,
 ): Promise<number> {
   const params: unknown[] = [agencyId];
-  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
+  const conditions = paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount), 0)::float AS today
@@ -921,10 +837,9 @@ export interface PaymentTypeSplit {
 export async function collectionByType(
   agencyId: string,
   filters: ReportFilters,
-  scope?: ResolvedScope,
 ): Promise<PaymentTypeSplit> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
+  const conditions = paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'settlement'), 0)::float AS settlement,
@@ -960,10 +875,9 @@ export interface CollectionChannelSplit {
 export async function collectionByChannel(
   agencyId: string,
   filters: ReportFilters,
-  scope?: ResolvedScope,
 ): Promise<CollectionChannelSplit> {
   const params: unknown[] = [agencyId, filters.month];
-  const conditions = scope ? buildPaymentConditions(scope, params) : paymentConditions(filters, params);
+  const conditions = paymentConditions(filters, params);
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT
@@ -1156,8 +1070,8 @@ export async function dashboard(
   const filters = scope.filters;
   const days = monthDays(filters.month.slice(0, 7));
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
-  const agg = await classify(user.agency_id, filters, useTransition, scope);
-  const deposits = await depositTotals(user.agency_id, filters, scope);
+  const agg = await classify(user.agency_id, filters, useTransition);
+  const deposits = await depositTotals(user.agency_id, filters);
 
   const basisOf = (metric: ReportMetric): "transition" | "payments" =>
     metric === "recovery" ? "payments" : useTransition ? "transition" : "payments";
@@ -1192,9 +1106,9 @@ export async function dashboard(
   const collectionTarget = await resolveTarget(user.agency_id, "collection", filters);
   const collectionBook = await bookTotals(user.agency_id, filters);
   const [todayAmount, byType, byChannel] = await Promise.all([
-    collectedToday(user.agency_id, filters, scope),
-    collectionByType(user.agency_id, filters, scope),
-    collectionByChannel(user.agency_id, filters, scope),
+    collectedToday(user.agency_id, filters),
+    collectionByType(user.agency_id, filters),
+    collectionByChannel(user.agency_id, filters),
   ]);
 
   return {
@@ -1323,7 +1237,7 @@ export async function agentBreakdown(
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
 
   const params: unknown[] = [user.agency_id, filters.month, useTransition];
-  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
+  const conditions = baseConditions(filters, params);
   const { rows } = await pool.query(
     `WITH ${classifiedCtes(conditions)}
      SELECT class.assigned_agent_id AS agent_id, ${AGGREGATE_SELECT}
@@ -1336,7 +1250,7 @@ export async function agentBreakdown(
   // Separately query collected amounts by who actually recorded the payment
   // (paymentConditions uses p.collected_by_user_id, unlike classifiedCtes which uses allocated agent).
   const payParams: unknown[] = [user.agency_id, filters.month];
-  const payConditions = scope ? buildPaymentConditions(scope, payParams) : paymentConditions(filters, payParams);
+  const payConditions = paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const { rows: collectedRows } = await pool.query(
     `SELECT p.collected_by_user_id AS agent_id, SUM(p.amount)::float AS collected_amount
@@ -1394,6 +1308,17 @@ export interface BreakdownRow {
   allocated_amount: number;
   allocated_count: number;
   collected_amount: number;
+  /**
+   * For branch/team/agent: money collected by staff belonging to this row
+   * (the collector's OWN branch/team/self), which can differ from
+   * `collected_amount` (money collected against THIS row's allocated book,
+   * regardless of who collected it) whenever the collecting agent isn't
+   * from the same branch/team as the book -- multi-branch telecallers,
+   * reallocation mid-month, or a manager recording on an agent's behalf.
+   * Equal to `collected_amount` for company/product/bucket, where both
+   * queries group by the same intrinsic customer property.
+   */
+  collected_by_own_staff_amount: number;
   resolution_amount: number;
   resolution_pct: number | null;
   rollback_amount: number;
@@ -1433,7 +1358,7 @@ export async function dimensionBreakdown(
   const filters = scope.filters;
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
   const params: unknown[] = [user.agency_id, filters.month, useTransition];
-  const conditions = scope ? buildReportConditions(scope, params) : baseConditions(filters, params);
+  const conditions = baseConditions(filters, params);
   const dim = DIMENSION_GROUP[dimension];
   const orderBy = dimension === "bucket" ? "MIN(class.cur_sort) ASC NULLS LAST" : "allocated_amount DESC";
 
@@ -1459,7 +1384,7 @@ export async function dimensionBreakdown(
     bucket:  "c.bucket",
   };
   const payParams: unknown[] = [user.agency_id, filters.month];
-  const payConditions = scope ? buildPaymentConditions(scope, payParams) : paymentConditions(filters, payParams);
+  const payConditions = paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const dimPayGroup = DIM_PAYMENT_GROUP[dimension];
   const { rows: collectedRows } = await pool.query(
@@ -1492,13 +1417,22 @@ export async function dimensionBreakdown(
       if (dimension === "agent") scopeFilter.agent_id = row.key;
       target = await resolveTarget(user.agency_id, "collection", scopeFilter);
     }
-    const actualCollected = collectedByDim.get(row.key as string) ?? 0;
+    const collectedByOwnStaff = collectedByDim.get(row.key as string) ?? 0;
     result.push({
       key: row.key,
       label: row.label ?? "—",
       allocated_amount: row.allocated_amount,
       allocated_count: row.allocated_count,
-      collected_amount: actualCollected,
+      // row.collected_amount comes from the SAME classified/allocated
+      // population as allocated_amount and the resolution/rollback/
+      // normalization/recovery figures below -- previously this was
+      // overwritten with collectedByOwnStaff (a differently-scoped,
+      // collector-grouped figure), so achievement_pct ended up dividing a
+      // "money collected by this branch/team/agent's own staff" numerator
+      // by a "target set for this branch/team/agent's allocated book"
+      // denominator: two different populations for the same labeled row.
+      collected_amount: row.collected_amount,
+      collected_by_own_staff_amount: collectedByOwnStaff,
       resolution_amount: row.resolution_amount,
       resolution_pct: pct(row.resolution_amount, row.allocated_amount),
       rollback_amount: row.rollback_amount,
@@ -1509,7 +1443,7 @@ export async function dimensionBreakdown(
       recovery_pct: pct(row.recovery_amount, row.recovery_allocated_amount),
       trail_pct: pct(row.trail_count, row.allocated_count),
       target_amount: target.target_amount,
-      achievement_pct: pct(actualCollected, target.target_amount),
+      achievement_pct: pct(row.collected_amount, target.target_amount),
     });
   }
   return result;

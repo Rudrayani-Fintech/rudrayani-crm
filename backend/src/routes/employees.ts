@@ -364,9 +364,15 @@ router.get(
       designation ?? null,
     ];
 
+    // Missing the telecaller_branches junction (unlike agentBranchClamp() in
+    // scope.ts, which every other branch-scoped route goes through) meant a
+    // multi-branch telecaller assigned to this branch via the junction table
+    // -- but whose own scalar branch_id points elsewhere -- silently didn't
+    // show up here, including in the dashboard's agent-picker dropdown.
     let conditions = `WHERE u.agency_id = $1
-          AND ($2::uuid IS NULL OR u.branch_id = $2 OR EXISTS (
-            SELECT 1 FROM branches mb WHERE mb.branch_manager_id = u.id AND mb.id = $2))
+          AND ($2::uuid IS NULL OR u.branch_id = $2
+            OR EXISTS (SELECT 1 FROM branches mb WHERE mb.branch_manager_id = u.id AND mb.id = $2)
+            OR EXISTS (SELECT 1 FROM telecaller_branches tb WHERE tb.user_id = u.id AND tb.branch_id = $2))
           AND ($3::uuid IS NULL OR u.team_id = $3)
           AND ($4::text IS NULL OR u.full_name ILIKE '%' || $4 || '%' OR u.phone LIKE $4 || '%')
           AND ($5::boolean IS NULL OR u.is_active = $5)

@@ -1,5 +1,5 @@
 import { Layout, Menu, Spin, Typography, Space, Tag, Button, Tooltip } from "antd";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import {
   ApartmentOutlined,
   AuditOutlined,
@@ -14,6 +14,7 @@ import {
   FileSyncOutlined,
   FlagOutlined,
   LogoutOutlined,
+  MenuOutlined,
   MoonOutlined,
   ScheduleOutlined,
   SettingOutlined,
@@ -35,12 +36,47 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { mode, toggle } = useThemeMode();
+  // Sider's own breakpoint="lg" collapses it to 0 width below 992px with no
+  // way back in -- there was no trigger anywhere to reopen it, so the whole
+  // nav simply vanished on a phone. Controlling it ourselves with a header
+  // button (shown at every width, not just mobile -- harmless on desktop
+  // too) means there's always a way to bring it back.
+  const [navCollapsed, setNavCollapsed] = useState(false);
 
   // Menu assembled from active capabilities/permissions (brief §3).
   // A caller with calls.log but not customers.allocate is a plain
   // telecaller/field_agent -- TL/ops/admin hold both, so this is the
   // precise "individual contributor, not a manager" test used throughout.
   const isIndividualContributor = hasPermission("calls.log") && !hasPermission("customers.allocate");
+  // Previously gated entirely on operations_manager/agency_admin, which hid
+  // Branches/Teams/Employees/Org Chart from a branch_manager even though the
+  // backend grants them employees.view/employees.create/branches.manage/
+  // teams.manage -- they could see their own branch's data through the API
+  // but had no nav path to reach it. Gate per-item on the actual permission
+  // (as every other nav item already does) and only show the submenu at all
+  // once at least one child is visible.
+  const organizationChildren = [
+    hasPermission("companies.manage") && {
+      key: "/companies",
+      label: <Link to="/companies">Companies</Link>,
+    },
+    hasPermission("branches.manage") && {
+      key: "/branches",
+      label: <Link to="/branches">Branches</Link>,
+    },
+    hasPermission("teams.manage") && {
+      key: "/teams",
+      label: <Link to="/teams">Teams</Link>,
+    },
+    hasPermission("employees.view") && {
+      key: "/employees",
+      label: <Link to="/employees">Employees</Link>,
+    },
+    hasPermission("employees.view") && {
+      key: "/org-chart",
+      label: <Link to="/org-chart">Org Chart</Link>,
+    },
+  ].filter(Boolean);
   const items = [
     {
       key: "/",
@@ -67,32 +103,11 @@ export default function AppLayout() {
       icon: <FileSyncOutlined />,
       label: <Link to="/my-requests">My Requests</Link>,
     },
-    (user?.capabilities.includes("operations_manager") || user?.capabilities.includes("agency_admin")) && {
+    organizationChildren.length > 0 && {
       key: "organization",
       icon: <ApartmentOutlined />,
       label: "Organization",
-      children: [
-        hasPermission("companies.manage") && {
-          key: "/companies",
-          label: <Link to="/companies">Companies</Link>,
-        },
-        hasPermission("branches.manage") && {
-          key: "/branches",
-          label: <Link to="/branches">Branches</Link>,
-        },
-        hasPermission("teams.manage") && {
-          key: "/teams",
-          label: <Link to="/teams">Teams</Link>,
-        },
-        hasPermission("employees.view") && {
-          key: "/employees",
-          label: <Link to="/employees">Employees</Link>,
-        },
-        hasPermission("employees.view") && {
-          key: "/org-chart",
-          label: <Link to="/org-chart">Org Chart</Link>,
-        },
-      ].filter(Boolean),
+      children: organizationChildren,
     },
     hasPermission("companies.manage") && {
       key: "/buckets",
@@ -172,7 +187,14 @@ export default function AppLayout() {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <Sider breakpoint="lg" collapsedWidth={0}>
+      <Sider
+        breakpoint="lg"
+        collapsedWidth={0}
+        collapsed={navCollapsed}
+        onCollapse={setNavCollapsed}
+        onBreakpoint={setNavCollapsed}
+        trigger={null}
+      >
         <div style={{ color: "white", padding: 16, fontWeight: 700, fontSize: 16 }}>
           <TeamOutlined /> Rudrayani CRM
         </div>
@@ -181,6 +203,11 @@ export default function AppLayout() {
           mode="inline"
           selectedKeys={[location.pathname]}
           items={items as never}
+          onClick={() => {
+            // Auto-close after navigating on a phone-width screen so the
+            // nav doesn't stay covering the page -- desktop is unaffected.
+            if (window.innerWidth < 992) setNavCollapsed(true);
+          }}
         />
       </Sider>
       <Layout>
@@ -192,7 +219,16 @@ export default function AppLayout() {
             paddingInline: 24,
           }}
         >
-          <Typography.Text strong>{user?.full_name}</Typography.Text>
+          <Space>
+            <Button
+              type="text"
+              shape="circle"
+              icon={<MenuOutlined />}
+              onClick={() => setNavCollapsed(!navCollapsed)}
+              aria-label="Toggle navigation"
+            />
+            <Typography.Text strong>{user?.full_name}</Typography.Text>
+          </Space>
           <Space>
             <Tooltip title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
               <Button

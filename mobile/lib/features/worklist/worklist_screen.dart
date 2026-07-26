@@ -77,6 +77,21 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       body: Column(
         children: [
           const _SyncBanner(),
+          // The worklist now falls back to the last cached copy when the
+          // network fails -- this makes sure that's visible, rather than
+          // letting an agent unknowingly work off possibly-hours-old data
+          // without any indication it isn't live.
+          if (ref.watch(worklistIsStaleProvider))
+            Container(
+              width: double.infinity,
+              color: AppColors.warningContainer,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: const Text(
+                'Offline — showing your last saved worklist',
+                style: TextStyle(fontSize: 12, color: AppColors.warningStrong),
+                textAlign: TextAlign.center,
+              ),
+            ),
           if (isBranchManager)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),

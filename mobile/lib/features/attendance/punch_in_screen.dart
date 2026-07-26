@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/tracking/attendance_provider.dart';
+import '../../core/tracking/tracking_service.dart';
 import '../../core/theme/app_theme.dart';
 
 class PunchInScreen extends ConsumerStatefulWidget {
@@ -44,6 +45,15 @@ class _PunchInScreenState extends ConsumerState<PunchInScreen> {
                   style: const TextStyle(color: AppColors.error),
                   textAlign: TextAlign.center,
                 ),
+                const SizedBox(height: 12),
+                if (att.needsAppSettings)
+                  // A permanently-denied permission means the OS will never
+                  // show the prompt again -- without this, tapping Punch In
+                  // did nothing, forever, with no way out of the screen.
+                  OutlinedButton(
+                    onPressed: TrackingService.openAppSettings,
+                    child: const Text('Open Settings'),
+                  ),
                 const SizedBox(height: 16),
               ],
               SizedBox(

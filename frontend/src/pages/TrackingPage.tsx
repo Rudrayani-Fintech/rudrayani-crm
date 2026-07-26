@@ -252,12 +252,16 @@ function RouteReplay() {
 
   // Non-admin/ops users are scope-clamped server-side -- mirror that in the
   // dropdown instead of letting picks fail with a 404.
-  // KNOWN GAP (pre-existing, not fixed here): this clamps by `team_id`
-  // equality, but branch_manager has no team_id of their own (Phase 1/2 --
-  // their scope comes from branches.branch_manager_id instead), so this
-  // picker under-shows for branch_manager today. Flagged separately.
+  // A branch_manager has no team_id of their own (their scope comes from
+  // branches.branch_manager_id via resolveBranchClamp() instead), so
+  // filtering by team_id equality made this picker under-show almost every
+  // employee in their branch. The server's own /employees clamp already
+  // restricts the response to their branch, so no client-side narrowing is
+  // needed for them -- just show what the server already scoped.
+  const isBranchManager = user?.designation === "branch_manager";
   const teamScoped =
-    user?.capabilities.every((c) => !["agency_admin", "operations_manager"].includes(c)) ?? false;
+    !isBranchManager &&
+    (user?.capabilities.every((c) => !["agency_admin", "operations_manager"].includes(c)) ?? false);
 
   useEffect(() => {
     api

@@ -106,8 +106,15 @@ router.post(
       // whatever the client believes — a reliable ops signal even if a future
       // client build forgets to show the warning (product decision: never
       // block on this, just flag it for later spot-checking).
+      // Compared as integer paise rather than raw floats -- due_amount comes
+      // back from Postgres NUMERIC as a string, and body.amount is a
+      // Zod-coerced float; rounding both to paise before comparing removes
+      // any doubt about float representation at the boundary between the
+      // two, even though in practice no two realistic due/payment amounts
+      // are ever close enough for it to have flipped this comparison.
       const dueAmount = custRes.rows[0].due_amount as string | null;
-      const exceedsDueAmount = dueAmount != null && body.amount > Number(dueAmount);
+      const toPaise = (v: number | string): number => Math.round(Number(v) * 100);
+      const exceedsDueAmount = dueAmount != null && toPaise(body.amount) > toPaise(dueAmount);
 
       // A bare `$6::date` cast to timestamptz is anchored to UTC midnight of
       // that date, not IST midnight -- it happened to still land on the

@@ -767,7 +767,7 @@ export async function depositsByRange(
   );
   const collected = rows[0].collected as number;
   const deposited = rows[0].deposited as number;
-  return { collected, deposited, pending: collected - deposited };
+  return { collected, deposited, pending: roundMoney(collected - deposited) ?? 0 };
 }
 
 // Exported (not just used by dashboard()) so the branch drill-down (Phase 9)
@@ -794,7 +794,7 @@ export async function depositTotals(
   );
   const collected = rows[0].collected as number;
   const deposited = rows[0].deposited as number;
-  return { collected, deposited, pending: collected - deposited };
+  return { collected, deposited, pending: roundMoney(collected - deposited) ?? 0 };
 }
 
 /**
@@ -1061,6 +1061,18 @@ export interface DashboardResult {
 const pct = (num: number, den: number | null | undefined): number | null =>
   den && den > 0 ? Math.round((num / den) * 10000) / 100 : null;
 
+/**
+ * SQL SUM(NUMERIC) is exact; once a value crosses into JS float64 (every
+ * ::float cast, and any subtraction/division performed here in JS) it can
+ * carry trailing floating-point noise -- e.g. 12999.999999999998 instead of
+ * 13000. At this system's real scale (dozens to low-thousands of rows, not
+ * millions) that noise never compounds into a paisa-level discrepancy, but
+ * it's still worth rounding away before a figure reaches an API response or
+ * a screen. Applied only to values computed here (subtraction, division) --
+ * raw single-aggregate passthroughs from SQL don't need it.
+ */
+const roundMoney = (v: number | null): number | null => (v == null ? null : Math.round(v * 100) / 100);
+
 export async function dashboard(
   user: UserRow,
   requested: ReportFilters,
@@ -1084,7 +1096,7 @@ export async function dashboard(
     allocatedCount: number,
   ): Promise<MetricBlock> => {
     const target = await resolveTarget(user.agency_id, metric, filters);
-    const runRateCurrent = days.elapsed > 0 ? mtdAmount / days.elapsed : null;
+    const runRateCurrent = days.elapsed > 0 ? roundMoney(mtdAmount / days.elapsed) : null;
     const remaining = target.target_amount != null ? Math.max(target.target_amount - mtdAmount, 0) : null;
     return {
       basis: basisOf(metric),
@@ -1097,8 +1109,8 @@ export async function dashboard(
       mtd_count: mtdCount,
       mtd_pct: pct(mtdAmount, allocatedAmount),
       run_rate_current: runRateCurrent,
-      run_rate_required: remaining != null && days.left > 0 ? remaining / days.left : null,
-      away_amount: target.target_amount != null ? Math.max(target.target_amount - mtdAmount, 0) : null,
+      run_rate_required: remaining != null && days.left > 0 ? roundMoney(remaining / days.left) : null,
+      away_amount: roundMoney(remaining),
       away_count: target.target_count != null ? Math.max(target.target_count - mtdCount, 0) : null,
     };
   };
@@ -1152,10 +1164,10 @@ export async function dashboard(
       mtd_amount: deposits.collected,
       target_amount: collectionTarget.target_amount,
       target_pct: pct(deposits.collected, collectionTarget.target_amount),
-      run_rate_current: days.elapsed > 0 ? deposits.collected / days.elapsed : null,
+      run_rate_current: days.elapsed > 0 ? roundMoney(deposits.collected / days.elapsed) : null,
       run_rate_required:
         collectionTarget.target_amount != null
-          ? (Math.max(collectionTarget.target_amount - deposits.collected, 0) / Math.max(days.left, 1))
+          ? roundMoney(Math.max(collectionTarget.target_amount - deposits.collected, 0) / Math.max(days.left, 1))
           : null,
       pos_total: collectionBook.pos_total,
       emi_over_pos_pct:
@@ -1208,7 +1220,7 @@ export async function overview(
     params,
   );
   const points = rows as OverviewPoint[];
-  return { total: points.reduce((sum, p) => sum + p.collected, 0), points };
+  return { total: roundMoney(points.reduce((sum, p) => sum + p.collected, 0)) ?? 0, points };
 }
 
 export interface AgentReportRow {
@@ -1708,7 +1720,7 @@ export async function recallReport(
     by_company: rows,
     customers: customerRows.rows as RecalledCustomerRow[],
     total_recalled_count: rows.reduce((s, r) => s + r.recalled_count, 0),
-    total_recalled_amount: rows.reduce((s, r) => s + r.recalled_amount, 0),
+    total_recalled_amount: roundMoney(rows.reduce((s, r) => s + r.recalled_amount, 0)) ?? 0,
     lifetime_recalled_count: lifetime.rows[0].n,
   };
 }

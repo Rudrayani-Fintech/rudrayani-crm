@@ -2,6 +2,12 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:geolocator/geolocator.dart';
 import 'tracking_task.dart';
 
+/// Previously `denied` (can just ask again) and `deniedForever` (the OS will
+/// never show the prompt again -- only Settings can fix it) were collapsed
+/// into one message with no way to act on the second case. After a
+/// permanent denial, tapping Punch In did nothing, forever.
+enum LocationPermissionIssue { none, servicesDisabled, deniedTemporarily, deniedForever }
+
 /// UI-side control of the background tracking foreground service.
 /// Punch-in starts it, punch-out stops it (brief §10: explicit, not implicit).
 class TrackingService {
@@ -12,28 +18,60 @@ class TrackingService {
   /// app is in the foreground, so a `location`-type foreground service keeps
   /// GPS access in the background with plain while-in-use permission —
   /// no "Allow all the time" settings trip needed.
-  static Future<String?> ensurePermissions() async {
+  static Future<LocationPermissionIssue> ensurePermissions() async {
     await FlutterForegroundTask.requestNotificationPermission();
 
     if (!await Geolocator.isLocationServiceEnabled()) {
-      return 'Turn on device location (GPS) to punch in.';
+      return LocationPermissionIssue.servicesDisabled;
     }
     var perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied) {
       perm = await Geolocator.requestPermission();
     }
-    if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
-      return 'Location permission is required to punch in. Enable it in app settings.';
+    if (perm == LocationPermission.deniedForever) {
+      return LocationPermissionIssue.deniedForever;
     }
-    return null;
+    if (perm == LocationPermission.denied) {
+      return LocationPermissionIssue.deniedTemporarily;
+    }
+    return LocationPermissionIssue.none;
   }
 
-  static Future<Position> currentPosition() => Geolocator.getCurrentPosition(
+  static String messageFor(LocationPermissionIssue issue) => switch (issue) {
+        LocationPermissionIssue.servicesDisabled => 'Turn on device location (GPS) to punch in.',
+        LocationPermissionIssue.deniedTemporarily =>
+          'Location permission is required to punch in.',
+        LocationPermissionIssue.deniedForever =>
+          "Location permission was permanently denied. Open Settings to enable it — this app can't ask again.",
+        LocationPermissionIssue.none => '',
+      };
+
+  /// Wraps geolocator's settings deep-link so the UI layer never imports
+  /// geolocator directly -- kept consistent with the rest of this class.
+  static Future<void> openAppSettings() => Geolocator.openAppSettings();
+
+  /// Null means no fix could be obtained at all (fresh or cached) -- callers
+  /// (punch-in/out) should proceed without coordinates rather than block,
+  /// matching field_visit_screen.dart's existing fallback pattern. Without
+  /// this, a 30s GPS timeout (indoors, basement office, cold GPS start)
+  /// threw straight out of punch-in and trapped the agent on that screen
+  /// with nothing to do but keep retrying.
+  static Future<Position?> currentPosition() async {
+    try {
+      return await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 30),
         ),
       );
+    } catch (_) {
+      try {
+        return await Geolocator.getLastKnownPosition();
+      } catch (_) {
+        return null;
+      }
+    }
+  }
 
   static Future<void> start({required int pingIntervalSeconds}) async {
     FlutterForegroundTask.init(

@@ -14,15 +14,18 @@ import {
 } from "antd";
 import {
   DownloadOutlined,
+  EditOutlined,
   FilePdfOutlined,
   FileImageOutlined,
   FlagOutlined,
+  PlusOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import type { UploadProps } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import PtpFormModal, { type PtpRecord } from "./PtpFormModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "./ReportCorrectionModal";
 
 interface Attachment {
@@ -114,6 +117,8 @@ export default function CustomerDetailDrawer({
     recordId: string;
     currentValues: Record<string, string | number | null>;
   } | null>(null);
+  // undefined = modal closed; null = create mode; a PtpRecord = edit mode.
+  const [ptpModalTarget, setPtpModalTarget] = useState<PtpRecord | null | undefined>(undefined);
 
   const loadDetail = useCallback(() => {
     if (!customerId) return;
@@ -317,7 +322,17 @@ export default function CustomerDetailDrawer({
           </div>
 
           <div>
-            <Typography.Title level={5}>Promises to Pay</Typography.Title>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Typography.Title level={5} style={{ margin: 0 }}>
+                Promises to Pay
+              </Typography.Title>
+              {/* Previously the only way a PTP could exist was as a side
+                  effect of logging a call with a PTP-flavored disposition --
+                  there was no first-class way to record one directly. */}
+              <Button size="small" icon={<PlusOutlined />} onClick={() => setPtpModalTarget(null)}>
+                New PTP
+              </Button>
+            </div>
             <Table
               size="small"
               rowKey="id"
@@ -341,21 +356,32 @@ export default function CustomerDetailDrawer({
                 {
                   title: "",
                   key: "actions",
-                  width: 40,
+                  width: 70,
                   render: (_: unknown, row: CustomerDetail["ptps"][number]) => (
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={<FlagOutlined />}
-                      title="Report an error"
-                      onClick={() =>
-                        setCorrectionTarget({
-                          recordType: "ptp",
-                          recordId: row.id,
-                          currentValues: { amount: row.amount, promised_date: row.promised_date },
-                        })
-                      }
-                    />
+                    <Space size={0}>
+                      {row.status === "pending" && (
+                        <Button
+                          size="small"
+                          type="text"
+                          icon={<EditOutlined />}
+                          title="Reschedule / mark kept or broken"
+                          onClick={() => setPtpModalTarget(row)}
+                        />
+                      )}
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<FlagOutlined />}
+                        title="Report an error"
+                        onClick={() =>
+                          setCorrectionTarget({
+                            recordType: "ptp",
+                            recordId: row.id,
+                            currentValues: { amount: row.amount, promised_date: row.promised_date },
+                          })
+                        }
+                      />
+                    </Space>
                   ),
                 },
               ]}
@@ -532,6 +558,16 @@ export default function CustomerDetailDrawer({
           open={correctionTarget !== null}
           onClose={() => setCorrectionTarget(null)}
           onSubmitted={loadDetail}
+        />
+      )}
+      {ptpModalTarget !== undefined && detail && (
+        <PtpFormModal
+          customerId={detail.customer.id}
+          customerName={detail.customer.customer_name}
+          existing={ptpModalTarget}
+          open={ptpModalTarget !== undefined}
+          onClose={() => setPtpModalTarget(undefined)}
+          onSaved={loadDetail}
         />
       )}
     </Drawer>

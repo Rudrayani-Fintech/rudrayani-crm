@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/friendly_error.dart';
 import '../../core/utils/parser.dart';
 import 'dashboard_widgets.dart';
 
@@ -73,7 +74,7 @@ class BranchManagerDashboardScreen extends ConsumerWidget {
         onRefresh: () async => _refresh(ref),
         child: branchDay.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ErrorState(message: 'Could not load the branch dashboard.\n$e', onRetry: () => _refresh(ref)),
+          error: (e, _) => ErrorState(message: 'Could not load the branch dashboard.\n${friendlyError(e)}', onRetry: () => _refresh(ref)),
           data: (members) {
             if (members.isEmpty) {
               return const EmptyState(message: 'No branch members found', hint: 'Ask an admin to assign this branch');
@@ -84,7 +85,7 @@ class BranchManagerDashboardScreen extends ConsumerWidget {
                 requests.when(
                   loading: () => const SizedBox.shrink(),
                   error: (e, _) => InlineErrorNote(
-                    message: 'Approvals: $e',
+                    message: 'Approvals: ${friendlyError(e)}',
                     onRetry: () => ref.invalidate(pendingRequestsProvider),
                   ),
                   data: (reqs) => reqs.isEmpty
@@ -104,7 +105,10 @@ class BranchManagerDashboardScreen extends ConsumerWidget {
                     padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
                     child: Center(child: CircularProgressIndicator()),
                   ),
-                  error: (e, _) => InlineErrorNote(message: 'Team breakdown: $e'),
+                  error: (e, _) => InlineErrorNote(
+                    message: 'Team breakdown: ${friendlyError(e)}',
+                    onRetry: () => ref.invalidate(bmTeamBreakdownProvider),
+                  ),
                   data: (rows) => rows.isEmpty
                       ? const Padding(
                           padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
@@ -276,7 +280,7 @@ class _ApprovalsSection extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.error));
+            .showSnackBar(SnackBar(content: Text('Failed: ${friendlyError(e)}'), backgroundColor: AppColors.error));
       }
     }
   }

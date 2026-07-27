@@ -3,6 +3,8 @@ import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/utils/friendly_error.dart';
+import '../../core/utils/messaging.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/parser.dart';
 import '../worklist/worklist_provider.dart';
@@ -100,7 +102,7 @@ class PtpsScreen extends ConsumerWidget {
       body: ptps.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ErrorState(
-          message: 'Could not load PTPs.\n$e',
+          message: 'Could not load PTPs.\n${friendlyError(e)}',
           onRetry: () => ref.invalidate(ptpListProvider(customerId)),
         ),
         data: (list) {
@@ -229,6 +231,9 @@ class _PtpFormSheetState extends ConsumerState<_PtpFormSheet> {
   String? _mode;
   bool _saving = false;
   String? _error;
+  // Set once a *new* PTP is created -- swaps the sheet to a share prompt
+  // instead of popping immediately, mirroring the payment receipt flow.
+  bool _created = false;
 
   bool get _isEdit => widget.existing != null;
 
@@ -277,6 +282,7 @@ class _PtpFormSheetState extends ConsumerState<_PtpFormSheet> {
           promisedDate: _date,
           mode: _mode,
         );
+        if (mounted) Navigator.of(context).pop();
       } else {
         await controller.create(
           customerId: widget.customerId,
@@ -284,10 +290,17 @@ class _PtpFormSheetState extends ConsumerState<_PtpFormSheet> {
           promisedDate: _date,
           mode: _mode,
         );
+        final mobileNumber = ref.read(customerByIdProvider(widget.customerId)).valueOrNull?.mobileNumber;
+        if (mounted) {
+          if (mobileNumber != null && mobileNumber.isNotEmpty) {
+            setState(() => _created = true);
+          } else {
+            Navigator.of(context).pop();
+          }
+        }
       }
-      if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      setState(() => _error = 'Could not save: ${e.toString().replaceFirst('DioException', '').trim()}');
+      setState(() => _error = 'Could not save: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -306,7 +319,7 @@ class _PtpFormSheetState extends ConsumerState<_PtpFormSheet> {
           );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      setState(() => _error = 'Could not update: ${e.toString().replaceFirst('DioException', '').trim()}');
+      setState(() => _error = 'Could not update: ${friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -314,6 +327,75 @@ class _PtpFormSheetState extends ConsumerState<_PtpFormSheet> {
 
   @override
   Widget build(BuildContext context) {
+    if (_created) {
+      final customer = ref.read(customerByIdProvider(widget.customerId)).valueOrNull;
+      final mobileNumber = customer?.mobileNumber;
+      final amount = double.tryParse(_amountCtrl.text.replaceAll(',', ''));
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(Icons.check_circle, color: AppColors.success, size: 48),
+              const SizedBox(height: 8),
+              Text(
+                'PTP set for ${_date.formatted}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 20),
+              if (mobileNumber != null && mobileNumber.isNotEmpty) ...[
+                SizedBox(
+                  height: AppDimens.tapTarget,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.chat),
+                    label: const Text('Confirm on WhatsApp'),
+                    onPressed: () => shareMessage(
+                      context,
+                      mobileNumber: mobileNumber,
+                      viaWhatsApp: true,
+                      message: 'Hi ${customer?.customerName ?? ''}, confirming your promise to pay '
+                          '${amount != null ? _rupee.format(amount) : ''} by ${_date.formatted}. '
+                          'Thank you — Rudrayani Fintech',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: AppDimens.tapTarget,
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.sms),
+                    label: const Text('Confirm via SMS'),
+                    onPressed: () => shareMessage(
+                      context,
+                      mobileNumber: mobileNumber,
+                      viaWhatsApp: false,
+                      message: 'Hi ${customer?.customerName ?? ''}, confirming your promise to pay '
+                          '${amount != null ? _rupee.format(amount) : ''} by ${_date.formatted}. '
+                          'Thank you — Rudrayani Fintech',
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+              SizedBox(
+                height: AppDimens.tapTarget,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.onPrimary,
+                  ),
+                  child: const Text('Done'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(

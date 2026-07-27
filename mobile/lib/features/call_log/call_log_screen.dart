@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
+import '../../core/auth/auth_provider.dart';
 import '../../core/models/disposition_code.dart';
 import '../../core/offline/offline_queue.dart';
+import '../../core/utils/friendly_error.dart';
 import '../../core/widgets/state_views.dart';
 import '../worklist/worklist_provider.dart';
 
@@ -70,6 +72,22 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
   String _remarkPreview = '';
 
   @override
+  void initState() {
+    super.initState();
+    // A telecaller only ever calls; a field agent only ever visits in
+    // person -- requiring a channel pick was a guaranteed wasted tap on
+    // every single disposition, every day, for the common single-capability
+    // case. A dual-capability user still has to choose, since either could
+    // apply to a given interaction.
+    final auth = ref.read(authProvider.notifier);
+    if (auth.isTelecaller && !auth.isFieldAgent) {
+      _selectedChannel = 'OC';
+    } else if (auth.isFieldAgent && !auth.isTelecaller) {
+      _selectedChannel = 'FV';
+    }
+  }
+
+  @override
   void dispose() {
     _amountCtrl.dispose();
     _dateCtrl.dispose();
@@ -119,6 +137,37 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
       _nameRelCtrl.clear();
       _remarkPreview = '';
     });
+  }
+
+  bool get _hasEnteredDetails =>
+      _selectedCodeId != null ||
+      _amountCtrl.text.isNotEmpty ||
+      _dateCtrl.text.isNotEmpty ||
+      _timeCtrl.text.isNotEmpty ||
+      _modeCtrl.text.isNotEmpty ||
+      _reasonCtrl.text.isNotEmpty ||
+      _nameRelCtrl.text.isNotEmpty ||
+      _extraCtrl.text.isNotEmpty;
+
+  /// A real channel switch (not the initial pick) used to wipe steps 2-4
+  /// with no warning -- a mis-tap destroyed a half-entered disposition.
+  Future<void> _handleChannelSelection(String newChannel) async {
+    if (newChannel == _selectedChannel) return;
+    if (_selectedChannel != null && _hasEnteredDetails) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Switch channel?'),
+          content: const Text('This will clear the result code and details you\'ve entered so far.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Switch')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    _selectChannel(newChannel);
   }
 
   void _updatePreview() {
@@ -224,7 +273,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
         context.pop();
       }
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('DioException', '').trim());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -255,7 +304,11 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Step 1: Channel — required, no default.
+            // Step 1: Channel — pre-selected by role when unambiguous (see
+            // initState); required otherwise. emptySelectionAllowed: false
+            // stops a tap on the already-selected segment from deselecting
+            // it (and wiping steps 2-4) -- a genuine switch is still
+            // confirmed in _handleChannelSelection if details were entered.
             const _StepLabel(step: 1, label: 'Channel'),
             const SizedBox(height: 8),
             SegmentedButton<String>(
@@ -275,9 +328,10 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
                 ),
               ],
               selected: _selectedChannel == null ? const {} : {_selectedChannel!},
-              emptySelectionAllowed: true,
+              emptySelectionAllowed: _selectedChannel == null,
               onSelectionChanged: (selection) {
-                _selectChannel(selection.isEmpty ? null : selection.first);
+                if (selection.isEmpty) return;
+                _handleChannelSelection(selection.first);
               },
             ),
             const SizedBox(height: 20),
@@ -290,7 +344,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
               codesAsync.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => InlineErrorNote(
-                  message: 'Could not load result codes: $e',
+                  message: 'Could not load result codes: ${friendlyError(e)}',
                   onRetry: () => ref.invalidate(dispositionCodesProvider),
                 ),
                 data: (_) {
@@ -447,6 +501,20 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
                 const SizedBox(height: 12),
               ],
             ],
+            // Extra bottom padding so the last field never sits flush
+            // against the persistent save bar below.
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+      // Persistent save bar (design brief 3.7): with four dynamic fields the
+      // primary action used to sit at the bottom of a SingleChildScrollView,
+      // costing a scroll on every single disposition entered.
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -454,6 +522,7 @@ class _CallLogScreenState extends ConsumerState<CallLogScreen> {
               ),
             SizedBox(
               height: AppDimens.tapTarget,
+              width: double.infinity,
               child: ElevatedButton.icon(
                 icon: _loading
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onPrimary))

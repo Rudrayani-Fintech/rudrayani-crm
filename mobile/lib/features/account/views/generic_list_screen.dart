@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_client.dart';
-import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/friendly_error.dart';
+import '../../../core/widgets/state_views.dart';
 
 class GenericListScreen<T> extends ConsumerStatefulWidget {
   final String title;
@@ -34,6 +35,10 @@ class _GenericListScreenState<T> extends ConsumerState<GenericListScreen<T>> {
   }
 
   Future<void> _load() async {
+    // Backs 8 routes and previously had none of this app's shared error/
+    // empty/loading treatment -- a raw 'Error: $_error' with no retry
+    // button, and no way to distinguish "still loading" from "failed".
+    setState(() => _error = null);
     try {
       final api = ref.read(apiClientProvider);
       final res = await api.get(widget.endpoint);
@@ -45,7 +50,7 @@ class _GenericListScreenState<T> extends ConsumerState<GenericListScreen<T>> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _error = e.toString());
+        setState(() => _error = friendlyError(e));
       }
     }
   }
@@ -55,14 +60,17 @@ class _GenericListScreenState<T> extends ConsumerState<GenericListScreen<T>> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.title)),
       body: _error != null
-          ? Center(child: Text('Error: $_error', style: const TextStyle(color: AppColors.error)))
+          ? ErrorState(message: _error!, onRetry: _load)
           : _data == null
-              ? const Center(child: CircularProgressIndicator())
+              ? const LoadingState()
               : _data!.isEmpty
-                  ? const Center(child: Text('No data found.'))
-                  : ListView.builder(
-                      itemCount: _data!.length,
-                      itemBuilder: (context, i) => widget.builder(_data![i]),
+                  ? const EmptyState(message: 'No data found.')
+                  : RefreshIndicator(
+                      onRefresh: _load,
+                      child: ListView.builder(
+                        itemCount: _data!.length,
+                        itemBuilder: (context, i) => widget.builder(_data![i]),
+                      ),
                     ),
     );
   }

@@ -1,12 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/models/customer.dart';
-import '../../core/offline/offline_queue.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/tracking/tracking_service.dart';
+import '../../core/utils/friendly_error.dart';
 import '../../core/widgets/state_views.dart';
 import 'worklist_provider.dart';
 import '../reminders/today_section.dart';
@@ -24,13 +27,36 @@ class WorklistScreen extends ConsumerStatefulWidget {
   ConsumerState<WorklistScreen> createState() => _WorklistScreenState();
 }
 
+enum _QuickFilter { none, ptpDueToday, overdue, notWorked }
+
+enum _SortOrder { defaultOrder, highestDue, nearestPtp, oldestContact }
+
 class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   String _search = '';
   String? _selectedCompany;
+  String? _selectedBucket;
+  _QuickFilter _quickFilter = _QuickFilter.none;
+  _SortOrder _sort = _SortOrder.defaultOrder;
+  Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  // 300ms debounce -- previously every keystroke re-ran `.where()` over the
+  // whole loaded list and rebuilt the entire ListView, undebounced.
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() => _search = value.toLowerCase());
+    });
   }
 
   @override
@@ -61,6 +87,18 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
           ],
         ),
         actions: [
+          PopupMenuButton<_SortOrder>(
+            icon: const Icon(Icons.sort),
+            tooltip: 'Sort',
+            initialValue: _sort,
+            onSelected: (v) => setState(() => _sort = v),
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(value: _SortOrder.defaultOrder, child: Text('Default (next action)')),
+              PopupMenuItem(value: _SortOrder.highestDue, child: Text('Highest due first')),
+              PopupMenuItem(value: _SortOrder.nearestPtp, child: Text('Nearest PTP first')),
+              PopupMenuItem(value: _SortOrder.oldestContact, child: Text('Oldest contact first')),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
@@ -76,7 +114,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
       ),
       body: Column(
         children: [
-          const _SyncBanner(),
           // The worklist now falls back to the last cached copy when the
           // network fails -- this makes sure that's visible, rather than
           // letting an agent unknowingly work off possibly-hours-old data
@@ -124,7 +161,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                       horizontal: 12,
                     ),
                   ),
-                  onChanged: (v) => setState(() => _search = v.toLowerCase()),
+                  onChanged: _onSearchChanged,
                 ),
                 // Track 7.2: Company filter dropdown
                 const SizedBox(height: 8),
@@ -135,24 +172,92 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                         .toSet()
                         .toList()
                         ..sort();
-                    return DropdownButton<String?>(
-                      isExpanded: true,
-                      value: _selectedCompany,
-                      hint: const Text('Filter by company'),
-                      items: [
-                        const DropdownMenuItem<String?>(
-                          value: null,
-                          child: Text('All companies'),
+                    final buckets = customers
+                        .map((c) => c.bucket)
+                        .whereType<String>()
+                        .toSet()
+                        .toList()
+                        ..sort();
+                    return Column(
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButton<String?>(
+                                isExpanded: true,
+                                value: _selectedCompany,
+                                hint: const Text('Filter by company'),
+                                items: [
+                                  const DropdownMenuItem<String?>(
+                                    value: null,
+                                    child: Text('All companies'),
+                                  ),
+                                  ...companies.map(
+                                    (company) => DropdownMenuItem(
+                                      value: company,
+                                      child: Text(company),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (value) =>
+                                    setState(() => _selectedCompany = value),
+                              ),
+                            ),
+                            if (buckets.isNotEmpty) ...[
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: DropdownButton<String?>(
+                                  isExpanded: true,
+                                  value: _selectedBucket,
+                                  hint: const Text('Filter by bucket'),
+                                  items: [
+                                    const DropdownMenuItem<String?>(
+                                      value: null,
+                                      child: Text('All buckets'),
+                                    ),
+                                    ...buckets.map(
+                                      (bucket) => DropdownMenuItem(
+                                        value: bucket,
+                                        child: Text(bucket),
+                                      ),
+                                    ),
+                                  ],
+                                  onChanged: (value) =>
+                                      setState(() => _selectedBucket = value),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                        ...companies.map(
-                          (company) => DropdownMenuItem(
-                            value: company,
-                            child: Text(company),
-                          ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            ChoiceChip(
+                              label: const Text('PTP due today'),
+                              selected: _quickFilter == _QuickFilter.ptpDueToday,
+                              onSelected: (sel) => setState(
+                                () => _quickFilter = sel ? _QuickFilter.ptpDueToday : _QuickFilter.none,
+                              ),
+                            ),
+                            ChoiceChip(
+                              label: const Text('Overdue'),
+                              selected: _quickFilter == _QuickFilter.overdue,
+                              onSelected: (sel) => setState(
+                                () => _quickFilter = sel ? _QuickFilter.overdue : _QuickFilter.none,
+                              ),
+                            ),
+                            ChoiceChip(
+                              label: const Text('Not yet worked'),
+                              selected: _quickFilter == _QuickFilter.notWorked,
+                              onSelected: (sel) => setState(
+                                () => _quickFilter = sel ? _QuickFilter.notWorked : _QuickFilter.none,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
-                      onChanged: (value) =>
-                          setState(() => _selectedCompany = value),
                     );
                   },
                   orElse: () => const SizedBox.shrink(),
@@ -164,19 +269,52 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
             child: wl.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => ErrorState(
-                message: 'Could not load your worklist.\n$e',
+                message: 'Could not load your worklist.\n${friendlyError(e)}',
                 onRetry: () {
                   ref.invalidate(worklistProvider);
                   ref.invalidate(dispositionCodesProvider);
                 },
               ),
               data: (customers) {
+                if (customers.isEmpty) {
+                  return const EmptyState(
+                    icon: Icons.people_outline,
+                    message: 'No customers assigned today.',
+                    hint: 'Pull down to refresh once new accounts land.',
+                  );
+                }
+
                 // Track 7.2: Client-side company filter
                 var filtered = _selectedCompany != null
                     ? customers
                         .where((c) => c.companyName == _selectedCompany)
                         .toList()
                     : customers;
+
+                if (_selectedBucket != null) {
+                  filtered = filtered.where((c) => c.bucket == _selectedBucket).toList();
+                }
+
+                final today = DateTime.now();
+                final todayDateOnly = DateTime(today.year, today.month, today.day);
+                switch (_quickFilter) {
+                  case _QuickFilter.ptpDueToday:
+                    filtered = filtered
+                        .where((c) =>
+                            c.ptpDate != null &&
+                            !c.ptpDate!.isBefore(todayDateOnly) &&
+                            c.ptpDate!.isBefore(todayDateOnly.add(const Duration(days: 1))))
+                        .toList();
+                    break;
+                  case _QuickFilter.overdue:
+                    filtered = filtered.where((c) => c.ptpDate != null && c.ptpDate!.isBefore(todayDateOnly)).toList();
+                    break;
+                  case _QuickFilter.notWorked:
+                    filtered = filtered.where((c) => c.lastCallAt == null).toList();
+                    break;
+                  case _QuickFilter.none:
+                    break;
+                }
 
                 // Apply search filter
                 if (_search.isNotEmpty) {
@@ -192,18 +330,47 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                       .toList();
                 }
 
-                // Extract distinct companies for filter dropdown (unused for now)
-                // final companies = customers
-                //     .map((c) => c.companyName)
-                //     .toSet()
-                //     .toList()
-                //     ..sort();
+                switch (_sort) {
+                  case _SortOrder.highestDue:
+                    filtered = [...filtered]..sort((a, b) => (b.dueAmount ?? 0).compareTo(a.dueAmount ?? 0));
+                    break;
+                  case _SortOrder.nearestPtp:
+                    filtered = [...filtered]..sort((a, b) {
+                      if (a.ptpDate == null && b.ptpDate == null) return 0;
+                      if (a.ptpDate == null) return 1;
+                      if (b.ptpDate == null) return -1;
+                      return a.ptpDate!.compareTo(b.ptpDate!);
+                    });
+                    break;
+                  case _SortOrder.oldestContact:
+                    filtered = [...filtered]..sort((a, b) {
+                      if (a.lastCallAt == null && b.lastCallAt == null) return 0;
+                      if (a.lastCallAt == null) return -1;
+                      if (b.lastCallAt == null) return 1;
+                      return a.lastCallAt!.compareTo(b.lastCallAt!);
+                    });
+                    break;
+                  case _SortOrder.defaultOrder:
+                    break;
+                }
 
                 if (filtered.isEmpty) {
-                  return const EmptyState(
-                    icon: Icons.people_outline,
-                    message: 'No customers assigned today.',
-                    hint: 'Pull down to refresh once new accounts land.',
+                  // Distinct from the "nothing assigned at all" case above --
+                  // the agent has a worklist, they just mistyped a search or
+                  // picked a combination of filters with no matches.
+                  return EmptyState(
+                    icon: Icons.search_off,
+                    message: 'No matches for your search or filters.',
+                    hint: 'Try clearing the search box or filters.',
+                    action: TextButton(
+                      onPressed: () => setState(() {
+                        _search = '';
+                        _selectedCompany = null;
+                        _selectedBucket = null;
+                        _quickFilter = _QuickFilter.none;
+                      }),
+                      child: const Text('Clear all filters'),
+                    ),
                   );
                 }
 
@@ -255,64 +422,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   }
 }
 
-/// Offline-queue state: how many actions are waiting to sync, and the last
-/// permanent rejection if the server refused one (brief §8 offline mode).
-class _SyncBanner extends ConsumerWidget {
-  const _SyncBanner();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final q = ref.watch(offlineQueueProvider);
-    if (q.pending == 0 && q.lastError == null) return const SizedBox.shrink();
-
-    return Container(
-      width: double.infinity,
-      color: q.lastError != null
-          ? AppColors.errorContainer
-          : AppColors.warningContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Row(
-        children: [
-          Icon(
-            q.lastError != null
-                ? Icons.error_outline
-                : Icons.cloud_upload_outlined,
-            size: 16,
-            color: q.lastError != null
-                ? AppColors.errorStrong
-                : AppColors.warningStrong,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              q.lastError ??
-                  (q.syncing
-                      ? 'Syncing ${q.pending} offline action(s)…'
-                      : '${q.pending} action(s) waiting to sync'),
-              style: TextStyle(
-                fontSize: 12,
-                color: q.lastError != null
-                    ? AppColors.errorStrong
-                    : AppColors.warningStrong,
-              ),
-            ),
-          ),
-          if (q.lastError != null)
-            TextButton(
-              onPressed: () =>
-                  ref.read(offlineQueueProvider.notifier).clearError(),
-              child: const Text('Dismiss', style: TextStyle(fontSize: 12)),
-            )
-          else if (!q.syncing)
-            TextButton(
-              onPressed: () => ref.read(offlineQueueProvider.notifier).flush(),
-              child: const Text('Sync now', style: TextStyle(fontSize: 12)),
-            ),
-        ],
-      ),
-    );
-  }
-}
 
 /// Explicit duty/tracking state (brief §10: "punch-in starts the
 /// location-tracking session; punch-out ends it. Make this explicit in the
@@ -323,12 +432,29 @@ class _CustomerCard extends StatelessWidget {
   final Customer customer;
   const _CustomerCard({required this.customer});
 
+  Future<void> _dial(BuildContext context) async {
+    final uri = Uri(scheme: 'tel', path: customer.mobileNumber);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot open dialer')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasPtp = customer.ptpDate != null;
-    final ptpDue =
-        hasPtp &&
-        customer.ptpDate!.isBefore(DateTime.now().add(const Duration(days: 1)));
+    // Comparing against `now() + 1 day` (which carries the current
+    // time-of-day) meant a PTP due *tomorrow* also satisfied "before
+    // tomorrow-at-this-exact-hour" for anyone checking after midnight --
+    // inflating the urgent count with promises that aren't actually due
+    // yet, which trains agents to ignore the badge. "Due" means today or
+    // earlier, so the cutoff is tomorrow's midnight, not now-plus-24h.
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
+    final ptpDue = hasPtp && customer.ptpDate!.isBefore(todayDateOnly.add(const Duration(days: 1)));
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -360,6 +486,25 @@ class _CustomerCard extends StatelessWidget {
                 '${customer.loanNumber} · ${customer.companyName}',
                 style: const TextStyle(fontSize: 12),
               ),
+              if (customer.mobileNumber.isNotEmpty)
+                GestureDetector(
+                  onTap: () => _dial(context),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.call, size: 12, color: AppColors.success),
+                      const SizedBox(width: 4),
+                      Text(
+                        customer.mobileNumber,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.success,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               if (customer.dueAmount != null)
                 Text(
                   'Due: ${_rupee.format(customer.dueAmount)}',
@@ -408,7 +553,23 @@ class _CustomerCard extends StatelessWidget {
                 ),
             ],
           ),
-          trailing: const Icon(Icons.chevron_right),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (customer.mobileNumber.isNotEmpty)
+                IconButton(
+                  icon: const Icon(Icons.call, color: AppColors.success),
+                  tooltip: 'Call',
+                  onPressed: () => _dial(context),
+                ),
+              IconButton(
+                icon: const Icon(Icons.note_add_outlined),
+                tooltip: 'Log Call',
+                onPressed: () => context.push('/customer/${customer.id}/call-log'),
+              ),
+              const Icon(Icons.chevron_right),
+            ],
+          ),
           onTap: () => context.push('/customer/${customer.id}'),
         ),
       ),

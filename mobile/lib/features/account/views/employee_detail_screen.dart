@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/friendly_error.dart';
+import '../../../core/widgets/state_views.dart';
 
 const Map<String, String> _designationLabels = {
   'agency_admin': 'Agency Admin',
@@ -46,6 +49,7 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
   }
 
   Future<void> _load() async {
+    setState(() => _error = null);
     try {
       final api = ref.read(apiClientProvider);
       final res = await api.get('/employees/${widget.employeeId}');
@@ -67,7 +71,7 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
         if (mounted) setState(() => _activity = const []);
       }
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = friendlyError(e));
     }
   }
 
@@ -76,14 +80,14 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
     if (_error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Employee Details')),
-        body: Center(child: Text('Error: $_error', style: const TextStyle(color: AppColors.error))),
+        body: ErrorState(message: _error!, onRetry: _load),
       );
     }
-    
+
     if (_employee == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Employee Details')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const LoadingState(),
       );
     }
 
@@ -161,6 +165,13 @@ class _EmployeeDetailScreenState extends ConsumerState<EmployeeDetailScreen> {
                 ListTile(
                   leading: const Icon(Icons.phone),
                   title: Text(phone),
+                  trailing: phone != 'No phone' ? const Icon(Icons.call, color: AppColors.success) : null,
+                  onTap: phone != 'No phone'
+                      ? () async {
+                          final uri = Uri(scheme: 'tel', path: phone);
+                          if (await canLaunchUrl(uri)) await launchUrl(uri);
+                        }
+                      : null,
                 ),
               ],
             ),

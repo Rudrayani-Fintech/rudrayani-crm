@@ -5,6 +5,7 @@ import '../../core/api/api_client.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/friendly_error.dart';
 import '../../core/utils/parser.dart';
 import 'package:go_router/go_router.dart';
 import 'dashboard_widgets.dart';
@@ -89,7 +90,10 @@ class FieldExecutiveDashboardScreen extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => InlineErrorNote(message: 'Attendance: $e'),
+              error: (e, _) => InlineErrorNote(
+                message: 'Attendance: ${friendlyError(e)}',
+                onRetry: () => ref.invalidate(feAttendanceProvider),
+              ),
               data: (m) {
                 if (m == null) return const EmptyState(message: 'No attendance record for today yet');
                 final onDuty = m['on_duty'] == true;
@@ -110,7 +114,10 @@ class FieldExecutiveDashboardScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.sm),
             route.when(
               loading: () => const SizedBox.shrink(),
-              error: (e, _) => InlineErrorNote(message: 'Route: $e'),
+              error: (e, _) => InlineErrorNote(
+                message: 'Route: ${friendlyError(e)}',
+                onRetry: () => ref.invalidate(feRouteProvider),
+              ),
               data: (r) {
                 if (r == null) return const SizedBox.shrink();
                 final km = (parseDouble(r['distance_meters']) ?? 0.0) / 1000;
@@ -125,7 +132,13 @@ class FieldExecutiveDashboardScreen extends ConsumerWidget {
             const DashboardSectionHeader('Receipts & Documents'),
             attendance.when(
               loading: () => const SizedBox.shrink(),
-              error: (e, _) => const SizedBox.shrink(),
+              // Previously silently hidden -- the whole section vanished
+              // with no explanation at all when this (shared with
+              // Attendance/GPS above) provider failed.
+              error: (e, _) => InlineErrorNote(
+                message: 'Receipts & Documents: ${friendlyError(e)}',
+                onRetry: () => ref.invalidate(feAttendanceProvider),
+              ),
               data: (m) {
                 if (m == null) return const SizedBox.shrink();
                 return DashboardStatGrid(cards: [
@@ -143,7 +156,10 @@ class FieldExecutiveDashboardScreen extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => InlineErrorNote(message: 'Target: $e'),
+              error: (e, _) => InlineErrorNote(
+                message: 'Target: ${friendlyError(e)}',
+                onRetry: () => ref.invalidate(feDashboardProvider),
+              ),
               data: (d) {
                 final collection = d['collection'] as Map<String, dynamic>;
                 final mtd = parseDouble(collection['mtd_amount']) ?? 0.0;
@@ -166,7 +182,10 @@ class FieldExecutiveDashboardScreen extends ConsumerWidget {
                 padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
                 child: Center(child: CircularProgressIndicator()),
               ),
-              error: (e, _) => InlineErrorNote(message: 'PTP summary: $e'),
+              error: (e, _) => InlineErrorNote(
+                message: 'PTP summary: ${friendlyError(e)}',
+                onRetry: () => ref.invalidate(feTrailProvider),
+              ),
               data: (t) => DashboardStatGrid(cards: [
                 DashboardStatCard(
                     label: 'Created',

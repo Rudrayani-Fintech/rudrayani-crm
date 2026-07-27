@@ -206,7 +206,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('switching channel clears a previously-selected code and its dynamic fields',
+    testWidgets('switching channel after picking a code asks for confirmation, then clears it',
         (tester) async {
       await pumpScreen(tester);
 
@@ -221,12 +221,41 @@ void main() {
       // Step 3 field for the PTP code is now visible.
       expect(find.text('Amount (₹) *'), findsOneWidget);
 
-      // Switch channel back -> code and its dynamic fields must disappear.
+      // Switching channel now that a code is selected must not silently
+      // wipe it -- confirm first (a mis-tap used to destroy a half-entered
+      // disposition with no warning at all).
       await tester.tap(find.text('Field Visit'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Switch channel?'), findsOneWidget);
+      // Declining leaves everything exactly as it was.
+      expect(find.text('Amount (₹) *'), findsOneWidget);
+
+      await tester.tap(find.text('Switch'));
       await tester.pumpAndSettle();
 
       expect(find.text('Amount (₹) *'), findsNothing);
       expect(find.text('OC_PTP — Promise to pay'), findsNothing);
+    });
+
+    testWidgets('tapping the already-selected channel does not clear anything', (tester) async {
+      await pumpScreen(tester);
+
+      await tester.tap(find.text('On-Call'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OC_PTP — Promise to pay').last);
+      await tester.pumpAndSettle();
+
+      // Re-tapping the segment that's already selected used to deselect it
+      // (emptySelectionAllowed: true) and wipe the whole form.
+      await tester.tap(find.text('On-Call'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Switch channel?'), findsNothing);
+      expect(find.text('Amount (₹) *'), findsOneWidget);
+      expect(find.text('OC_PTP — Promise to pay'), findsOneWidget); // still selected in the dropdown
     });
 
     testWidgets('dynamic fields switch to match the newly selected code', (tester) async {

@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Form,
   Input,
@@ -13,7 +14,7 @@ import {
   message,
 } from "antd";
 import { KeyOutlined, PlusOutlined } from "@ant-design/icons";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -50,6 +51,8 @@ export default function EmployeesPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filterBranch, setFilterBranch] = useState<string | undefined>();
   const [filterTeam, setFilterTeam] = useState<string | undefined>();
@@ -130,8 +133,11 @@ export default function EmployeesPage() {
   // No client-side filtering - all filtering now done server-side via query params
   const filteredEmployees = employees;
 
+  const loadSeq = useRef(0);
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
+    setLoadError(null);
     try {
       const params: Record<string, string> = {};
       if (search) params.q = search;
@@ -149,18 +155,36 @@ export default function EmployeesPage() {
         api.get("/teams"),
         api.get("/products"),
       ]);
+      if (seq !== loadSeq.current) return;
       setEmployees(emp.data.employees);
       setBranches(br.data.branches);
       setTeams(tm.data.teams);
       setProducts(prod.data.products);
+    } catch (err) {
+      if (seq !== loadSeq.current) return;
+      setLoadError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [search, filterBranch, filterTeam, filterStatus, filterDesignation, filterCustomerBranch, filterProduct]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Debounce the search box -- `search` is a dependency of `load` (a
+  // useCallback), so updating it directly on every keystroke fired a network
+  // request per character. `searchInput` tracks what's actually typed;
+  // `search` (and therefore the request) only follows 300ms after typing
+  // stops, or immediately on Enter/onSearch below (which also cancels this
+  // pending timer so it can't clobber the immediate value moments later).
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    searchDebounceRef.current = setTimeout(() => setSearch(searchInput), 300);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchInput]);
 
   const branchName = (id: string | null) => branches.find((b) => b.id === id)?.name ?? "—";
   const teamName = (id: string | null) => teams.find((t) => t.id === id)?.name ?? "—";
@@ -300,9 +324,12 @@ export default function EmployeesPage() {
           <Input.Search
             placeholder="Search name or phone"
             allowClear
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onSearch={() => {/* load() already called via useEffect when search changes */}}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onSearch={(v) => {
+              if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+              setSearch(v);
+            }}
             style={{ width: 260 }}
           />
           {hasPermission("employees.create") && (
@@ -388,6 +415,17 @@ export default function EmployeesPage() {
           ]}
         />
       </Space>
+
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message={loadError}
+          action={<Button size="small" onClick={() => load()}>Retry</Button>}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Table
         rowKey="id"
         loading={loading}

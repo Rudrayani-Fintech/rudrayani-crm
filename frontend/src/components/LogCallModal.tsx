@@ -45,6 +45,22 @@ export default function LogCallModal({
   const codesForChannel = dispositionCodes.filter((c) => c.channel === channel);
   const code = dispositionCodes.find((c) => c.id === codeId);
 
+  // Computed on every render (cheap, no async) so the Save button can be
+  // disabled until the form is actually valid -- previously this exact
+  // list of conditions only ran inside submit(), so an agent could click
+  // Save on an incomplete form and get told what's wrong only afterward.
+  const missing: string[] = [];
+  if (!channel) missing.push("channel");
+  else if (!code) missing.push("result code");
+  else {
+    if (code.needs_amount && amount == null) missing.push("amount");
+    if (code.needs_date && !date) missing.push("date");
+    if (code.needs_time && !time.trim()) missing.push("time");
+    if (code.needs_mode && !mode) missing.push("mode");
+    if (code.needs_reason && !reason.trim()) missing.push("reason");
+    if (code.needs_name_relation && !nameRelation.trim()) missing.push("name/relation");
+  }
+
   const resetFields = () => {
     setAmount(null);
     setDate(null);
@@ -70,44 +86,17 @@ export default function LogCallModal({
   }, [open]);
 
   const submit = async () => {
-    if (!channel) {
-      message.error("Pick a channel (Field Visit or On-Call)");
-      return;
-    }
-    if (!code) {
-      message.error("Pick a result code");
-      return;
-    }
+    // Unreachable via the UI (the Save button is disabled while `missing`
+    // is non-empty) -- kept as a guard against calling submit() directly.
+    if (!channel || !code || missing.length > 0) return;
+
     const fields: Record<string, string | number> = {};
-    const missing: string[] = [];
-    if (code.needs_amount) {
-      if (amount == null) missing.push("amount");
-      else fields.amount = amount;
-    }
-    if (code.needs_date) {
-      if (!date) missing.push("date");
-      else fields.date = date.format("YYYY-MM-DD");
-    }
-    if (code.needs_time) {
-      if (!time.trim()) missing.push("time");
-      else fields.time = time.trim();
-    }
-    if (code.needs_mode) {
-      if (!mode) missing.push("mode");
-      else fields.mode = mode;
-    }
-    if (code.needs_reason) {
-      if (!reason.trim()) missing.push("reason");
-      else fields.reason = reason.trim();
-    }
-    if (code.needs_name_relation) {
-      if (!nameRelation.trim()) missing.push("name/relation");
-      else fields.name_relation = nameRelation.trim();
-    }
-    if (missing.length > 0) {
-      message.error(`This disposition requires: ${missing.join(", ")}`);
-      return;
-    }
+    if (code.needs_amount && amount != null) fields.amount = amount;
+    if (code.needs_date && date) fields.date = date.format("YYYY-MM-DD");
+    if (code.needs_time && time.trim()) fields.time = time.trim();
+    if (code.needs_mode && mode) fields.mode = mode;
+    if (code.needs_reason && reason.trim()) fields.reason = reason.trim();
+    if (code.needs_name_relation && nameRelation.trim()) fields.name_relation = nameRelation.trim();
 
     setSubmitting(true);
     try {
@@ -141,6 +130,7 @@ export default function LogCallModal({
       onOk={submit}
       confirmLoading={submitting}
       okText="Save"
+      okButtonProps={{ disabled: missing.length > 0 }}
     >
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
         {/* Step 1: Channel */}
@@ -263,6 +253,12 @@ export default function LogCallModal({
               onChange={(e) => setExtraRemark(e.target.value)}
             />
           </div>
+        )}
+
+        {code && missing.length > 0 && (
+          <Typography.Text type="warning" style={{ fontSize: 12 }}>
+            Still needed: {missing.join(", ")}
+          </Typography.Text>
         )}
       </Space>
     </Modal>

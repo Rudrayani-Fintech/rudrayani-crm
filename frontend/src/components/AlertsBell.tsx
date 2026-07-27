@@ -3,20 +3,11 @@ import { Badge, Button, Empty, List, Popover, Tag, notification } from "antd";
 import { BellOutlined, EnvironmentOutlined, WarningOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
-import { api } from "../api/client";
+import { subscribeLiveTracking, type LiveTrackingData, type TrackingAlert } from "../api/liveTracking";
 import { useAuth } from "../auth/AuthContext";
 import { palette } from "../theme/tokens";
 
-const POLL_MS = 30_000;
-
-export interface TrackingAlert {
-  user_id: string;
-  full_name: string;
-  team_name: string | null;
-  status: "stationary" | "no_signal";
-  stationary_minutes: number | null;
-  last_ping_at: string | null;
-}
+export type { TrackingAlert };
 
 export function alertText(a: TrackingAlert): string {
   return a.status === "stationary"
@@ -40,10 +31,10 @@ export default function AlertsBell() {
   const seen = useRef(new Set<string>());
   const canView = hasPermission("tracking.view");
 
-  const load = useCallback(async () => {
-    try {
-      const res = await api.get("/tracking/live");
-      const fresh: TrackingAlert[] = res.data.alerts;
+  const onData = useCallback(
+    (data: LiveTrackingData | null, err: unknown) => {
+      if (err || !data) return; // header polling failures stay silent -- the Tracking page surfaces errors
+      const fresh = data.alerts;
       setAlerts(fresh);
       for (const a of fresh) {
         const key = `${a.user_id}:${a.status}`;
@@ -68,17 +59,14 @@ export default function AlertsBell() {
       for (const key of seen.current) {
         if (!freshKeys.has(key)) seen.current.delete(key);
       }
-    } catch {
-      // Header polling failures stay silent — the Tracking page surfaces errors.
-    }
-  }, [navigate, toastApi]);
+    },
+    [navigate, toastApi],
+  );
 
   useEffect(() => {
     if (!canView) return;
-    load();
-    const t = setInterval(load, POLL_MS);
-    return () => clearInterval(t);
-  }, [canView, load]);
+    return subscribeLiveTracking(onData);
+  }, [canView, onData]);
 
   if (!canView) return null;
 

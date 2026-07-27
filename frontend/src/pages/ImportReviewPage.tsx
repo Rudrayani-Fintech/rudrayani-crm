@@ -65,7 +65,7 @@ export default function ImportReviewPage() {
     api.get("/companies").then((res) => {
       setCompanies(res.data.companies);
       if (res.data.companies.length > 0) setCompanyId(res.data.companies[0].id);
-    });
+    }).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   const load = useCallback(async () => {
@@ -97,7 +97,8 @@ export default function ImportReviewPage() {
     if (!companyId) return;
     api
       .get("/import-reviews", { params: { company_id: companyId, status: "pending", limit: 1 } })
-      .then((res) => setPendingCount(res.data.total));
+      .then((res) => setPendingCount(res.data.total))
+      .catch((err) => message.error(errorMessage(err)));
   }, [companyId, items]);
 
   const loadDetail = async (id: string) => {
@@ -309,7 +310,10 @@ export default function ImportReviewPage() {
             title: "Type",
             dataIndex: "item_type",
             width: 120,
-            render: (v: ReviewItemType) => <Tag color={TYPE_TAG[v].color}>{TYPE_TAG[v].label}</Tag>,
+            render: (v: ReviewItemType) => {
+              const tag = TYPE_TAG[v] ?? { color: "default", label: v };
+              return <Tag color={tag.color}>{tag.label}</Tag>;
+            },
           },
           {
             title: "Loan Number",

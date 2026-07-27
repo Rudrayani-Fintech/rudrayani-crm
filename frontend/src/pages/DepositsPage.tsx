@@ -1,6 +1,7 @@
 import {
   Button,
   DatePicker,
+  Modal,
   Segmented,
   Select,
   Space,
@@ -50,7 +51,7 @@ export default function DepositsPage() {
   const [marking, setMarking] = useState(false);
 
   useEffect(() => {
-    api.get("/companies").then((res) => setCompanies(res.data.companies));
+    api.get("/companies").then((res) => setCompanies(res.data.companies)).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   const load = useCallback(async () => {
@@ -73,7 +74,7 @@ export default function DepositsPage() {
     void load();
   }, [load]);
 
-  const markDeposited = async () => {
+  const applyMarkDeposited = async () => {
     setMarking(true);
     try {
       const res = await api.patch("/payments/mark-deposited", { payment_ids: selected });
@@ -84,6 +85,21 @@ export default function DepositsPage() {
     } finally {
       setMarking(false);
     }
+  };
+
+  const markDeposited = () => {
+    const total = rows
+      .filter((r) => selected.includes(r.id))
+      .reduce((sum, r) => sum + Number(r.amount), 0);
+    // Cash reconciliation, not a data edit -- there's no "unmark" in this
+    // UI, so a batch of the wrong rows stays wrong until someone finds it
+    // directly in the database.
+    Modal.confirm({
+      title: `Mark ${selected.length} payment(s) deposited?`,
+      content: `Total ${rupee.format(total)}. This confirms the cash reached the bank and cannot be undone from here.`,
+      okText: "Mark deposited",
+      onOk: applyMarkDeposited,
+    });
   };
 
   const pendingTotal = rows

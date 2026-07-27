@@ -2,7 +2,7 @@ import { Button, Card, Form, Input, theme, Typography, message } from "antd";
 import { LockOutlined, PhoneOutlined } from "@ant-design/icons";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { errorMessage } from "../api/client";
+import { errorMessage, POST_LOGIN_REDIRECT_KEY } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 
 export default function LoginPage() {
@@ -15,7 +15,11 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(values.phone, values.password);
-      navigate("/"); // role-aware landing: layout menu adapts to capabilities
+      const redirect = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY);
+      sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
+      // role-aware landing when there's nowhere specific to return to: the
+      // layout menu adapts to capabilities.
+      navigate(redirect || "/");
     } catch (err) {
       message.error(errorMessage(err));
     } finally {

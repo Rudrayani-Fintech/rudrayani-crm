@@ -5,7 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
-import { agentBranchClamp, customerBranchClamp, resolveBranchClamp } from "../services/scope";
+import { type BranchClamp, agentBranchClamp, customerBranchClamp, resolveBranchClamp } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 
 /**
@@ -112,86 +112,143 @@ router.get(
 
 /**
  * Approve (reassign to new_agent_id, or return to the unallocated pool when
- * omitted) or reject. Approvals with a new agent land in allocation_logs
- * like any other reallocation.
+ * omitted) or reject a single request. Shared by the single-request route
+ * below and the bulk route, so a fix to one decision path can't drift out
+ * of sync with the other the way the "hand-rolled filter" bugs did elsewhere.
  */
+async function decideOne(
+  agencyId: string,
+  userId: string,
+  clamp: BranchClamp,
+  id: string,
+  approve: boolean,
+  newAgentId: string | undefined,
+  note: string | undefined,
+) {
+  const reqParams: unknown[] = [id, agencyId];
+  const reqClampSql = customerBranchClamp(clamp, reqParams, "c");
+  const reqRes = await pool.query(
+    `SELECT r.*, c.assigned_agent_id FROM reallocation_requests r
+       JOIN customers c ON c.id = r.customer_id
+       JOIN companies co ON co.id = c.company_id
+      WHERE r.id = $1 AND co.agency_id = $2${reqClampSql}`,
+    reqParams,
+  );
+  const request = reqRes.rows[0];
+  if (!request) throw new HttpError(404, "Request not found");
+  if (request.status !== "pending") throw new HttpError(409, "Request already decided");
+
+  if (approve && newAgentId) {
+    const agentParams: unknown[] = [newAgentId, agencyId];
+    const agentClampSql = agentBranchClamp(clamp, agentParams, "users");
+    const agent = await pool.query(
+      `SELECT id FROM users WHERE id = $1 AND agency_id = $2 AND is_active = true${agentClampSql}`,
+      agentParams,
+    );
+    if (!agent.rows[0]) throw new HttpError(404, "New agent not found in this agency");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const updated = await client.query(
+      `UPDATE reallocation_requests
+          SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4
+        WHERE id = $1 RETURNING *`,
+      [id, approve ? "approved" : "rejected", userId, note ?? null],
+    );
+
+    if (approve) {
+      await client.query("UPDATE customers SET assigned_agent_id = $2 WHERE id = $1", [
+        request.customer_id,
+        newAgentId ?? null,
+      ]);
+      if (newAgentId) {
+        await client.query(
+          `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            request.customer_id,
+            request.assigned_agent_id,
+            newAgentId,
+            userId,
+            `Reallocation request approved: ${request.reason}`,
+          ],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    return updated.rows[0];
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+const decideSchema = z.object({
+  approve: z.boolean(),
+  new_agent_id: z.string().uuid().optional(),
+  note: z.string().trim().max(500).optional(),
+});
+
 router.post(
   "/:id/decide",
   requirePermission("customers.allocate"),
   asyncHandler(async (req, res) => {
     const id = z.string().uuid().parse(req.params.id);
+    const body = decideSchema.parse(req.body);
+    // A branch_manager can only decide requests for their own branch's
+    // customers, and can only reassign to an agent in their own branch.
+    const clamp = await resolveBranchClamp(req.user!);
+    const request = await decideOne(
+      req.user!.agency_id,
+      req.user!.id,
+      clamp,
+      id,
+      body.approve,
+      body.new_agent_id,
+      body.note,
+    );
+    res.json({ request });
+  }),
+);
+
+/**
+ * Bulk approve/reject -- mirrors import-reviews.ts's bulk-decision: each id
+ * is decided independently (its own transaction), so one already-decided or
+ * now-invalid request in the batch doesn't roll back everyone else's. A
+ * single new_agent_id, if given, applies to every approved id in the batch
+ * -- reassigning a batch of flagged customers to one agent at once; leave
+ * it out to return all of them to the unallocated pool instead.
+ */
+router.post(
+  "/bulk-decide",
+  requirePermission("customers.allocate"),
+  asyncHandler(async (req, res) => {
     const body = z
       .object({
+        ids: z.array(z.string().uuid()).min(1).max(200),
         approve: z.boolean(),
         new_agent_id: z.string().uuid().optional(),
         note: z.string().trim().max(500).optional(),
       })
       .parse(req.body);
 
-    // A branch_manager can only decide requests for their own branch's
-    // customers, and can only reassign to an agent in their own branch.
     const clamp = await resolveBranchClamp(req.user!);
-    const reqParams: unknown[] = [id, req.user!.agency_id];
-    const reqClampSql = customerBranchClamp(clamp, reqParams, "c");
-    const reqRes = await pool.query(
-      `SELECT r.*, c.assigned_agent_id FROM reallocation_requests r
-         JOIN customers c ON c.id = r.customer_id
-         JOIN companies co ON co.id = c.company_id
-        WHERE r.id = $1 AND co.agency_id = $2${reqClampSql}`,
-      reqParams,
-    );
-    const request = reqRes.rows[0];
-    if (!request) throw new HttpError(404, "Request not found");
-    if (request.status !== "pending") throw new HttpError(409, "Request already decided");
-
-    if (body.approve && body.new_agent_id) {
-      const agentParams: unknown[] = [body.new_agent_id, req.user!.agency_id];
-      const agentClampSql = agentBranchClamp(clamp, agentParams, "users");
-      const agent = await pool.query(
-        `SELECT id FROM users WHERE id = $1 AND agency_id = $2 AND is_active = true${agentClampSql}`,
-        agentParams,
-      );
-      if (!agent.rows[0]) throw new HttpError(404, "New agent not found in this agency");
-    }
-
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      const updated = await client.query(
-        `UPDATE reallocation_requests
-            SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4
-          WHERE id = $1 RETURNING *`,
-        [id, body.approve ? "approved" : "rejected", req.user!.id, body.note ?? null],
-      );
-
-      if (body.approve) {
-        await client.query("UPDATE customers SET assigned_agent_id = $2 WHERE id = $1", [
-          request.customer_id,
-          body.new_agent_id ?? null,
-        ]);
-        if (body.new_agent_id) {
-          await client.query(
-            `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [
-              request.customer_id,
-              request.assigned_agent_id,
-              body.new_agent_id,
-              req.user!.id,
-              `Reallocation request approved: ${request.reason}`,
-            ],
-          );
-        }
+    const applied: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const id of body.ids) {
+      try {
+        await decideOne(req.user!.agency_id, req.user!.id, clamp, id, body.approve, body.new_agent_id, body.note);
+        applied.push(id);
+      } catch (err) {
+        skipped.push({ id, reason: err instanceof HttpError ? err.message : "Unexpected error" });
       }
-
-      await client.query("COMMIT");
-      res.json({ request: updated.rows[0] });
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
     }
+    res.json({ applied, skipped });
   }),
 );
 

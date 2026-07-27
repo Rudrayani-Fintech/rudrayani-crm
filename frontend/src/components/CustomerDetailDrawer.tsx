@@ -231,8 +231,8 @@ export default function CustomerDetailDrawer({
       {!loading && detail && (
         <Space direction="vertical" style={{ width: "100%" }} size="large">
           <Space wrap>
-            <Tag color={STATUS_TAG[detail.customer.status].color}>
-              {STATUS_TAG[detail.customer.status].label}
+            <Tag color={(STATUS_TAG[detail.customer.status] ?? { color: "default" }).color}>
+              {(STATUS_TAG[detail.customer.status] ?? { label: detail.customer.status }).label}
             </Tag>
             {normalizedPending && (
               <Tag color="blue">Normalized this month (pending lender confirmation)</Tag>

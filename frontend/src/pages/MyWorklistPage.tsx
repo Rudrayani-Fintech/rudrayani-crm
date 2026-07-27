@@ -171,10 +171,10 @@ export default function MyWorklistPage() {
   }, [search, filterCustomerBranch, filterProduct, filterBucket, isBranchManager, scope]);
 
   useEffect(() => {
-    api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes));
-    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches));
-    api.get("/products").then((res) => setProducts(res.data.products));
-    api.get("/buckets").then((res) => setBuckets(res.data.buckets));
+    api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes)).catch((err) => message.error(errorMessage(err)));
+    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches)).catch((err) => message.error(errorMessage(err)));
+    api.get("/products").then((res) => setProducts(res.data.products)).catch((err) => message.error(errorMessage(err)));
+    api.get("/buckets").then((res) => setBuckets(res.data.buckets)).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   useEffect(() => {
@@ -229,7 +229,10 @@ export default function MyWorklistPage() {
 
       <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Input.Search
-          placeholder="Search name or phone..."
+          // The backend's /worklist ?q= already ILIKEs both customer_name
+          // and loan_number (worklist.ts) -- the placeholder just hadn't
+          // caught up, so agents didn't know loan-number search worked.
+          placeholder="Search name or loan number..."
           allowClear
           onSearch={(v) => setSearch(v)}
           style={{ width: 240 }}

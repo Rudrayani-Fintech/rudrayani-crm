@@ -58,16 +58,12 @@ export default function RecordPaymentModal({
   }, [open]);
 
   const exceedsDue = dueAmount != null && amount != null && amount > dueAmount;
+  // Drives the Save button below -- computed live so the form disables
+  // itself instead of letting the agent click Save and find out afterward.
+  const canSubmit = amount != null && amount > 0 && (!exceedsDue || confirmedExceedsDue);
 
   const submit = async () => {
-    if (amount == null || amount <= 0) {
-      message.error("Enter a valid positive amount");
-      return;
-    }
-    if (exceedsDue && !confirmedExceedsDue) {
-      message.error("Confirm the amount above — it's more than what's owed");
-      return;
-    }
+    if (!canSubmit) return; // unreachable via the UI; guards direct calls
     setSubmitting(true);
     try {
       const form = new FormData();
@@ -100,6 +96,7 @@ export default function RecordPaymentModal({
       onOk={submit}
       confirmLoading={submitting}
       okText="Save"
+      okButtonProps={{ disabled: !canSubmit }}
     >
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
         <div>
@@ -195,7 +192,21 @@ export default function RecordPaymentModal({
             </Upload>
           </div>
         </div>
-        <Checkbox checked={closeCustomer} onChange={(e) => setCloseCustomer(e.target.checked)}>
+        <Checkbox
+          checked={closeCustomer}
+          onChange={(e) => {
+            if (!e.target.checked) return setCloseCustomer(false);
+            // Mirrors the same confirm added to mobile's payment_screen.dart
+            // -- an irreversible toggle deserves a deliberate second tap,
+            // not a single misplaced click.
+            Modal.confirm({
+              title: "Mark customer as Closed?",
+              content: "This clears the assignment and sets the loan status to closed. This cannot be undone from here.",
+              okText: "Close customer",
+              onOk: () => setCloseCustomer(true),
+            });
+          }}
+        >
           Mark customer as Closed
           <Typography.Text type="secondary" style={{ display: "block", fontSize: 12 }}>
             Clears assignment and sets status to closed

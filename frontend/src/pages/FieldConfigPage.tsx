@@ -4,6 +4,7 @@ import {
   Card,
   Form,
   Input,
+  Modal,
   Select,
   Space,
   Switch,
@@ -61,16 +62,22 @@ export default function FieldConfigPage() {
   const [definitions, setDefinitions] = useState<FieldDefinition[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [definitionsError, setDefinitionsError] = useState<string | null>(null);
   const [addForm] = Form.useForm();
   const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    api.get("/companies").then((r) => setCompanies(r.data.companies));
+    api.get("/companies").then((r) => setCompanies(r.data.companies)).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   const loadDefinitions = useCallback(async () => {
-    const res = await api.get("/field-config/definitions");
-    setDefinitions(res.data.definitions);
+    setDefinitionsError(null);
+    try {
+      const res = await api.get("/field-config/definitions");
+      setDefinitions(res.data.definitions);
+    } catch (err) {
+      setDefinitionsError(errorMessage(err));
+    }
   }, []);
 
   const loadCatalog = useCallback(async () => {
@@ -104,7 +111,7 @@ export default function FieldConfigPage() {
     }
   };
 
-  const deleteDefinition = async (def: FieldDefinition) => {
+  const applyDelete = async (def: FieldDefinition) => {
     try {
       await api.delete(`/field-config/definitions/${def.id}`);
       message.success(`Removed "${def.label}" from the master catalog`);
@@ -113,6 +120,17 @@ export default function FieldConfigPage() {
     } catch (err) {
       message.error(errorMessage(err));
     }
+  };
+
+  const deleteDefinition = (def: FieldDefinition) => {
+    Modal.confirm({
+      title: `Remove "${def.label}" from the master catalog?`,
+      content:
+        "This removes it from every company's field configuration going forward. Values already imported for this field stay on existing customer records.",
+      okText: "Remove",
+      okButtonProps: { danger: true },
+      onOk: () => applyDelete(def),
+    });
   };
 
   const patchSetting = async (
@@ -128,11 +146,16 @@ export default function FieldConfigPage() {
     }
   };
 
+  // Without this, clicking up/down twice quickly fires two overlapping PUTs
+  // against the same optimistic array -- whichever response lands last wins,
+  // silently discarding the other click's reorder.
+  const [reordering, setReordering] = useState(false);
   const move = async (index: number, delta: -1 | 1) => {
     const next = [...catalog];
     const [item] = next.splice(index, 1);
     next.splice(index + delta, 0, item);
     setCatalog(next); // optimistic
+    setReordering(true);
     try {
       await api.put("/field-config/settings/reorder", {
         company_id: companyId,
@@ -141,6 +164,8 @@ export default function FieldConfigPage() {
     } catch (err) {
       message.error(errorMessage(err));
       void loadCatalog();
+    } finally {
+      setReordering(false);
     }
   };
 
@@ -159,6 +184,15 @@ export default function FieldConfigPage() {
       </Typography.Paragraph>
 
       <Card title="Master catalog (agency-wide)" style={{ marginBottom: 24 }}>
+        {definitionsError && (
+          <Alert
+            type="error"
+            showIcon
+            message={definitionsError}
+            action={<Button size="small" onClick={() => void loadDefinitions()}>Retry</Button>}
+            style={{ marginBottom: 16 }}
+          />
+        )}
         <Table<FieldDefinition>
           rowKey="id"
           dataSource={definitions}
@@ -253,13 +287,13 @@ export default function FieldConfigPage() {
                     <Button
                       size="small"
                       icon={<ArrowUpOutlined />}
-                      disabled={index === 0}
+                      disabled={index === 0 || reordering}
                       onClick={() => void move(index, -1)}
                     />
                     <Button
                       size="small"
                       icon={<ArrowDownOutlined />}
-                      disabled={index === catalog.length - 1}
+                      disabled={index === catalog.length - 1 || reordering}
                       onClick={() => void move(index, 1)}
                     />
                   </Space>

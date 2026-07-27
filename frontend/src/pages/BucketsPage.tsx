@@ -1,4 +1,4 @@
-import { Alert, Button, InputNumber, Radio, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, InputNumber, Modal, Radio, Select, Space, Table, Tag, Typography, message } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
@@ -26,7 +26,7 @@ export default function BucketsPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api.get("/companies").then((res) => setCompanies(res.data.companies));
+    api.get("/companies").then((res) => setCompanies(res.data.companies)).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   const load = useCallback(async () => {
@@ -49,11 +49,16 @@ export default function BucketsPage() {
     void load();
   }, [load]);
 
+  // Without this, clicking up/down twice quickly fires two overlapping PUTs
+  // against the same optimistic array -- whichever response lands last wins,
+  // silently discarding the other click's reorder.
+  const [reordering, setReordering] = useState(false);
   const move = async (index: number, delta: -1 | 1) => {
     const next = [...buckets];
     const [item] = next.splice(index, 1);
     next.splice(index + delta, 0, item);
     setBuckets(next); // optimistic
+    setReordering(true);
     try {
       await api.put("/buckets/reorder", {
         company_id: companyId,
@@ -62,6 +67,8 @@ export default function BucketsPage() {
     } catch (err) {
       message.error(errorMessage(err));
       void load();
+    } finally {
+      setReordering(false);
     }
   };
 
@@ -75,6 +82,22 @@ export default function BucketsPage() {
     } catch (err) {
       message.error(errorMessage(err));
     }
+  };
+
+  // Flipping a bucket to NPA changes how Recovery/Rollback are computed on
+  // the performance dashboard for every account currently sitting in it --
+  // worth a confirmation. Reversing back to normal is a corrective action
+  // and stays a plain click.
+  const setCategory = (b: Bucket, category: Bucket["category"]) => {
+    if (category !== "npa" || b.category === "npa") return void patch(b.id, { category });
+    Modal.confirm({
+      title: `Flag "${b.label}" as NPA?`,
+      content:
+        "This changes how Recovery and Rollback are computed on the performance dashboard for every account currently in this bucket.",
+      okText: "Flag as NPA",
+      okButtonProps: { danger: true },
+      onOk: () => patch(b.id, { category }),
+    });
   };
 
   const hasCurrent = buckets.some((b) => b.is_current);
@@ -124,13 +147,13 @@ export default function BucketsPage() {
                 <Button
                   size="small"
                   icon={<ArrowUpOutlined />}
-                  disabled={index === 0}
+                  disabled={index === 0 || reordering}
                   onClick={() => void move(index, -1)}
                 />
                 <Button
                   size="small"
                   icon={<ArrowDownOutlined />}
-                  disabled={index === buckets.length - 1}
+                  disabled={index === buckets.length - 1 || reordering}
                   onClick={() => void move(index, 1)}
                 />
               </Space>
@@ -144,7 +167,7 @@ export default function BucketsPage() {
               <Radio.Group
                 size="small"
                 value={b.category}
-                onChange={(e) => void patch(b.id, { category: e.target.value })}
+                onChange={(e) => setCategory(b, e.target.value)}
                 options={[
                   { value: "normal", label: "Normal" },
                   { value: "npa", label: "NPA" },

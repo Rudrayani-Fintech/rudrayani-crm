@@ -86,9 +86,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!isManager) return;
-    api.get("/companies").then((r) => setCompanies(r.data.companies));
-    api.get("/branches").then((r) => setBranches(r.data.branches));
-    api.get("/teams").then((r) => setTeams(r.data.teams));
+    api.get("/companies").then((r) => setCompanies(r.data.companies)).catch((err) => message.error(errorMessage(err)));
+    api.get("/branches").then((r) => setBranches(r.data.branches)).catch((err) => message.error(errorMessage(err)));
+    api.get("/teams").then((r) => setTeams(r.data.teams)).catch((err) => message.error(errorMessage(err)));
     if (hasPermission("employees.view")) {
       api.get("/employees").then((r) =>
         setAgents(
@@ -101,7 +101,7 @@ export default function DashboardPage() {
               e.is_active && (e.capabilities.includes("telecaller") || e.capabilities.includes("field_agent")),
           ),
         ),
-      );
+      ).catch((err) => message.error(errorMessage(err)));
     }
   }, [isManager, hasPermission]);
 

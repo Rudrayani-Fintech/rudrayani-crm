@@ -348,6 +348,12 @@ router.get(
     // client-side. Omitted -> unfiltered (unchanged pre-Phase-12 behavior).
     const isActiveRaw = req.query.is_active as string | undefined;
     const isActive = isActiveRaw === undefined ? null : isActiveRaw === "true";
+    // Allocation's agent picker (AllocationPage.tsx) is otherwise blind --
+    // an agent with 400 accounts and one with 4 look identical in the
+    // dropdown. Opt-in and computed only when asked for, so the plain
+    // employee-list/table view (EmployeesPage) doesn't pay for an extra
+    // correlated subquery per row on every load.
+    const withLoad = req.query.with_load === "true";
 
     // A branch_manager's branch filter is forced to their own branch,
     // overriding whatever (if anything) the client asked for -- the client
@@ -388,8 +394,11 @@ router.get(
       conditions += ` AND EXISTS (SELECT 1 FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.product = $${params.length})`;
     }
 
-    const { rows } = await pool.query<UserRow & { manager_name: string | null }>(
-      `SELECT u.*, m.full_name as manager_name FROM users u LEFT JOIN users m ON u.manager_id = m.id ${conditions} ORDER BY u.full_name`,
+    const loadSelect = withLoad
+      ? `, (SELECT COUNT(*) FROM customers c WHERE (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id) AND c.status = 'active') AS assigned_count`
+      : "";
+    const { rows } = await pool.query<UserRow & { manager_name: string | null; assigned_count?: string }>(
+      `SELECT u.*, m.full_name as manager_name${loadSelect} FROM users u LEFT JOIN users m ON u.manager_id = m.id ${conditions} ORDER BY u.full_name`,
       params,
     );
     const withMulti = await attachMultiAssignments(rows);
@@ -402,6 +411,7 @@ router.get(
         team_ids: u.team_ids,
         managed_branch_id: u.managed_branch_id,
         manager_name: u.manager_name,
+        ...(withLoad ? { assigned_count: Number(u.assigned_count ?? 0) } : {}),
       })),
     });
   }),

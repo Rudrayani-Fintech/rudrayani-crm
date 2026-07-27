@@ -1,5 +1,5 @@
-import { Navigate, Route, Routes } from "react-router-dom";
-import { Spin } from "antd";
+import { Link, Navigate, Route, Routes } from "react-router-dom";
+import { Button, Result, Spin } from "antd";
 import { lazy } from "react";
 import { useAuth } from "./auth/AuthContext";
 import AppLayout from "./components/AppLayout";
@@ -46,6 +46,24 @@ function RequireAuth({ children }: { children: JSX.Element }) {
   return children;
 }
 
+// A mistyped or stale URL previously bounced silently to the dashboard --
+// indistinguishable from "you clicked Dashboard", so a broken bookmark or
+// shared link never got reported. This tells the user what happened.
+function NotFoundPage() {
+  return (
+    <Result
+      status="404"
+      title="Page not found"
+      subTitle="That link doesn't match any page in the portal."
+      extra={
+        <Link to="/">
+          <Button type="primary">Back to dashboard</Button>
+        </Link>
+      }
+    />
+  );
+}
+
 export default function App() {
   return (
     <Routes>
@@ -82,6 +100,7 @@ export default function App() {
         <Route path="targets" element={<TargetsPage />} />
         <Route path="deposits" element={<DepositsPage />} />
         <Route path="attendance" element={<AttendancePage />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

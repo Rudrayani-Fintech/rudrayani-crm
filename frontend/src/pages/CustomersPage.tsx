@@ -1,17 +1,23 @@
 import {
+  Alert,
+  Button,
   Col,
   Empty,
   Input,
   Row,
   Select,
+  Space,
   Table,
   Tag,
   Typography,
+  message,
 } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
-import { useCallback, useEffect, useState } from "react";
-import { api } from "../api/client";
+import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { api, errorMessage } from "../api/client";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
+import { downloadCsv } from "../utils/csv";
 import type { Company, Customer } from "../types";
 
 const STATUS_TAG: Record<string, { color: string; label: string }> = {
@@ -26,23 +32,47 @@ interface Product {
   canonical_label: string;
 }
 
+// Everything below reads its initial value from the URL and writes back to
+// it on change -- previously all of this was pure component state, so a
+// refresh reset every filter, the back button left the page entirely
+// instead of undoing the last filter change, and a customer drawer could
+// never be linked to a colleague (no URL represented it at all).
 export default function CustomersPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [customerBranches, setCustomerBranches] = useState<{value: string; label: string}[]>([]);
-  const [companyId, setCompanyId] = useState<string | null>(null);
-  const [customerBranch, setCustomerBranch] = useState<string | null>(null);
+  const [companyId, setCompanyId] = useState<string | null>(() => searchParams.get("company_id"));
+  const [customerBranch, setCustomerBranch] = useState<string | null>(() => searchParams.get("customer_branch"));
   const [products, setProducts] = useState<Product[]>([]);
   const [buckets, setBuckets] = useState<string[]>([]);
-  const [product, setProduct] = useState<string | null>(null);
-  const [bucket, setBucket] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
+  const [product, setProduct] = useState<string | null>(() => searchParams.get("product"));
+  const [bucket, setBucket] = useState<string | null>(() => searchParams.get("bucket"));
+  const [status, setStatus] = useState<string | null>(() => searchParams.get("status"));
+  const [search, setSearch] = useState(() => searchParams.get("q") ?? "");
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => Number(searchParams.get("page")) || 1);
   const [loading, setLoading] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(() => searchParams.get("customer"));
+
+  // Mirrors every filter + the open drawer into the URL (replacing, not
+  // pushing, so tweaking three filters in a row doesn't require three
+  // presses of Back to leave the page).
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (companyId) next.set("company_id", companyId);
+    if (customerBranch) next.set("customer_branch", customerBranch);
+    if (product) next.set("product", product);
+    if (bucket) next.set("bucket", bucket);
+    if (status) next.set("status", status);
+    if (query) next.set("q", query);
+    if (page > 1) next.set("page", String(page));
+    if (detailId) next.set("customer", detailId);
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, customerBranch, product, bucket, status, query, page, detailId]);
 
   useEffect(() => {
     Promise.all([
@@ -51,7 +81,7 @@ export default function CustomersPage() {
     ]).then(([cRes, bRes]) => {
       setCompanies(cRes.data.companies);
       setCustomerBranches(bRes.data.branches);
-    });
+    }).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   useEffect(() => {
@@ -68,11 +98,16 @@ export default function CustomersPage() {
     ]).then(([pRes, bRes]) => {
       setProducts(pRes.data.products);
       setBuckets(bRes.data.buckets.map((b: { label: string }) => b.label));
-    });
+    }).catch((err) => message.error(errorMessage(err)));
   }, [companyId]);
 
+  // Guards against a fast filter/page change resolving out of order: only
+  // the response for the most recently issued load() is ever applied.
+  const loadSeq = useRef(0);
   const load = useCallback(async (pg = 1) => {
+    const seq = ++loadSeq.current;
     setLoading(true);
+    setLoadError(null);
     try {
       const params: Record<string, string | number> = { page: pg, limit: 50 };
       if (companyId) params.company_id = companyId;
@@ -82,11 +117,17 @@ export default function CustomersPage() {
       if (status) params.status = status;
       if (query) params.q = query;
       const res = await api.get("/customers", { params });
+      if (seq !== loadSeq.current) return;
       setCustomers(res.data.customers);
       setTotal(res.data.total);
       setPage(pg);
+    } catch (err) {
+      if (seq !== loadSeq.current) return;
+      // A failed load must not look like an empty book -- distinct from
+      // the "import data first" empty state rendered below.
+      setLoadError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [companyId, customerBranch, product, bucket, status, query]);
 
@@ -103,7 +144,32 @@ export default function CustomersPage() {
         <Typography.Title level={3} style={{ margin: 0 }}>
           Customers
         </Typography.Title>
-        <Typography.Text type="secondary">{total.toLocaleString()} records</Typography.Text>
+        <Space>
+          <Typography.Text type="secondary">{total.toLocaleString()} records</Typography.Text>
+          <Button
+            icon={<DownloadOutlined />}
+            disabled={customers.length === 0}
+            onClick={() =>
+              downloadCsv(
+                `customers-page-${page}.csv`,
+                ["Loan No", "Customer", "Company", "Branch", "Product", "Bucket", "Status", "Due Amount", "POS"],
+                customers.map((c) => [
+                  c.loan_number,
+                  c.customer_name,
+                  c.company_name,
+                  c.branch_name ?? "",
+                  c.product ?? "",
+                  c.bucket ?? "",
+                  c.status,
+                  c.due_amount ?? "",
+                  c.pos ?? "",
+                ]),
+              )
+            }
+          >
+            Export page as CSV
+          </Button>
+        </Space>
       </div>
 
       {/* Filters */}
@@ -181,6 +247,16 @@ export default function CustomersPage() {
           />
         </Col>
       </Row>
+
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message={loadError}
+          action={<Button size="small" onClick={() => load(page)}>Retry</Button>}
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       <Table
         rowKey="id"

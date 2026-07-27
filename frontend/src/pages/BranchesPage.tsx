@@ -14,12 +14,14 @@ export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [branchManagers, setBranchManagers] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Branch | "new" | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [form] = Form.useForm<BranchFormValues>();
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [br, bm] = await Promise.all([
         api.get("/branches"),
@@ -27,6 +29,8 @@ export default function BranchesPage() {
       ]);
       setBranches(br.data.branches);
       setBranchManagers(bm.data.employees);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -112,6 +116,16 @@ export default function BranchesPage() {
             />
           )}
         </Space>
+      )}
+
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message={loadError}
+          action={<Button size="small" onClick={() => load()}>Retry</Button>}
+          style={{ marginBottom: 16 }}
+        />
       )}
 
       <Table

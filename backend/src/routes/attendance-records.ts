@@ -67,9 +67,28 @@ router.get(
       extraClause += ` AND a.punch_out_at IS NULL`;
     }
 
+    // Taken before per_page/offset are appended below, so these placeholder
+    // numbers line up with the ones already baked into scopeClause/extraClause.
+    const countParams = [...params];
+
     const offset = (q.page - 1) * q.per_page;
     params.push(q.per_page, offset);
     const limitClause = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
+
+    // Without this, the client had no way to know how many rows exist past
+    // the current page -- AntD's Table sized its pagination off
+    // dataSource.length alone, so page 2 was unreachable no matter how many
+    // records the server actually had.
+    const { rows: countRows } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::int AS count
+         FROM attendance a
+         JOIN users u ON u.id = a.user_id
+        WHERE u.agency_id = $1
+          ${scopeClause}
+          ${extraClause}`,
+      countParams,
+    );
+    const total = Number(countRows[0]?.count ?? 0);
 
     const { rows } = await pool.query(
       `SELECT a.id,
@@ -94,7 +113,7 @@ router.get(
       params,
     );
 
-    res.json({ records: rows, page: q.page, per_page: q.per_page });
+    res.json({ records: rows, page: q.page, per_page: q.per_page, total });
   }),
 );
 

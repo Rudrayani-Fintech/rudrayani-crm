@@ -13,10 +13,12 @@ ALTER TABLE customer_month_snapshots
   ADD COLUMN branch_id UUID REFERENCES branches(id);
 
 UPDATE customer_month_snapshots s
-   SET branch_id = COALESCE(tm.branch_id, c.branch_id, au.branch_id)
+   SET branch_id = COALESCE(
+         (SELECT branch_id FROM teams WHERE id = s.assigned_team_id),
+         c.branch_id,
+         (SELECT branch_id FROM users WHERE id = s.assigned_agent_id)
+       )
   FROM customers c
-  LEFT JOIN teams tm ON tm.id = s.assigned_team_id
-  LEFT JOIN users au ON au.id = s.assigned_agent_id
  WHERE c.id = s.customer_id
    AND s.branch_id IS NULL;
 

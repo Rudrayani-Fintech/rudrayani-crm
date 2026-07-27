@@ -3,6 +3,7 @@ import {
   Badge,
   Button,
   Descriptions,
+  Empty,
   Input,
   Modal,
   Select,
@@ -220,6 +221,20 @@ export default function ImportReviewPage() {
         rowKey="id"
         loading={loading}
         dataSource={items}
+        locale={{
+          // An empty queue here is a good sign, not a setup gap -- no
+          // discrepancy was detected on the latest import, or everything
+          // already got a decision. Previously a bare "No Data".
+          emptyText: (
+            <Empty
+              description={
+                status === "pending"
+                  ? "No pending items — nothing needs a decision right now"
+                  : `No ${status} items for this company`
+              }
+            />
+          ),
+        }}
         pagination={{ pageSize: 20 }}
         scroll={{ x: "max-content" }}
         rowSelection={{

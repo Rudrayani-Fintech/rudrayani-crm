@@ -1,6 +1,7 @@
 import {
   Button,
   DatePicker,
+  Empty,
   Modal,
   Segmented,
   Select,
@@ -158,6 +159,19 @@ export default function DepositsPage() {
         rowKey="id"
         loading={loading}
         dataSource={rows}
+        locale={{
+          emptyText: (
+            <Empty
+              description={
+                filter === "pending"
+                  ? "No pending deposits — either nothing's been collected yet this month, or it's all reconciled already"
+                  : filter === "deposited"
+                    ? "Nothing marked deposited for this period yet"
+                    : "No payments recorded for this period"
+              }
+            />
+          ),
+        }}
         size="small"
         rowSelection={{
           selectedRowKeys: selected,

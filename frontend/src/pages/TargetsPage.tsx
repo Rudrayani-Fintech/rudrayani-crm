@@ -1,6 +1,7 @@
 import {
   Button,
   DatePicker,
+  Empty,
   InputNumber,
   Radio,
   Space,
@@ -14,6 +15,7 @@ import { SaveOutlined, UploadOutlined } from "@ant-design/icons";
 import type { RcFile } from "antd/es/upload";
 import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
 
 const METRICS = ["collection", "resolution", "rollback", "normalization", "recovery"] as const;
@@ -311,6 +313,30 @@ export default function TargetsPage() {
         loading={loading}
         dataSource={entities}
         columns={columns}
+        // Each row here is a branch/team/agent to enter a target against --
+        // an empty table means none of those exist yet for this scope, not
+        // "no targets set." Point at where to create one.
+        locale={{
+          emptyText: (
+            <Empty
+              description={
+                scopeType === "branch"
+                  ? "No branches yet"
+                  : scopeType === "team"
+                    ? "No teams yet"
+                    : "No employees yet"
+              }
+            >
+              {scopeType !== "agency" && (
+                <Link to={scopeType === "branch" ? "/branches" : scopeType === "team" ? "/teams" : "/employees"}>
+                  <Button type="primary">
+                    Add {scopeType === "branch" ? "a branch" : scopeType === "team" ? "a team" : "an employee"}
+                  </Button>
+                </Link>
+              )}
+            </Empty>
+          ),
+        }}
         pagination={false}
         scroll={{ x: 1110 }}
         size="small"

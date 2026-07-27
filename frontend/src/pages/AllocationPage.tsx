@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Col,
+  Empty,
   Input,
   Modal,
   Row,
@@ -484,6 +485,17 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
         rowKey="id"
         loading={loading}
         dataSource={customers}
+        locale={{
+          emptyText: (
+            <Empty
+              description={
+                filters.companyId || filters.product || filters.bucket || customerBranch
+                  ? "No unallocated customers match your filters"
+                  : "No unallocated customers — everyone's assigned, or nothing's been imported yet"
+              }
+            />
+          ),
+        }}
         rowSelection={{
           selectedRowKeys: selected,
           onChange: (keys) => setSelected(keys as string[]),
@@ -508,7 +520,13 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
 // Allocated list: see who has what, reallocate with reason, view history
 // ──────────────────────────────────────────────────────────────────────────────
 
-function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void }) {
+function AllocatedList({
+  onOpenDetail,
+  onGoToUnallocated,
+}: {
+  onOpenDetail: (id: string) => void;
+  onGoToUnallocated: () => void;
+}) {
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const customerBranches = useCustomerBranches();
@@ -726,6 +744,15 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
         rowKey="id"
         loading={loading}
         dataSource={customers}
+        locale={{
+          emptyText: (
+            <Empty description="No allocated customers yet">
+              <Button type="primary" onClick={onGoToUnallocated}>
+                Go allocate the unallocated queue
+              </Button>
+            </Empty>
+          ),
+        }}
         rowSelection={{
           selectedRowKeys: selected,
           onChange: (keys) => setSelected(keys as string[]),
@@ -859,6 +886,7 @@ function AllocatedList({ onOpenDetail }: { onOpenDetail: (id: string) => void })
 
 export default function AllocationPage() {
   const [detailDrawerId, setDetailDrawerId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("unallocated");
 
   return (
     <div>
@@ -866,10 +894,17 @@ export default function AllocationPage() {
         Customer Allocation
       </Typography.Title>
       <Tabs
-        defaultActiveKey="unallocated"
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={[
           { key: "unallocated", label: "Unallocated Queue", children: <UnallocatedQueue onOpenDetail={setDetailDrawerId} /> },
-          { key: "allocated", label: "Allocated", children: <AllocatedList onOpenDetail={setDetailDrawerId} /> },
+          {
+            key: "allocated",
+            label: "Allocated",
+            children: (
+              <AllocatedList onOpenDetail={setDetailDrawerId} onGoToUnallocated={() => setActiveTab("unallocated")} />
+            ),
+          },
         ]}
       />
       <CustomerDetailDrawer

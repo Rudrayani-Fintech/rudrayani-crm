@@ -1,4 +1,4 @@
-import { Card, Col, DatePicker, Row, Select, Space, Spin, Tag, theme, Typography, message } from "antd";
+import { Card, Col, DatePicker, Row, Select, Space, Spin, theme, Typography, message } from "antd";
 import { Column } from "@ant-design/plots";
 import dayjs, { type Dayjs } from "dayjs";
 import { useEffect, useMemo, useState } from "react";
@@ -38,13 +38,8 @@ interface TrendPoint {
  * an existing /reports/* endpoint (already tested, already scoped to
  * admin/ops/TL by the server). Reuse-first: no bespoke aggregation lives
  * here that report-service.ts doesn't already own.
- *
- * Placeholder-only (deferred per Phase 12 brief, tracked separately):
- * Revenue & Agency Commission, Compliance Alerts, Legal Cases Status,
- * Incentive Calculator.
  */
 export default function ManagementDashboardPage() {
-  const { token } = theme.useToken();
   const [month, setMonth] = useState<Dayjs>(dayjs());
   const [companyId, setCompanyId] = useState<string>();
   const [branchId, setBranchId] = useState<string>();
@@ -347,33 +342,6 @@ export default function ManagementDashboardPage() {
               />
             </Col>
           </Row>
-
-          {/* Placeholder-only KPIs, deferred per Phase 12 brief */}
-          <Card size="small" title="Coming Soon">
-            <Row gutter={[12, 12]}>
-              {["Revenue & Agency Commission", "Compliance Alerts", "Legal Cases Status", "Incentive Calculator"].map(
-                (label) => (
-                  <Col xs={12} md={6} key={label}>
-                    <div
-                      style={{
-                        background: token.colorFillTertiary,
-                        borderRadius: 8,
-                        padding: "12px 16px",
-                        opacity: 0.6,
-                      }}
-                    >
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        {label}
-                      </Typography.Text>
-                      <div>
-                        <Tag>Not yet available</Tag>
-                      </div>
-                    </div>
-                  </Col>
-                ),
-              )}
-            </Row>
-          </Card>
         </Space>
       )}
 

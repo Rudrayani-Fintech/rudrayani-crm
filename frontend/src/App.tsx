@@ -5,6 +5,7 @@ import { useAuth } from "./auth/AuthContext";
 import AppLayout from "./components/AppLayout";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import LoginPage from "./pages/LoginPage";
+import { WorkScopeProvider } from "./scope/WorkScopeContext";
 
 // Lazy: none of these are needed until after login, and most users only ever
 // touch a handful of them (role-gated in AppLayout's nav) -- bundling all 15+
@@ -73,7 +74,9 @@ export default function App() {
         path="/"
         element={
           <RequireAuth>
-            <AppLayout />
+            <WorkScopeProvider>
+              <AppLayout />
+            </WorkScopeProvider>
           </RequireAuth>
         }
       >

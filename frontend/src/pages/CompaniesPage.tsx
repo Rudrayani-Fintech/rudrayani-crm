@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Modal, Table, Typography, message } from "antd";
+import { Alert, Button, Empty, Form, Input, Modal, Table, Typography, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
@@ -47,20 +47,18 @@ export default function CompaniesPage() {
     }
   };
 
+  const openCreate = () => {
+    form.resetFields();
+    setEditing("new");
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
         <Typography.Title level={3} style={{ margin: 0 }}>
           Companies
         </Typography.Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            setEditing("new");
-          }}
-        >
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           Add company
         </Button>
       </div>
@@ -80,6 +78,15 @@ export default function CompaniesPage() {
         loading={loading}
         dataSource={companies}
         pagination={false}
+        locale={{
+          emptyText: (
+            <Empty description="No companies yet — every import and customer belongs to one">
+              <Button type="primary" onClick={openCreate}>
+                Add your first company
+              </Button>
+            </Empty>
+          ),
+        }}
         columns={[
           { title: "Name", dataIndex: "name" },
           {

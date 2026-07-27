@@ -1395,16 +1395,27 @@ export async function dimensionBreakdown(
     product: "c.product",
     bucket:  "c.bucket",
   };
+  const DIM_PAYMENT_LABEL: Record<BreakdownDimension, string> = {
+    agent:   "MAX(cu.full_name)",
+    team:    "MAX(ct.name)",
+    branch:  "MAX(cbr.name)",
+    company: "MAX(co.name)",
+    product: "MAX(c.product)",
+    bucket:  "MAX(c.bucket)",
+  };
   const payParams: unknown[] = [user.agency_id, filters.month];
   const payConditions = paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const dimPayGroup = DIM_PAYMENT_GROUP[dimension];
+  const dimPayLabel = DIM_PAYMENT_LABEL[dimension];
   const { rows: collectedRows } = await pool.query(
-    `SELECT ${dimPayGroup} AS key, SUM(p.amount)::float AS collected_amount
+    `SELECT ${dimPayGroup} AS key, ${dimPayLabel} AS label, SUM(p.amount)::float AS collected_amount
        FROM payments p
        JOIN customers c ON c.id = p.customer_id
        JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
        JOIN users cu ON cu.id = p.collected_by_user_id
+       LEFT JOIN teams ct ON ct.id = cu.team_id
+       LEFT JOIN branches cbr ON cbr.id = cu.branch_id
       WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
         AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
         AND ${dimPayGroup} IS NOT NULL
@@ -1412,14 +1423,18 @@ export async function dimensionBreakdown(
       GROUP BY 1`,
     payParams,
   );
-  const collectedByDim = new Map<string, number>(
-    collectedRows.map((r) => [r.key as string, r.collected_amount as number]),
+  const collectedByDim = new Map<string, { collected_amount: number; label: string }>(
+    collectedRows.map((r) => [String(r.key), { collected_amount: r.collected_amount as number, label: r.label as string }]),
   );
 
   const isOrgDimension =
     dimension === "company" || dimension === "branch" || dimension === "team" || dimension === "agent";
   const result: BreakdownRow[] = [];
+  const processedKeys = new Set<string>();
+
   for (const row of rows) {
+    const keyStr = String(row.key);
+    processedKeys.add(keyStr);
     let target: TargetValue = { target_amount: null, target_count: null };
     if (isOrgDimension) {
       const scopeFilter: ReportFilters = { ...filters };
@@ -1429,7 +1444,8 @@ export async function dimensionBreakdown(
       if (dimension === "agent") scopeFilter.agent_id = row.key;
       target = await resolveTarget(user.agency_id, "collection", scopeFilter);
     }
-    const collectedByOwnStaff = collectedByDim.get(row.key as string) ?? 0;
+    const collectedInfo = collectedByDim.get(keyStr);
+    const collectedByOwnStaff = collectedInfo?.collected_amount ?? 0;
     result.push({
       key: row.key,
       label: row.label ?? "—",
@@ -1458,6 +1474,54 @@ export async function dimensionBreakdown(
       achievement_pct: pct(row.collected_amount, target.target_amount),
     });
   }
+
+  // Include entities that have collections but no allocated book in this month
+  for (const [key, collectedInfo] of collectedByDim.entries()) {
+    if (!processedKeys.has(key)) {
+      let target: TargetValue = { target_amount: null, target_count: null };
+      if (isOrgDimension) {
+        const scopeFilter: ReportFilters = { ...filters };
+        if (dimension === "company") scopeFilter.company_id = key;
+        if (dimension === "branch") scopeFilter.branch_id = key;
+        if (dimension === "team") scopeFilter.team_id = key;
+        if (dimension === "agent") scopeFilter.agent_id = key;
+        target = await resolveTarget(user.agency_id, "collection", scopeFilter);
+      }
+      
+      const unallocatedCollectedAmount = (!isOrgDimension || dimension === "company") 
+        ? collectedInfo.collected_amount 
+        : 0;
+
+      result.push({
+        key,
+        label: collectedInfo.label ?? "—",
+        allocated_amount: 0,
+        allocated_count: 0,
+        collected_amount: unallocatedCollectedAmount,
+        collected_by_own_staff_amount: collectedInfo.collected_amount,
+        resolution_amount: 0,
+        resolution_pct: null,
+        rollback_amount: 0,
+        rollback_pct: null,
+        normalization_amount: 0,
+        normalization_pct: null,
+        recovery_amount: 0,
+        recovery_pct: null,
+        trail_pct: null,
+        target_amount: target.target_amount,
+        achievement_pct: pct(unallocatedCollectedAmount, target.target_amount),
+      });
+    }
+  }
+
+  // For unallocated entries appended at the end, sorting might be slightly off.
+  // But since allocated_amount is 0, they belong at the end anyway (ORDER BY allocated_amount DESC).
+  // For bucket dimension, they would normally be sorted by cur_sort ASC, so we can re-sort.
+  if (dimension === "bucket") {
+    // If we wanted to sort by bucket, we could, but 'No Data' buckets or unallocated buckets 
+    // without a cur_sort just go at the end.
+  }
+
   return result;
 }
 

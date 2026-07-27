@@ -110,6 +110,20 @@ export default function TrailAnalyticsCard({ filters }: { filters: DashboardFilt
               <Stat label="PTP Conversion" value={pctText(data.ptp_conversion_pct)} />
             </Col>
           </Row>
+          {/* The core collections KPI (build brief) previously had no
+              visible kept/broken counts anywhere -- only the conversion %,
+              which hides whether that's 2/2 or 200/200. */}
+          <Row gutter={[10, 10]}>
+            <Col span={8}>
+              <Stat label="PTPs Created" value={compactCount(data.ptps_created)} />
+            </Col>
+            <Col span={8}>
+              <Stat label="PTPs Kept" value={compactCount(data.ptps_kept)} />
+            </Col>
+            <Col span={8}>
+              <Stat label="PTPs Broken" value={compactCount(data.ptps_broken)} />
+            </Col>
+          </Row>
           {chartData.length > 0 ? (
             <Column
               data={chartData}

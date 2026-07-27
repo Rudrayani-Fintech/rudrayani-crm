@@ -361,9 +361,12 @@ const SCOPE_GROUP_EXPR: Record<"agency" | "branch" | "team" | "agent", { live: s
   // Same tm-then-customer-then-agent fallback as reportBranchClause()/
   // classifiedCtes() -- a team-less agent's book would otherwise group under
   // scope_id = NULL and vanish from the Targets page's per-branch column.
+  // The snapshot side prefers s.branch_id (captured at import time) first --
+  // falling back to CURRENT customer/agent branch only for older snapshot
+  // rows written before that column existed.
   branch: {
     live: "COALESCE(tm.branch_id, c.branch_id, u.branch_id)",
-    snap: "COALESCE(tm.branch_id, c.branch_id, u.branch_id)",
+    snap: "COALESCE(s.branch_id, tm.branch_id, c.branch_id, u.branch_id)",
   },
   team: { live: "c.assigned_team_id", snap: "s.assigned_team_id" },
   agent: { live: "c.assigned_agent_id", snap: "s.assigned_agent_id" },
@@ -459,12 +462,15 @@ function classifiedCtes(conditions: string[]): string {
              bm.sort_order AS cur_sort, COALESCE(bm.category, 'normal') AS cur_cat,
              c.status,
              co.name AS company_name, tm.name AS team_name,
-             -- Same tm-then-customer-then-agent fallback chain as
-             -- reportBranchClause() -- a team-less agent's customer would
-             -- otherwise group under branch_id = NULL here and get dropped
-             -- by dimensionBreakdown()'s "WHERE ... IS NOT NULL" filter even
-             -- after the WHERE clause above widened to include it.
-             COALESCE(tm.branch_id, c.branch_id, au.branch_id) AS branch_id,
+             -- s.branch_id is captured at snapshot time (import-service.ts)
+             -- and is the correct historical answer; the rest of the chain
+             -- is the same tm-then-customer-then-agent fallback as
+             -- reportBranchClause(), kept only for snapshot rows written
+             -- before that column existed -- a team-less agent's customer
+             -- would otherwise group under branch_id = NULL here and get
+             -- dropped by dimensionBreakdown()'s "WHERE ... IS NOT NULL"
+             -- filter even after the WHERE clause above widened to include it.
+             COALESCE(s.branch_id, tm.branch_id, c.branch_id, au.branch_id) AS branch_id,
              COALESCE(br.name, cbr.name, aubr.name,
                       NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name,
              au.full_name AS agent_name,
@@ -768,6 +774,52 @@ export async function depositsByRange(
   const collected = rows[0].collected as number;
   const deposited = rows[0].deposited as number;
   return { collected, deposited, pending: roundMoney(collected - deposited) ?? 0 };
+}
+
+export interface ExceptionPaymentRow {
+  id: string;
+  amount: number;
+  due_amount: number | null;
+  mode: string | null;
+  paid_at: string;
+  customer_name: string;
+  loan_number: string;
+  company_name: string;
+  collected_by_name: string;
+}
+
+/**
+ * Phase 6.3: payments.exceeds_due_amount is written on every payment
+ * (payments.ts) but was never queried anywhere -- the spot-check signal it
+ * was built for (an agent recorded more than what's owed, worth a second
+ * look) had no consumer. Same free-date-range + scope-clamp pattern as
+ * depositsByRange()/trailAnalytics().
+ */
+export async function exceptionPayments(
+  agencyId: string,
+  from: string,
+  to: string,
+  filters: Omit<ReportFilters, "month">,
+): Promise<ExceptionPaymentRow[]> {
+  const params: unknown[] = [agencyId, from, to];
+  const conditions = paymentConditions({ ...filters, month: from } as ReportFilters, params);
+  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT p.id, p.amount::float AS amount, c.due_amount::float AS due_amount, p.mode, p.paid_at,
+            c.customer_name, c.loan_number, co.name AS company_name, cu.full_name AS collected_by_name
+       FROM payments p
+       JOIN customers c ON c.id = p.customer_id
+       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
+       JOIN users cu ON cu.id = p.collected_by_user_id
+      WHERE p.exceeds_due_amount = true
+        AND p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+        AND p.paid_at < (($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')
+        ${where}
+      ORDER BY p.paid_at DESC
+      LIMIT 500`,
+    params,
+  );
+  return rows as ExceptionPaymentRow[];
 }
 
 // Exported (not just used by dashboard()) so the branch drill-down (Phase 9)

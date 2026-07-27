@@ -1265,23 +1265,35 @@ export async function agentBreakdown(
   const payConditions = paymentConditions(filters, payParams);
   const payWhere = payConditions.length > 0 ? `AND ${payConditions.join(" AND ")}` : "";
   const { rows: collectedRows } = await pool.query(
-    `SELECT p.collected_by_user_id AS agent_id, SUM(p.amount)::float AS collected_amount
+    `SELECT p.collected_by_user_id AS agent_id, MAX(cu.full_name) AS full_name, MAX(tm.name) AS team_name, SUM(p.amount)::float AS collected_amount
        FROM payments p
        JOIN customers c ON c.id = p.customer_id
        JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
        JOIN users cu ON cu.id = p.collected_by_user_id
+       LEFT JOIN teams tm ON tm.id = cu.team_id
       WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
         AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
         ${payWhere}
       GROUP BY 1`,
     payParams,
   );
-  const collectedByAgent = new Map<string, number>(
-    collectedRows.map((r) => [r.agent_id as string, r.collected_amount as number]),
+  const collectedByAgent = new Map<string, { collected_amount: number; full_name: string; team_name: string | null }>(
+    collectedRows.map((r) => [
+      String(r.agent_id),
+      {
+        collected_amount: r.collected_amount as number,
+        full_name: r.full_name as string,
+        team_name: r.team_name as string | null,
+      },
+    ]),
   );
 
   const result: AgentReportRow[] = [];
+  const processedAgentIds = new Set<string>();
+
   for (const row of rows) {
+    const agentIdStr = String(row.agent_id);
+    processedAgentIds.add(agentIdStr);
     const { rows: users } = await pool.query(
       `SELECT u.full_name, tm.name AS team_name FROM users u
         LEFT JOIN teams tm ON tm.id = u.team_id WHERE u.id = $1`,
@@ -1291,7 +1303,8 @@ export async function agentBreakdown(
       ...filters,
       agent_id: row.agent_id as string,
     });
-    const actualCollected = collectedByAgent.get(row.agent_id as string) ?? 0;
+    const collectedInfo = collectedByAgent.get(agentIdStr);
+    const actualCollected = collectedInfo?.collected_amount ?? 0;
     result.push({
       agent_id: row.agent_id,
       full_name: users[0]?.full_name ?? "—",
@@ -1308,6 +1321,31 @@ export async function agentBreakdown(
       achievement_pct: pct(actualCollected, target.target_amount),
     });
   }
+
+  for (const [agentIdStr, collectedInfo] of collectedByAgent.entries()) {
+    if (!processedAgentIds.has(agentIdStr)) {
+      const target = await resolveTarget(user.agency_id, "collection", {
+        ...filters,
+        agent_id: agentIdStr,
+      });
+      result.push({
+        agent_id: agentIdStr,
+        full_name: collectedInfo.full_name ?? "—",
+        team_name: collectedInfo.team_name ?? null,
+        allocated_amount: 0,
+        allocated_count: 0,
+        collected_amount: collectedInfo.collected_amount,
+        resolution_amount: 0,
+        rollback_amount: 0,
+        normalization_amount: 0,
+        recovery_amount: 0,
+        trail_count: 0,
+        target_amount: target.target_amount,
+        achievement_pct: pct(collectedInfo.collected_amount, target.target_amount),
+      });
+    }
+  }
+
   result.sort((a, b) => b.collected_amount - a.collected_amount);
   return result;
 }

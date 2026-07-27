@@ -747,9 +747,9 @@ export async function commitImport(params: {
         await client.query(
           `INSERT INTO customer_month_snapshots
              (customer_id, company_id, month, bucket, due_amount, pos, emi, due_date, product,
-              assigned_team_id, assigned_agent_id, import_run_id)
+              assigned_team_id, assigned_agent_id, branch_id, import_run_id)
            SELECT c.id, c.company_id, $2, c.bucket, c.due_amount, c.pos, c.emi, c.due_date, c.product,
-                  c.assigned_team_id, c.assigned_agent_id, $3
+                  c.assigned_team_id, c.assigned_agent_id, c.branch_id, $3
              FROM customers c WHERE c.id = $1
            ON CONFLICT (customer_id, month) DO UPDATE
              SET bucket = EXCLUDED.bucket,
@@ -760,6 +760,7 @@ export async function commitImport(params: {
                  product = EXCLUDED.product,
                  assigned_team_id = EXCLUDED.assigned_team_id,
                  assigned_agent_id = EXCLUDED.assigned_agent_id,
+                 branch_id = EXCLUDED.branch_id,
                  import_run_id = EXCLUDED.import_run_id`,
           [customerId, params.allocationMonth, runId],
         );

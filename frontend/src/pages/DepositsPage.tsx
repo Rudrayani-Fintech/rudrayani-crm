@@ -36,6 +36,10 @@ type DepositRow = {
   deposited_by_name: string | null;
 };
 
+/** Days the cash sat before reaching the bank -- or, for still-pending rows, days sitting so far. */
+const ageDays = (r: DepositRow): number =>
+  dayjs(r.deposited_at ?? undefined).diff(dayjs(r.paid_at), "day");
+
 /**
  * Deposit reconciliation (Phase 5): field collections are "pending" until the
  * cash reaches the bank. Select rows and mark them deposited — the dashboard's
@@ -193,6 +197,21 @@ export default function DepositsPage() {
             title: "Collected",
             dataIndex: "paid_at",
             render: (v: string, r) => `${dayjs(v).format("DD MMM")} · ${r.collected_by_name}`,
+          },
+          {
+            // The actual cash-risk report: how long has this agent been
+            // holding cash before it reached the bank. Sorted oldest-first
+            // by default so the riskiest rows surface without extra clicks.
+            title: "Age (days)",
+            key: "age_days",
+            align: "right" as const,
+            sorter: (a: DepositRow, b: DepositRow) => ageDays(a) - ageDays(b),
+            defaultSortOrder: "descend" as const,
+            render: (_: unknown, r: DepositRow) => {
+              const days = ageDays(r);
+              const color = r.deposited_at ? undefined : days >= 7 ? "#d4380d" : days >= 3 ? "#faad14" : undefined;
+              return <span style={{ color, fontWeight: color ? 600 : undefined }}>{days}d</span>;
+            },
           },
           {
             title: "Status",

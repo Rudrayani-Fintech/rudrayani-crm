@@ -4,6 +4,7 @@ import BreakdownTable from "./BreakdownTable";
 import BucketMismatchCard from "./BucketMismatchCard";
 import BucketMovementCard from "./BucketMovementCard";
 import DepositsRangeCard from "./DepositsRangeCard";
+import ExceptionPaymentsCard from "./ExceptionPaymentsCard";
 import MetricPanel from "./MetricPanel";
 import MetricTabsCard from "./MetricTabsCard";
 import OverviewChart from "./OverviewChart";
@@ -26,6 +27,11 @@ export interface DashboardWidget {
   id: string;
   title: string;
   render: (ctx: DashboardRenderCtx) => ReactNode;
+  /** Spans both columns of the dashboard's 2-column grid (DashboardPage.tsx)
+   *  -- widgets that are internally already a multi-column Row (the hero
+   *  stats, the breakdown table, charts) want the full width; simple tiles
+   *  pair up side by side. Defaults to false (half-width). */
+  fullWidth?: boolean;
 }
 
 /**
@@ -39,6 +45,7 @@ export const DASHBOARD_WIDGETS: DashboardWidget[] = [
   {
     id: "collection-hero",
     title: "Collection Summary",
+    fullWidth: true,
     render: ({ data }) => (
       <Card
         size="small"
@@ -62,6 +69,13 @@ export const DASHBOARD_WIDGETS: DashboardWidget[] = [
           </Tag>
         </div>
         <Row gutter={[12, 12]}>
+          <Col xs={12} md={6}>
+            <SummaryStat
+              label="Collected Today"
+              value={lakh(data.collection.today_amount)}
+              accent="#13c2c2"
+            />
+          </Col>
           <Col xs={12} md={6}>
             <SummaryStat
               label="Collection MTD"
@@ -112,6 +126,16 @@ export const DASHBOARD_WIDGETS: DashboardWidget[] = [
     ),
   },
   {
+    // Previously the only chart in the entire product, and it sat dead last
+    // on a page that's otherwise ~30 numbers in a single column. Moved
+    // right after the hero stats so there's a visual anchor before the
+    // wall of figures, not after it.
+    id: "overview-chart",
+    title: "Monthly Overview Chart",
+    fullWidth: true,
+    render: ({ filters }) => <OverviewChart filters={filters} />,
+  },
+  {
     id: "metric-gauge",
     title: "Metric Gauge",
     render: ({ data, amountMode, activeMetric, setActiveMetric }) => (
@@ -137,6 +161,7 @@ export const DASHBOARD_WIDGETS: DashboardWidget[] = [
   {
     id: "metric-panel-others",
     title: "Other Metrics",
+    fullWidth: true,
     render: ({ data, amountMode, activeMetric }) => {
       const otherMetrics = (Object.keys(METRIC_TITLES) as MetricKey[]).filter(
         (k) => k !== activeMetric,
@@ -216,26 +241,35 @@ export const DASHBOARD_WIDGETS: DashboardWidget[] = [
     render: ({ filters }) => <BucketMismatchCard filters={filters} />,
   },
   {
+    id: "exception-payments",
+    title: "Payments Above Due Amount",
+    fullWidth: true,
+    render: ({ filters }) => <ExceptionPaymentsCard filters={filters} />,
+  },
+  {
     id: "breakdown-table",
     title: "Dimension Breakdown",
+    fullWidth: true,
     render: ({ filters }) => <BreakdownTable filters={filters} />,
   },
   {
     id: "trail-analytics",
     title: "Trail / Disposition Analytics",
+    fullWidth: true,
     render: ({ filters }) => <TrailAnalyticsCard filters={filters} />,
-  },
-  {
-    id: "overview-chart",
-    title: "Monthly Overview Chart",
-    render: ({ filters }) => <OverviewChart filters={filters} />,
   },
 ];
 
 export const DASHBOARD_WIDGET_IDS = DASHBOARD_WIDGETS.map((w) => w.id);
 
 /** Widgets that only make sense for managers (agents get a self-scoped, filter-free view). */
-const MANAGER_ONLY_WIDGET_IDS = new Set(["recalled-tile", "bucket-movement-card", "bucket-mismatch", "breakdown-table"]);
+const MANAGER_ONLY_WIDGET_IDS = new Set([
+  "recalled-tile",
+  "bucket-movement-card",
+  "bucket-mismatch",
+  "breakdown-table",
+  "exception-payments",
+]);
 
 export interface WidgetLayoutEntry {
   id: string;

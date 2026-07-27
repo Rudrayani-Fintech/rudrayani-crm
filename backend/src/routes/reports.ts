@@ -17,6 +17,7 @@ import {
   dashboard,
   depositsByRange,
   dimensionBreakdown,
+  exceptionPayments,
   filterOptions,
   overview,
   recallReport,
@@ -205,8 +206,8 @@ const dateRangeSchema = z.object({
 });
 
 /**
- * Shared scope clamp for the three free-date-range endpoints below
- * (/deposits-range, /trail, /trend). These used to hand-roll their own
+ * Shared scope clamp for the free-date-range endpoints below
+ * (/deposits-range, /exceptions, /trail, /trend). These used to hand-roll their own
  * "if full view: use filters as-is" branch, which never clamped branch_id
  * for a branch_manager (who holds reports.view, so hasFullView() is true
  * for them too) -- a branch_manager could see, or explicitly request,
@@ -234,6 +235,17 @@ router.get(
     const scope = await resolveDateRangeScope(req, filters);
     const result = await depositsByRange(req.user!.agency_id, from, to, scope);
     res.json(result);
+  }),
+);
+
+/** Payments recorded above the customer's due amount -- a spot-check list, not a total. */
+router.get(
+  "/exceptions",
+  asyncHandler(async (req, res) => {
+    const { from, to, ...filters } = dateRangeSchema.parse(req.query);
+    const scope = await resolveDateRangeScope(req, filters);
+    const rows = await exceptionPayments(req.user!.agency_id, from, to, scope);
+    res.json({ rows });
   }),
 );
 
@@ -544,8 +556,15 @@ router.get(
       "Content-Disposition",
       `attachment; filename=dashboard-${result.month}.xlsx`,
     );
-    const buffer = await wb.xlsx.writeBuffer();
-    res.send(Buffer.from(buffer));
+    // Streamed straight to the response instead of writeBuffer() + res.send()
+    // -- the whole workbook no longer has to sit fully materialized in
+    // process memory at once, and the client starts receiving bytes as soon
+    // as the first sheet is ready rather than only after every sheet is
+    // built. All the report queries above already ran to completion before
+    // this point, so a write failure here is a client/network issue, not
+    // something a retry at this layer could fix.
+    await wb.xlsx.write(res);
+    if (!res.writableEnded) res.end();
   }),
 );
 

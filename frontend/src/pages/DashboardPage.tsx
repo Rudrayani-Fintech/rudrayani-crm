@@ -193,6 +193,12 @@ export default function DashboardPage() {
 
   return (
     <div>
+      <style>{`
+        @media (max-width: 900px) {
+          .dashboard-widget-grid { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+
       {hasPermission("companies.manage") && <SetupChecklist />}
       {hasPermission("customers.allocate") && <PendingApprovalsAlert />}
 
@@ -368,14 +374,28 @@ export default function DashboardPage() {
           <Spin size="large" />
         </div>
       ) : (
-        <Space direction="vertical" size={16} style={{ width: "100%", display: "flex" }}>
+        // Previously every widget rendered full-width in a single vertical
+        // Space, regardless of how small its own content was -- a 3-stat
+        // "Deposits" card took the same full row as the breakdown table.
+        // Widgets opt into full width via fullWidth; everything else pairs
+        // up two-to-a-row on wide screens and stacks on narrow ones.
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+            gap: 16,
+          }}
+          className="dashboard-widget-grid"
+        >
           {(() => {
             const ctx: DashboardRenderCtx = { data, filters, amountMode, activeMetric, setActiveMetric };
             return applyLayout(prefs.layout, isManager).map((w) => (
-              <div key={w.id}>{w.render(ctx)}</div>
+              <div key={w.id} style={w.fullWidth ? { gridColumn: "1 / -1" } : undefined}>
+                {w.render(ctx)}
+              </div>
             ));
           })()}
-        </Space>
+        </div>
       )}
 
       <DashboardCustomizer

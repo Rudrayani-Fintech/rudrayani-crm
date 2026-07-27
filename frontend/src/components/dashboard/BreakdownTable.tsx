@@ -47,12 +47,16 @@ export default function BreakdownTable({
   filters,
   defaultDimension = "product",
   onRowClick,
+  onRowsChange,
 }: {
   filters: DashboardFilters;
   defaultDimension?: Dimension;
   /** Optional click-through (Management Dashboard's branch→team→agent drill-down). Rows for
    *  dimensions without a stable id (product/bucket, key is null) are not clickable. */
   onRowClick?: (dimension: Dimension, row: BreakdownRow) => void;
+  /** Lets a parent (the Reports page's CSV export) see the current rows/dimension without
+   *  duplicating the fetch itself. */
+  onRowsChange?: (rows: BreakdownRow[], dimension: Dimension) => void;
 }) {
   const [dimension, setDimension] = useState<Dimension>(defaultDimension);
   const [rows, setRows] = useState<BreakdownRow[]>([]);
@@ -68,7 +72,9 @@ export default function BreakdownTable({
     api
       .get("/reports/breakdown", { params })
       .then((res) => {
-        if (!cancelled) setRows(res.data.rows);
+        if (cancelled) return;
+        setRows(res.data.rows);
+        onRowsChange?.(res.data.rows, dimension);
       })
       .catch((err) => {
         if (!cancelled) message.error(errorMessage(err));
@@ -81,6 +87,9 @@ export default function BreakdownTable({
     return () => {
       cancelled = true;
     };
+    // onRowsChange intentionally excluded -- an inline callback from the
+    // parent must not itself trigger a refetch, only dimension/filters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dimension, filters]);
 
   return (

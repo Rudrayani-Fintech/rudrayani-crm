@@ -96,6 +96,11 @@ export default function AppLayout() {
       icon: <BarChartOutlined />,
       label: <Link to="/management-dashboard">Management Dashboard</Link>,
     },
+    hasPermission("reports.view") && {
+      key: "/reports",
+      icon: <FileSearchOutlined />,
+      label: <Link to="/reports">Reports</Link>,
+    },
     // Shown to anyone who personally logs calls -- not just individual
     // contributors. Branch managers/ops managers hold customers.allocate
     // too, but still need their own properly-scoped book (GET /worklist is

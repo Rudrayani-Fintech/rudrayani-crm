@@ -18,28 +18,28 @@ ALTER TABLE payments ADD COLUMN receipt_no TEXT UNIQUE;
 -- branch/FY rather than assignment order.
 DO $$
 DECLARE
-  p RECORD;
+  pmt_rec RECORD;
   branch_name TEXT;
   code TEXT;
   fy TEXT;
   scope TEXT;
   seq INT;
 BEGIN
-  FOR p IN
+  FOR pmt_rec IN
     SELECT p.id, p.paid_at, u.branch_id
       FROM payments p
       JOIN users u ON u.id = p.collected_by_user_id
      ORDER BY p.paid_at ASC
   LOOP
-    SELECT b.name INTO branch_name FROM branches b WHERE b.id = p.branch_id;
+    SELECT b.name INTO branch_name FROM branches b WHERE b.id = pmt_rec.branch_id;
     code := COALESCE(NULLIF(regexp_replace(upper(branch_name), '[^A-Z0-9]', '', 'g'), ''), 'GEN');
     code := left(code, 4);
     -- Indian financial year: Apr 1 - Mar 31.
-    fy := CASE WHEN EXTRACT(MONTH FROM p.paid_at AT TIME ZONE 'Asia/Kolkata') >= 4
-      THEN right((EXTRACT(YEAR FROM p.paid_at AT TIME ZONE 'Asia/Kolkata'))::text, 2)
-           || '-' || right((EXTRACT(YEAR FROM p.paid_at AT TIME ZONE 'Asia/Kolkata') + 1)::text, 2)
-      ELSE right((EXTRACT(YEAR FROM p.paid_at AT TIME ZONE 'Asia/Kolkata') - 1)::text, 2)
-           || '-' || right((EXTRACT(YEAR FROM p.paid_at AT TIME ZONE 'Asia/Kolkata'))::text, 2)
+    fy := CASE WHEN EXTRACT(MONTH FROM pmt_rec.paid_at AT TIME ZONE 'Asia/Kolkata') >= 4
+      THEN right((EXTRACT(YEAR FROM pmt_rec.paid_at AT TIME ZONE 'Asia/Kolkata'))::text, 2)
+           || '-' || right((EXTRACT(YEAR FROM pmt_rec.paid_at AT TIME ZONE 'Asia/Kolkata') + 1)::text, 2)
+      ELSE right((EXTRACT(YEAR FROM pmt_rec.paid_at AT TIME ZONE 'Asia/Kolkata') - 1)::text, 2)
+           || '-' || right((EXTRACT(YEAR FROM pmt_rec.paid_at AT TIME ZONE 'Asia/Kolkata'))::text, 2)
     END;
     scope := 'RD/' || code || '/' || fy;
 
@@ -47,7 +47,7 @@ BEGIN
       ON CONFLICT (scope_key) DO UPDATE SET next_seq = receipt_sequences.next_seq + 1
       RETURNING next_seq INTO seq;
 
-    UPDATE payments SET receipt_no = scope || '/' || lpad(seq::text, 5, '0') WHERE id = p.id;
+    UPDATE payments SET receipt_no = scope || '/' || lpad(seq::text, 5, '0') WHERE id = pmt_rec.id;
   END LOOP;
 END $$;
 

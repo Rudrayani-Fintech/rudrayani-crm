@@ -3,6 +3,7 @@ import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/models/customer.dart';
+import '../../core/utils/friendly_error.dart';
 import 'reminders_provider.dart';
 
 /// Bottom sheet to set a follow-up reminder, optionally against a customer.
@@ -89,7 +90,7 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Could not set reminder: $e'),
+            content: Text('Could not set reminder: ${friendlyError(e)}'),
             backgroundColor: AppColors.error,
           ),
         );

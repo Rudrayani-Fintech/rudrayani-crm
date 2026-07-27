@@ -105,10 +105,18 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
   final Ref ref;
   Box<String>? _box;
   final Completer<void> _ready = Completer<void>();
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  DateTime? _lastConnectivityFlush;
   static const _uuid = Uuid();
 
   OfflineQueueNotifier(this.ref) : super(const OfflineQueueState()) {
     _init();
+  }
+
+  @override
+  void dispose() {
+    _connectivitySub?.cancel();
+    super.dispose();
   }
 
   Future<void> _init() async {
@@ -116,9 +124,22 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
     _box = await Hive.openBox<String>('offline_actions');
     _ready.complete();
     _syncStateFromBox();
-    // Flush whenever connectivity comes back (and once at startup).
-    Connectivity().onConnectivityChanged.listen((results) {
-      if (results.any((r) => r != ConnectivityResult.none)) flush();
+    // Flush whenever connectivity comes back (and once at startup). The
+    // subscription was never cancelled (leaked on notifier disposal), and
+    // a captive portal or flaky signal bouncing between "connected" and
+    // "none" could fire this many times a second -- flush() itself is
+    // guarded against overlapping runs, but each connectivity blip still
+    // wasted a real network attempt. A short debounce collapses a burst of
+    // events into one flush instead of one per blip.
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
+      if (!results.any((r) => r != ConnectivityResult.none)) return;
+      final now = DateTime.now();
+      if (_lastConnectivityFlush != null &&
+          now.difference(_lastConnectivityFlush!) < const Duration(seconds: 3)) {
+        return;
+      }
+      _lastConnectivityFlush = now;
+      flush();
     });
     flush();
   }

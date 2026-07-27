@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_client.dart';
 import '../auth/auth_provider.dart';
 import '../offline/read_cache.dart';
+import '../utils/friendly_error.dart';
 import 'tracking_service.dart';
 
 class AttendanceState {
@@ -190,20 +191,13 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
 
   /// A bare `'Punch-in failed: $e'` used to put raw exception text on screen
   /// (e.g. "Punch-in failed: TimeoutException after 0:00:30.000000: ...").
+  /// Delegates the general case to the shared mapper; keeps the one
+  /// GPS-specific message that doesn't belong in a generic API-error util.
   static String _friendlyError(Object e) {
-    if (e is DioException) {
-      if (e.type == DioExceptionType.connectionTimeout ||
-          e.type == DioExceptionType.receiveTimeout ||
-          e.type == DioExceptionType.connectionError) {
-        return 'No network connection — try again once you have signal.';
-      }
-      final serverMsg = e.response?.data is Map ? e.response?.data['error'] as String? : null;
-      return serverMsg ?? 'Something went wrong. Please try again.';
-    }
-    if (e.toString().contains('TimeoutException')) {
+    if (e is! DioException && e.toString().contains('TimeoutException')) {
       return 'Could not get a GPS fix in time. Try again, or move somewhere with a clearer view of the sky.';
     }
-    return 'Something went wrong. Please try again.';
+    return friendlyError(e);
   }
 }
 

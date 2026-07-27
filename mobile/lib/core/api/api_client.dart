@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../auth/auth_provider.dart';
 
 // --dart-define=API_URL=... always wins over the build-mode default below,
 // but is itself overridden at runtime by a saved server-URL override (see
@@ -73,14 +74,49 @@ class ApiClient {
       _dio.post<T>(path, data: data);
 }
 
+/// One in-flight refresh at a time, shared by every concurrent 401. Without
+/// this, home_shell.dart's IndexedStack firing 6-8 parallel requests at
+/// login could trigger several concurrent refreshes racing against a
+/// single-use refresh token -- and since a reused refresh token is now
+/// treated as a compromise signal server-side (revokes every session for
+/// the user), an unmutexed refresh could log the agent out mid-shift from
+/// nothing more than opening the app.
+Future<String>? _refreshInFlight;
+
+Future<String> _refresh(String refreshToken) {
+  return _refreshInFlight ??= () async {
+    try {
+      final refreshDio = Dio(BaseOptions(baseUrl: '$effectiveBaseUrl/api'));
+      final res = await refreshDio.post(
+        '/auth/refresh',
+        data: {'refresh_token': refreshToken},
+      );
+      final newAccess = res.data['access_token'] as String;
+      final newRefresh = res.data['refresh_token'] as String?;
+      await _storage.write(key: _kAccessToken, value: newAccess);
+      if (newRefresh != null) {
+        await _storage.write(key: _kRefreshToken, value: newRefresh);
+      }
+      return newAccess;
+    } finally {
+      _refreshInFlight = null;
+    }
+  }();
+}
+
 /// Also used by the background tracking isolate (tracking_task.dart), which
-/// can't reach Riverpod providers — tokens come from secure storage either way.
-Dio buildDio() {
+/// can't reach Riverpod providers -- [onSessionExpired] is omitted there
+/// (nothing to notify) and only wired up by apiClientProvider below.
+Dio buildDio({void Function()? onSessionExpired}) {
   final dio = Dio(
     BaseOptions(
       baseUrl: '$effectiveBaseUrl/api',
-      connectTimeout: const Duration(seconds: 10),
+      // 10s was too aggressive on 2G, where a slow-starting connection
+      // could still complete given more time; multipart photo/signature
+      // uploads had no sendTimeout at all, so a stalled upload just hung.
+      connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 30),
+      sendTimeout: const Duration(seconds: 60),
     ),
   );
 
@@ -98,19 +134,7 @@ Dio buildDio() {
           final refreshToken = await _storage.read(key: _kRefreshToken);
           if (refreshToken != null) {
             try {
-              final refreshDio = Dio(
-                BaseOptions(baseUrl: '$effectiveBaseUrl/api'),
-              );
-              final res = await refreshDio.post(
-                '/auth/refresh',
-                data: {'refresh_token': refreshToken},
-              );
-              final newAccess = res.data['access_token'] as String;
-              final newRefresh = res.data['refresh_token'] as String?;
-              await _storage.write(key: _kAccessToken, value: newAccess);
-              if (newRefresh != null) {
-                await _storage.write(key: _kRefreshToken, value: newRefresh);
-              }
+              final newAccess = await _refresh(refreshToken);
               // Retry original request
               final opts = error.requestOptions;
               opts.headers['Authorization'] = 'Bearer $newAccess';
@@ -118,6 +142,11 @@ Dio buildDio() {
               return handler.resolve(retried);
             } catch (_) {
               await clearTokens();
+              // Previously this cleared storage without telling anyone --
+              // authProvider's in-memory state stayed "logged in", so the
+              // agent kept tapping into 401s on a session that was already
+              // dead, with no path back to the login screen.
+              onSessionExpired?.call();
             }
           }
         }
@@ -129,7 +158,20 @@ Dio buildDio() {
   return dio;
 }
 
-final apiClientProvider = Provider<ApiClient>((ref) => ApiClient(buildDio()));
+// Explicit type on both sides: apiClientProvider's closure reads
+// authProvider (for the session-expiry callback) while authProvider's own
+// constructor reads apiClientProvider -- the two files import each other,
+// and without an explicit annotation here Dart's top-level type inference
+// can't resolve the cycle.
+final Provider<ApiClient> apiClientProvider = Provider<ApiClient>((ref) {
+  // A plain closure, evaluated lazily on the first actual session-expiry
+  // event -- never at provider construction time, so this doesn't create a
+  // circular *construction* dependency with authProvider (which itself
+  // reads apiClientProvider) even though the two files import each other.
+  return ApiClient(
+    buildDio(onSessionExpired: () => ref.read(authProvider.notifier).logout()),
+  );
+});
 
 Future<void> saveTokens(String access, String refresh) async {
   await Future.wait([

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/friendly_error.dart';
 import '../../core/utils/parser.dart';
 import 'package:go_router/go_router.dart';
 import 'dashboard_widgets.dart';
@@ -67,7 +68,7 @@ class TelecallerDashboardScreen extends ConsumerWidget {
         onRefresh: () async => _refresh(ref),
         child: dash.when(
           loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => ErrorState(message: 'Could not load your dashboard.\n$e', onRetry: () => _refresh(ref)),
+          error: (e, _) => ErrorState(message: 'Could not load your dashboard.\n${friendlyError(e)}', onRetry: () => _refresh(ref)),
           data: (d) {
             final collection = d['collection'] as Map<String, dynamic>;
             final mtd = parseDouble(collection['mtd_amount']) ?? 0.0;
@@ -93,7 +94,10 @@ class TelecallerDashboardScreen extends ConsumerWidget {
                     padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
                     child: Center(child: CircularProgressIndicator()),
                   ),
-                  error: (e, _) => InlineErrorNote(message: 'Calls: $e'),
+                  error: (e, _) => InlineErrorNote(
+                    message: 'Calls: ${friendlyError(e)}',
+                    onRetry: () => ref.invalidate(teleTrailProvider),
+                  ),
                   data: (t) {
                     final total = parseInt(t['total_trails']) ?? 0;
                     final byResult = (t['by_result_code'] as List).cast<Map<String, dynamic>>();
@@ -116,7 +120,10 @@ class TelecallerDashboardScreen extends ConsumerWidget {
                 const DashboardSectionHeader('PTP Created / Kept / Broken (This Month)'),
                 trail.when(
                   loading: () => const SizedBox.shrink(),
-                  error: (e, _) => InlineErrorNote(message: 'PTP summary: $e'),
+                  error: (e, _) => InlineErrorNote(
+                    message: 'PTP summary: ${friendlyError(e)}',
+                    onRetry: () => ref.invalidate(teleTrailProvider),
+                  ),
                   data: (t) => DashboardStatGrid(cards: [
                     DashboardStatCard(
                         label: 'Created',

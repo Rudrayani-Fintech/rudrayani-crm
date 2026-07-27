@@ -187,7 +187,11 @@ class _PtpTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final promised = DateTime.parse(ptp['promised_date'] as String);
-    final overdue = promised.isBefore(DateTime.now());
+    // Date-only comparison -- comparing against DateTime.now() directly
+    // (which carries a time-of-day) marked a PTP due *today* as overdue
+    // from 00:00 onward.
+    final today = DateTime.now();
+    final overdue = promised.isBefore(DateTime(today.year, today.month, today.day));
     final amount = parseDouble(ptp['amount']);
     final textColor = heroMode ? AppColors.onPrimary : null;
 

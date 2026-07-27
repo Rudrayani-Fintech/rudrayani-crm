@@ -6,10 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/offline_queue.dart';
+import '../../core/utils/friendly_error.dart';
+import '../../core/utils/messaging.dart';
 import '../worklist/worklist_provider.dart';
 
 class PaymentScreen extends ConsumerStatefulWidget {
@@ -60,9 +61,42 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     if (picked != null) _dateCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
   }
 
+  /// Strips thousand-separator commas (e.g. from a pasted "1,000") before
+  /// parsing -- double.tryParse rejects them outright otherwise.
+  double? _parseAmount(String text) => double.tryParse(text.replaceAll(',', '').trim());
+
+  Future<void> _confirmCloseCustomer() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Mark customer as Closed?'),
+        content: const Text(
+          'This clears the assignment and sets the loan status to closed. This cannot be undone from here.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes, close'),
+          ),
+        ],
+      ),
+    );
+    if (mounted && confirmed == true) setState(() => _closeCustomer = true);
+  }
+
+  void _applyAmountChip(double value) {
+    setState(() {
+      _amountCtrl.text = value == value.roundToDouble()
+          ? value.toStringAsFixed(0)
+          : value.toStringAsFixed(2);
+      _confirmedExceedsDue = false;
+    });
+  }
+
   Future<void> _submit() async {
     if (_amountCtrl.text.isEmpty) { setState(() => _error = 'Amount is required'); return; }
-    final amount = double.tryParse(_amountCtrl.text);
+    final amount = _parseAmount(_amountCtrl.text);
     if (amount == null || amount <= 0) { setState(() => _error = 'Enter a valid positive amount'); return; }
 
     final dueAmount = ref.read(customerByIdProvider(widget.customerId)).valueOrNull?.dueAmount;
@@ -144,19 +178,10 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
         }
       }
     } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('DioException', '').trim());
+      setState(() => _error = friendlyError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  /// India-only heuristic matching the rest of this app's phone handling
-  /// (see customer_detail_screen.dart's tel: intent): a bare 10-digit
-  /// number gets the country code prefixed for wa.me, which requires it.
-  String _whatsappDigits(String mobileNumber) {
-    final digits = mobileNumber.replaceAll(RegExp(r'\D'), '');
-    if (digits.length == 10) return '91$digits';
-    return digits;
   }
 
   Future<void> _shareReceipt({
@@ -166,24 +191,12 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     required String? mobileNumber,
     required bool viaWhatsApp,
   }) async {
+    if (mobileNumber == null) return;
     final message = 'Receipt $receiptNo\n'
         '₹${amount.toStringAsFixed(2)} received'
         '${customerName != null ? ' from $customerName' : ''}.\n'
         'Thank you — Rudrayani Fintech';
-    final uri = viaWhatsApp && mobileNumber != null
-        ? Uri.parse('https://wa.me/${_whatsappDigits(mobileNumber)}?text=${Uri.encodeComponent(message)}')
-        : Uri(
-            scheme: 'sms',
-            path: mobileNumber,
-            queryParameters: {'body': message},
-          );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(viaWhatsApp ? 'WhatsApp is not installed' : 'Cannot open messaging app')),
-      );
-    }
+    await shareMessage(context, mobileNumber: mobileNumber, message: message, viaWhatsApp: viaWhatsApp);
   }
 
   Future<void> _showReceiptSheet({
@@ -266,8 +279,10 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   @override
   Widget build(BuildContext context) {
     final customerAsync = ref.watch(customerByIdProvider(widget.customerId));
-    final dueAmount = customerAsync.valueOrNull?.dueAmount;
-    final enteredAmount = double.tryParse(_amountCtrl.text);
+    final customer = customerAsync.valueOrNull;
+    final dueAmount = customer?.dueAmount;
+    final emi = customer?.emi;
+    final enteredAmount = _parseAmount(_amountCtrl.text);
     final exceedsDue = dueAmount != null && enteredAmount != null && enteredAmount > dueAmount;
     return Scaffold(
       appBar: AppBar(
@@ -297,6 +312,25 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
               ),
               onChanged: (_) => setState(() => _confirmedExceedsDue = false),
             ),
+            if (emi != null || dueAmount != null) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  if (emi != null && emi > 0)
+                    ActionChip(
+                      label: Text('Full EMI ₹${emi.toStringAsFixed(0)}', style: const TextStyle().tabular),
+                      onPressed: () => _applyAmountChip(emi),
+                    ),
+                  if (dueAmount != null && dueAmount > 0)
+                    ActionChip(
+                      label: Text('Full Due ₹${dueAmount.toStringAsFixed(0)}', style: const TextStyle().tabular),
+                      onPressed: () => _applyAmountChip(dueAmount),
+                    ),
+                ],
+              ),
+            ],
             if (exceedsDue) ...[
               const SizedBox(height: 8),
               Container(
@@ -410,17 +444,35 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
               title: const Text('Mark customer as Closed'),
               subtitle: const Text('Clears assignment and sets status to closed', style: TextStyle(fontSize: 12)),
               value: _closeCustomer,
-              onChanged: (v) => setState(() => _closeCustomer = v),
+              onChanged: (v) {
+                if (v) {
+                  _confirmCloseCustomer();
+                } else {
+                  setState(() => _closeCustomer = false);
+                }
+              },
               activeThumbColor: AppColors.primary,
             ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+      // Persistent save bar (design brief 3.7) -- previously the primary
+      // action sat at the bottom of a SingleChildScrollView, costing a
+      // scroll past photo proof + the close-customer toggle on every payment.
+      bottomNavigationBar: SafeArea(
+        minimum: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(_error!, style: const TextStyle(color: AppColors.error)),
               ),
-            const SizedBox(height: 8),
             SizedBox(
               height: AppDimens.tapTarget,
+              width: double.infinity,
               child: ElevatedButton.icon(
                 icon: _loading
                     ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onPrimary))

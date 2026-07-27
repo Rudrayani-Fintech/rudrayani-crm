@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
+import '../../core/utils/friendly_error.dart';
+import '../../core/utils/messaging.dart';
 import '../../core/widgets/state_views.dart';
 import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
@@ -56,7 +58,7 @@ class CustomerDetailScreen extends ConsumerWidget {
           foregroundColor: AppColors.onPrimary,
         ),
         body: ErrorState(
-          message: 'Could not load this customer.\n$err',
+          message: 'Could not load this customer.\n${friendlyError(err)}',
           onRetry: () => ref.invalidate(customerByIdProvider(customerId)),
         ),
       ),
@@ -115,6 +117,32 @@ class _CustomerDetailBody extends ConsumerWidget {
     }
   }
 
+  /// Composes a payment-reminder message from whatever's on hand (active
+  /// PTP first, else the plain due amount) and lets the agent send it
+  /// straight to the customer -- WhatsApp is the primary channel in Indian
+  /// collections and was entirely absent from the app until now.
+  Future<void> _sendPaymentReminder(BuildContext context, bool viaWhatsApp) async {
+    final greeting = 'Hi ${customer.customerName},';
+    final String body;
+    if (customer.ptpDate != null) {
+      final due = DateFormat('dd MMM yyyy').format(customer.ptpDate!.toLocal());
+      body = customer.ptpAmount != null
+          ? 'this is a reminder of your promised payment of ${_rupee.format(customer.ptpAmount)} by $due.'
+          : 'this is a reminder of your promised payment by $due.';
+    } else if (customer.dueAmount != null && customer.dueAmount! > 0) {
+      body = 'this is a reminder that ${_rupee.format(customer.dueAmount)} is due on your loan '
+          '${customer.loanNumber}. Please arrange payment at the earliest.';
+    } else {
+      body = 'this is a reminder regarding your loan ${customer.loanNumber}. Please get in touch at your earliest convenience.';
+    }
+    await shareMessage(
+      context,
+      mobileNumber: customer.mobileNumber,
+      viaWhatsApp: viaWhatsApp,
+      message: '$greeting $body\nThank you — Rudrayani Fintech',
+    );
+  }
+
   Future<void> _requestReallocation(BuildContext context, WidgetRef ref) async {
     final reasonCtrl = TextEditingController();
     final reason = await showDialog<String>(
@@ -142,7 +170,18 @@ class _CustomerDetailBody extends ConsumerWidget {
         ],
       ),
     );
-    if (reason == null || reason.length < 3) return;
+    if (reason == null) return; // Cancelled -- no feedback needed.
+    if (reason.length < 3) {
+      // Previously discarded silently -- the agent typed "no" or similar,
+      // tapped Submit, and the dialog just closed with nothing sent and no
+      // indication why.
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please explain why in a few more words')),
+        );
+      }
+      return;
+    }
 
     try {
       await ref
@@ -163,7 +202,7 @@ class _CustomerDetailBody extends ConsumerWidget {
       if (context.mounted) {
         final msg = e.response?.statusCode == 409
             ? 'A request is already pending for this customer'
-            : 'Could not send the request — check your connection';
+            : friendlyError(e);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(msg), backgroundColor: AppColors.error),
         );
@@ -293,7 +332,39 @@ class _CustomerDetailBody extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Expanded(child: SizedBox()),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.chat_outlined),
+                      label: const Text('Send Reminder'),
+                      onPressed: customer.mobileNumber.isNotEmpty
+                          ? () => showModalBottomSheet(
+                                context: context,
+                                builder: (_) => SafeArea(
+                                  child: Wrap(
+                                    children: [
+                                      ListTile(
+                                        leading: const Icon(Icons.chat, color: AppColors.success),
+                                        title: const Text('Send via WhatsApp'),
+                                        onTap: () {
+                                          Navigator.of(context).pop();
+                                          _sendPaymentReminder(context, true);
+                                        },
+                                      ),
+                                      ListTile(
+                                        leading: const Icon(Icons.sms),
+                                        title: const Text('Send via SMS'),
+                                        onTap: () {
+                                          Navigator.of(context).pop();
+                                          _sendPaymentReminder(context, false);
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              )
+                          : null,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
@@ -379,7 +450,10 @@ class _CustomerDetailBody extends ConsumerWidget {
                     ),
                     _Row(
                       'Promised Date',
-                      DateFormat('dd MMM yyyy').format(customer.ptpDate!),
+                      // Missing .toLocal() here (unlike lastCallAt above)
+                      // rendered an evening-IST PTP one day early when the
+                      // server sends a UTC instant.
+                      DateFormat('dd MMM yyyy').format(customer.ptpDate!.toLocal()),
                     ),
                   ],
                 ),

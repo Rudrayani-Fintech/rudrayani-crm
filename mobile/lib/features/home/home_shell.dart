@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/sync_banner.dart';
 import '../dashboard/branch_manager_dashboard_screen.dart';
 import '../dashboard/field_executive_dashboard_screen.dart';
 import '../dashboard/telecaller_dashboard_screen.dart';
@@ -103,7 +104,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ];
 
     return Scaffold(
-      body: IndexedStack(index: _tab, children: screens),
+      body: Column(
+        children: [
+          const SyncBanner(),
+          Expanded(child: IndexedStack(index: _tab, children: screens)),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),

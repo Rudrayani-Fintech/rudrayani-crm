@@ -75,8 +75,17 @@ router.post(
     const files = req.files as Record<string, Express.Multer.File[]> | undefined;
     const photo = files?.photo?.[0];
     const signature = files?.signature?.[0];
-    if (!photo && !signature) {
-      throw new HttpError(400, "A visit needs at least a photo or a signature");
+    // The most common field outcome -- door locked, nobody home -- has
+    // nothing to photograph. Previously this forced the agent to either
+    // fabricate a photo or abandon recording the visit at all. A visit with
+    // no photo/signature is now allowed as long as the remark actually
+    // explains why (mirrors the mobile "Could not access" outcome, which
+    // requires the same remark before it lets the agent skip the photo).
+    if (!photo && !signature && !(body.remark && body.remark.length >= 3)) {
+      throw new HttpError(
+        400,
+        "A visit needs a photo, or a remark explaining why there isn't one",
+      );
     }
 
     const photoKey = await saveImage(photo, "visits");

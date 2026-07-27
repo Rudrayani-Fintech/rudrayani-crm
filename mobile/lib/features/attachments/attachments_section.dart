@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../core/offline/offline_queue.dart';
+import '../../core/utils/friendly_error.dart';
+import '../../core/widgets/state_views.dart';
 import 'attachments_provider.dart';
 
 final _date = DateFormat('dd MMM yyyy');
@@ -56,7 +58,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Upload failed: $e'),
+            content: Text('Upload failed: ${friendlyError(e)}'),
             backgroundColor: AppColors.error,
           ),
         );
@@ -90,7 +92,7 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
     } catch (e) {
       final msg = isOfflineError(e)
           ? 'PDF upload needs a connection — try again when online'
-          : 'Upload failed: $e';
+          : 'Upload failed: ${friendlyError(e)}';
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(msg), backgroundColor: AppColors.error),
@@ -137,9 +139,9 @@ class _AttachmentsSectionState extends ConsumerState<AttachmentsSection> {
                 padding: EdgeInsets.symmetric(vertical: 8),
                 child: LinearProgressIndicator(),
               ),
-              error: (e, _) => Text(
-                'Could not load documents: $e',
-                style: const TextStyle(fontSize: 12, color: AppColors.error),
+              error: (e, _) => InlineErrorNote(
+                message: 'Could not load documents: ${friendlyError(e)}',
+                onRetry: () => ref.invalidate(attachmentsProvider(widget.customerId)),
               ),
               data: (list) => list.isEmpty
                   ? const Padding(

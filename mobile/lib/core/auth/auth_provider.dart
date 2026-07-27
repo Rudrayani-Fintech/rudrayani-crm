@@ -89,6 +89,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
   bool get isFieldAgent => state.capabilities.contains('field_agent');
 }
 
-final authProvider = StateNotifierProvider<AuthNotifier, AuthState>(
+// Explicit type: see the matching note on apiClientProvider in
+// api_client.dart -- the two files import each other, which needs an
+// explicit annotation on at least one side to break the type-inference cycle.
+final StateNotifierProvider<AuthNotifier, AuthState> authProvider = StateNotifierProvider<AuthNotifier, AuthState>(
   (ref) => AuthNotifier(ref.watch(apiClientProvider)),
 );

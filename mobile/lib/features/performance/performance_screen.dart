@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/friendly_error.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/parser.dart';
 
@@ -54,7 +55,7 @@ class PerformanceScreen extends ConsumerWidget {
       body: data.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ErrorState(
-          message: 'Could not load your performance.\n$e',
+          message: 'Could not load your performance.\n${friendlyError(e)}',
           onRetry: () => ref.invalidate(performanceProvider),
         ),
         data: (d) => RefreshIndicator(

@@ -38,12 +38,20 @@ export default function RecalledStatTile({ filters }: { filters: DashboardFilter
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const params: Record<string, string> = { month: filters.month };
     if (filters.company_id) params.company_id = filters.company_id;
     api
       .get("/reports/recalls", { params })
-      .then((res) => setData(res.data))
-      .catch((err) => message.error(errorMessage(err)));
+      .then((res) => {
+        if (!cancelled) setData(res.data);
+      })
+      .catch((err) => {
+        if (!cancelled) message.error(errorMessage(err));
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [filters.month, filters.company_id]);
 
   return (

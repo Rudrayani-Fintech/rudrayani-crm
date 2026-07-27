@@ -24,6 +24,7 @@ export default function OverviewChart({ filters }: { filters: DashboardFilters }
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const params: Record<string, string> = { months: viewAll ? "all" : "3" };
     for (const key of ["company_id", "branch_id", "team_id", "agent_id", "product", "bucket"] as const) {
@@ -32,11 +33,19 @@ export default function OverviewChart({ filters }: { filters: DashboardFilters }
     api
       .get("/reports/overview", { params })
       .then((res) => {
+        if (cancelled) return;
         setPoints(res.data.points);
         setTotal(res.data.total);
       })
-      .catch((err) => message.error(errorMessage(err)))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!cancelled) message.error(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [viewAll, filters]);
 
   const data = points.map((p) => ({

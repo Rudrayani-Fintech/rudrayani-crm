@@ -33,6 +33,10 @@ export default function ReallocationRequestsPage() {
   const [approveTarget, setApproveTarget] = useState<ReallocationRequest | null>(null);
   const [newAgentId, setNewAgentId] = useState<string | undefined>(undefined);
   const [rejectTarget, setRejectTarget] = useState<ReallocationRequest | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkApproveOpen, setBulkApproveOpen] = useState(false);
+  const [bulkAgentId, setBulkAgentId] = useState<string | undefined>(undefined);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
 
   useEffect(() => {
     api.get("/employees").then((res) => {
@@ -41,7 +45,7 @@ export default function ReallocationRequestsPage() {
           (e) => e.is_active && e.capabilities.some((c) => ["telecaller", "field_agent"].includes(c)),
         ),
       );
-    });
+    }).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   const load = useCallback(async () => {
@@ -49,6 +53,7 @@ export default function ReallocationRequestsPage() {
     try {
       const res = await api.get("/reallocation-requests", { params: { status } });
       setRequests(res.data.requests);
+      setSelectedIds([]);
       if (status === "pending") setPendingCount(res.data.total);
     } catch (err) {
       message.error(errorMessage(err));
@@ -64,7 +69,8 @@ export default function ReallocationRequestsPage() {
   useEffect(() => {
     api
       .get("/reallocation-requests", { params: { status: "pending" } })
-      .then((res) => setPendingCount(res.data.total));
+      .then((res) => setPendingCount(res.data.total))
+      .catch((err) => message.error(errorMessage(err)));
   }, [requests]);
 
   const decide = async (id: string, approve: boolean, opts?: { new_agent_id?: string; note?: string }) => {
@@ -74,6 +80,31 @@ export default function ReallocationRequestsPage() {
       void load();
     } catch (err) {
       message.error(errorMessage(err));
+    }
+  };
+
+  // Mirrors Import Review's bulk-decision UX: one modal action for the
+  // whole selection instead of clicking Approve/Reject once per row.
+  const bulkDecide = async (approve: boolean, newAgentId?: string) => {
+    setBulkSubmitting(true);
+    try {
+      const res = await api.post("/reallocation-requests/bulk-decide", {
+        ids: selectedIds,
+        approve,
+        new_agent_id: newAgentId,
+      });
+      if (res.data.skipped.length > 0) {
+        message.warning(
+          `${res.data.applied.length} applied, ${res.data.skipped.length} skipped (already decided or stale)`,
+        );
+      } else {
+        message.success(approve ? "Approved" : "Rejected");
+      }
+      void load();
+    } catch (err) {
+      message.error(errorMessage(err));
+    } finally {
+      setBulkSubmitting(false);
     }
   };
 
@@ -105,10 +136,59 @@ export default function ReallocationRequestsPage() {
         </Button>
       </Space>
 
+      {status === "pending" && selectedIds.length > 0 && (
+        <Alert
+          type="info"
+          style={{ marginBottom: 12 }}
+          message={
+            <Space wrap>
+              <span>
+                <b>{selectedIds.length}</b> selected
+              </span>
+              <Button
+                type="primary"
+                icon={<CheckOutlined />}
+                onClick={() => {
+                  setBulkAgentId(undefined);
+                  setBulkApproveOpen(true);
+                }}
+              >
+                Approve Selected
+              </Button>
+              <Button
+                danger
+                icon={<CloseOutlined />}
+                loading={bulkSubmitting}
+                onClick={() =>
+                  Modal.confirm({
+                    title: `Reject ${selectedIds.length} request(s)?`,
+                    content: "Each customer stays with their current agent.",
+                    okText: "Reject",
+                    okButtonProps: { danger: true },
+                    onOk: () => bulkDecide(false),
+                  })
+                }
+              >
+                Reject Selected
+              </Button>
+            </Space>
+          }
+        />
+      )}
+
       <Table<ReallocationRequest>
         rowKey="id"
         loading={loading}
         dataSource={requests}
+        rowSelection={
+          status === "pending"
+            ? {
+                selectedRowKeys: selectedIds,
+                onChange: (keys) => setSelectedIds(keys as string[]),
+                getCheckboxProps: (r) => ({ disabled: r.status !== "pending" }),
+              }
+            : undefined
+        }
         pagination={{ pageSize: 20 }}
         scroll={{ x: status !== "pending" ? 1500 : 1230 }}
         columns={[
@@ -202,6 +282,31 @@ export default function ReallocationRequestsPage() {
           allowClear
           value={newAgentId}
           onChange={(v) => setNewAgentId(v ?? undefined)}
+          options={agents.map((a) => ({ value: a.id, label: a.full_name }))}
+        />
+      </Modal>
+
+      <Modal
+        title={`Approve ${selectedIds.length} reallocation request(s)?`}
+        open={bulkApproveOpen}
+        onCancel={() => setBulkApproveOpen(false)}
+        confirmLoading={bulkSubmitting}
+        onOk={async () => {
+          await bulkDecide(true, bulkAgentId);
+          setBulkApproveOpen(false);
+        }}
+        okText="Approve"
+      >
+        <Typography.Paragraph type="secondary">
+          Reassign every selected customer to one agent, or leave blank to return all of them to the
+          unallocated pool.
+        </Typography.Paragraph>
+        <Select
+          style={{ width: "100%" }}
+          title="Return to unallocated pool" placeholder="Return to unallocated pool"
+          allowClear
+          value={bulkAgentId}
+          onChange={(v) => setBulkAgentId(v ?? undefined)}
           options={agents.map((a) => ({ value: a.id, label: a.full_name }))}
         />
       </Modal>

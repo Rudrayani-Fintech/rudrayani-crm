@@ -28,6 +28,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useThemeMode } from "../theme/ThemeModeProvider";
 import { CAPABILITY_LABELS } from "../types";
 import AlertsBell from "./AlertsBell";
+import ErrorBoundary from "./ErrorBoundary";
 
 const { Sider, Header, Content } = Layout;
 
@@ -256,15 +257,17 @@ export default function AppLayout() {
           </Space>
         </Header>
         <Content style={{ margin: 24 }}>
-          <Suspense
-            fallback={
-              <div style={{ display: "grid", placeItems: "center", height: 320 }}>
-                <Spin size="large" />
-              </div>
-            }
-          >
-            <Outlet />
-          </Suspense>
+          <ErrorBoundary key={location.pathname}>
+            <Suspense
+              fallback={
+                <div style={{ display: "grid", placeItems: "center", height: 320 }}>
+                  <Spin size="large" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </ErrorBoundary>
         </Content>
       </Layout>
     </Layout>

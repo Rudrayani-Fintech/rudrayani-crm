@@ -3,6 +3,7 @@ import { DownloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { downloadCsv } from "../utils/csv";
 import type { Branch, Team } from "../types";
 
 const { RangePicker } = DatePicker;
@@ -41,6 +42,7 @@ export default function AttendancePage() {
   const [agentId, setAgentId] = useState<string | undefined>();
   const [onDutyOnly, setOnDutyOnly] = useState(false);
   const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     Promise.all([
@@ -54,7 +56,7 @@ export default function AttendancePage() {
         (emp.data.employees as { id: string; full_name: string; is_active: boolean }[])
           .filter((e) => e.is_active),
       );
-    });
+    }).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   const load = useCallback(async (p = 1) => {
@@ -72,6 +74,10 @@ export default function AttendancePage() {
       if (onDutyOnly) params.on_duty_only = "true";
       const res = await api.get("/attendance-records", { params });
       setRecords(res.data.records);
+      // Previously absent from the response, so AntD sized pagination off
+      // dataSource.length (max 100) and page 2 was unreachable no matter
+      // how many records actually existed.
+      setTotal(res.data.total);
       setPage(p);
     } catch (err) {
       message.error(errorMessage(err));
@@ -130,26 +136,21 @@ export default function AttendancePage() {
         </Typography.Title>
         <Button
           icon={<DownloadOutlined />}
-          onClick={() => {
-            const csv = [
-              ["Employee", "Team", "Punch In", "Punch Out", "Duration (min)"].join(","),
-              ...records.map((r) =>
-                [
-                  `"${r.full_name}"`,
-                  `"${r.team_name ?? ""}"`,
-                  new Date(r.punch_in_at).toISOString(),
-                  r.punch_out_at ? new Date(r.punch_out_at).toISOString() : "",
-                  Math.round(r.duration_seconds / 60),
-                ].join(","),
-              ),
-            ].join("\n");
-            const blob = new Blob([csv], { type: "text/csv" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = `attendance-${range[0].format("YYYY-MM-DD")}-to-${range[1].format("YYYY-MM-DD")}.csv`;
-            a.click();
-            URL.revokeObjectURL(a.href);
-          }}
+          onClick={() =>
+            downloadCsv(
+              `attendance-${range[0].format("YYYY-MM-DD")}-to-${range[1].format("YYYY-MM-DD")}.csv`,
+              ["Employee", "Team", "Punch In", "Punch Out", "Duration (min)"],
+              records.map((r) => [
+                r.full_name,
+                r.team_name ?? "",
+                // Raw ISO previously landed directly in the sheet -- unreadable
+                // without a spreadsheet formula to convert it.
+                dayjs(r.punch_in_at).format("DD/MM/YYYY HH:mm"),
+                r.punch_out_at ? dayjs(r.punch_out_at).format("DD/MM/YYYY HH:mm") : "",
+                Math.round(r.duration_seconds / 60),
+              ]),
+            )
+          }
         >
           Export CSV
         </Button>
@@ -201,11 +202,17 @@ export default function AttendancePage() {
         pagination={{
           current: page,
           pageSize: 100,
+          total,
           showSizeChanger: false,
           onChange: (p) => load(p),
-          showTotal: (total) => `${total} records`,
+          showTotal: (t) => `${t} records`,
         }}
-        rowClassName={(r: AttendanceRecord) => (r.punch_out_at === null ? "on-duty-row" : "")}
+        // "on-duty-row" used to be set here with no matching CSS anywhere in
+        // the app -- a highlight that silently never rendered. onRow's
+        // inline style actually takes effect.
+        onRow={(r: AttendanceRecord) =>
+          r.punch_out_at === null ? { style: { background: "rgba(82, 196, 26, 0.08)" } } : {}
+        }
       />
     </div>
   );

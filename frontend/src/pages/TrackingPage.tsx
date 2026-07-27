@@ -29,29 +29,13 @@ import {
 } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../api/client";
+import { refreshLiveTracking, subscribeLiveTracking, type LiveAgent } from "../api/liveTracking";
 import { useAuth } from "../auth/AuthContext";
 import { alertText } from "../components/AlertsBell";
 import { palette } from "../theme/tokens";
 
 // Default map center (Pune) used only before any data arrives.
 const FALLBACK_CENTER: [number, number] = [18.5204, 73.8567];
-const LIVE_REFRESH_MS = 30_000;
-
-interface LiveAgent {
-  user_id: string;
-  full_name: string;
-  phone: string;
-  team_name: string | null;
-  branch_name: string | null;
-  punch_in_at: string;
-  last_ping_at: string | null;
-  lat: number | null;
-  lng: number | null;
-  accuracy_meters: number | null;
-  status: "moving" | "stationary" | "no_signal" | "awaiting_first_ping";
-  stationary_since: string | null;
-  stationary_minutes: number | null;
-}
 
 interface RoutePoint {
   recorded_at: string;
@@ -65,6 +49,10 @@ const STATUS_META: Record<LiveAgent["status"], { color: string; label: string }>
   no_signal: { color: palette.warning, label: "No signal" },
   awaiting_first_ping: { color: palette.textMuted, label: "Awaiting first ping" },
 };
+
+// A server-added status value the frontend hasn't been updated for yet
+// should render as an unlabeled dot, not throw and blank the whole map.
+const statusMeta = (s: string) => STATUS_META[s as LiveAgent["status"]] ?? { color: palette.textMuted, label: s };
 
 /** Colored dot marker — avoids Leaflet's bundler-hostile image icons. */
 function dotIcon(color: string, highlight: boolean) {
@@ -97,24 +85,23 @@ function LiveMap() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Dayjs | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const res = await api.get("/tracking/live");
-      setAgents(res.data.agents);
-      setThresholds(res.data.thresholds);
-      setLastUpdated(dayjs());
-    } catch {
-      message.error("Could not load live positions");
-    } finally {
+  useEffect(() => {
+    return subscribeLiveTracking((data, err) => {
       setLoading(false);
-    }
+      if (err || !data) {
+        message.error("Could not load live positions");
+        return;
+      }
+      setAgents(data.agents);
+      setThresholds(data.thresholds);
+      setLastUpdated(dayjs());
+    });
   }, []);
 
-  useEffect(() => {
-    load();
-    const t = setInterval(load, LIVE_REFRESH_MS);
-    return () => clearInterval(t);
-  }, [load]);
+  const load = useCallback(() => {
+    setLoading(true);
+    void refreshLiveTracking();
+  }, []);
 
   const located = agents.filter((a): a is LiveAgent & { lat: number; lng: number } =>
     a.lat !== null && a.lng !== null,
@@ -135,8 +122,8 @@ function LiveMap() {
       title: "Status",
       dataIndex: "status",
       render: (s: LiveAgent["status"], row: LiveAgent) => (
-        <Tag color={STATUS_META[s].color}>
-          {STATUS_META[s].label}
+        <Tag color={statusMeta(s).color}>
+          {statusMeta(s).label}
           {s === "stationary" && ` ${row.stationary_minutes} min`}
         </Tag>
       ),
@@ -204,7 +191,7 @@ function LiveMap() {
               <Marker
                 key={a.user_id}
                 position={[a.lat, a.lng]}
-                icon={dotIcon(STATUS_META[a.status].color, a.status === "stationary")}
+                icon={dotIcon(statusMeta(a.status).color, a.status === "stationary")}
               >
                 <Tooltip direction="top" offset={[0, -10]}>
                   {a.full_name}
@@ -214,7 +201,7 @@ function LiveMap() {
                   <br />
                   {a.team_name ?? "No team"} {a.branch_name ? `· ${a.branch_name}` : ""}
                   <br />
-                  Status: {STATUS_META[a.status].label}
+                  Status: {statusMeta(a.status).label}
                   {a.status === "stationary" && ` for ${a.stationary_minutes} min`}
                   <br />
                   Last ping: {a.last_ping_at ? dayjs(a.last_ping_at).format("HH:mm:ss") : "—"}

@@ -58,12 +58,15 @@ export default function CorrectionRequestsPage() {
   const [pendingCount, setPendingCount] = useState(0);
   const [approveTarget, setApproveTarget] = useState<CorrectionRequest | null>(null);
   const [rejectTarget, setRejectTarget] = useState<CorrectionRequest | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkRejecting, setBulkRejecting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.get("/correction-requests", { params: { status } });
       setRequests(res.data.requests);
+      setSelectedIds([]);
       if (status === "pending") setPendingCount(res.data.total);
     } catch (err) {
       message.error(errorMessage(err));
@@ -77,7 +80,9 @@ export default function CorrectionRequestsPage() {
   }, [load]);
 
   useEffect(() => {
-    api.get("/correction-requests", { params: { status: "pending" } }).then((res) => setPendingCount(res.data.total));
+    api.get("/correction-requests", { params: { status: "pending" } })
+      .then((res) => setPendingCount(res.data.total))
+      .catch((err) => message.error(errorMessage(err)));
   }, [requests]);
 
   const decide = async (id: string, approve: boolean, note?: string) => {
@@ -87,6 +92,30 @@ export default function CorrectionRequestsPage() {
       void load();
     } catch (err) {
       message.error(errorMessage(err));
+    }
+  };
+
+  // Bulk approve is deliberately not offered here: unlike a reallocation
+  // (one decision applied uniformly), every correction proposes a different
+  // field change on a different record -- approving a batch of unreviewed
+  // edits sight-unseen is a real risk. Bulk reject carries no such risk, so
+  // it's the one bulk action offered.
+  const bulkReject = async () => {
+    setBulkRejecting(true);
+    try {
+      const res = await api.post("/correction-requests/bulk-decide", { ids: selectedIds, approve: false });
+      if (res.data.skipped.length > 0) {
+        message.warning(
+          `${res.data.applied.length} rejected, ${res.data.skipped.length} skipped (already decided or stale)`,
+        );
+      } else {
+        message.success("Rejected");
+      }
+      void load();
+    } catch (err) {
+      message.error(errorMessage(err));
+    } finally {
+      setBulkRejecting(false);
     }
   };
 
@@ -117,10 +146,49 @@ export default function CorrectionRequestsPage() {
         </Button>
       </Space>
 
+      {status === "pending" && selectedIds.length > 0 && (
+        <Alert
+          type="warning"
+          style={{ marginBottom: 12 }}
+          message={
+            <Space wrap>
+              <span>
+                <b>{selectedIds.length}</b> selected
+              </span>
+              <Button
+                danger
+                icon={<CloseOutlined />}
+                loading={bulkRejecting}
+                onClick={() =>
+                  Modal.confirm({
+                    title: `Reject ${selectedIds.length} correction request(s)?`,
+                    content: "The original records stay exactly as they are.",
+                    okText: "Reject",
+                    okButtonProps: { danger: true },
+                    onOk: bulkReject,
+                  })
+                }
+              >
+                Reject Selected
+              </Button>
+            </Space>
+          }
+        />
+      )}
+
       <Table<CorrectionRequest>
         rowKey="id"
         loading={loading}
         dataSource={requests}
+        rowSelection={
+          status === "pending"
+            ? {
+                selectedRowKeys: selectedIds,
+                onChange: (keys) => setSelectedIds(keys as string[]),
+                getCheckboxProps: (r) => ({ disabled: r.status !== "pending" }),
+              }
+            : undefined
+        }
         pagination={{ pageSize: 20 }}
         scroll={{ x: status !== "pending" ? 1490 : 1230 }}
         columns={[

@@ -100,7 +100,10 @@ export default function MyRequestsPage() {
           {
             title: "Status",
             width: 110,
-            render: (_, r) => <Tag color={STATUS_TAG[r.status].color}>{STATUS_TAG[r.status].label}</Tag>,
+            render: (_, r) => {
+              const tag = STATUS_TAG[r.status] ?? { color: "default", label: r.status };
+              return <Tag color={tag.color}>{tag.label}</Tag>;
+            },
           },
           {
             title: "Age",

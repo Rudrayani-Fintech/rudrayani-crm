@@ -34,6 +34,10 @@ export interface User {
 
 export interface Employee extends User {
   is_active: boolean;
+  /** Only present when GET /employees is called with with_load=true (the
+   * allocation agent picker) -- omitted elsewhere to avoid paying for the
+   * subquery on every plain employee-list load. */
+  assigned_count?: number;
 }
 
 export interface NodePerformance {

@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Table, Typography, message } from "antd";
+import { Alert, Button, Form, Input, Modal, Table, Typography, message } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
@@ -9,13 +9,17 @@ import type { Company } from "../types";
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Company | "new" | null>(null);
   const [form] = Form.useForm<{ name: string }>();
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       setCompanies((await api.get("/companies")).data.companies);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -60,6 +64,17 @@ export default function CompaniesPage() {
           Add company
         </Button>
       </div>
+
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message={loadError}
+          action={<Button size="small" onClick={() => load()}>Retry</Button>}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Table
         rowKey="id"
         loading={loading}

@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Select, Table, Typography, message, Space } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Table, Typography, message, Space } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
@@ -11,11 +11,13 @@ export default function TeamsPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Team | "new" | null>(null);
   const [form] = Form.useForm<{ name: string; branch_id: string }>();
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [teamsRes, branchesRes] = await Promise.all([
         api.get("/teams"),
@@ -23,6 +25,8 @@ export default function TeamsPage() {
       ]);
       setTeams(teamsRes.data.teams);
       setBranches(branchesRes.data.branches);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -67,6 +71,17 @@ export default function TeamsPage() {
           Add team
         </Button>
       </div>
+
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message={loadError}
+          action={<Button size="small" onClick={() => load()}>Retry</Button>}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Table
         rowKey="id"
         loading={loading}

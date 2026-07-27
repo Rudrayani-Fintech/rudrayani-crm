@@ -50,6 +50,7 @@ export default function TrailAnalyticsCard({ filters }: { filters: DashboardFilt
   }, [filters.month]);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const params: Record<string, string> = {
       from: range[0].format("YYYY-MM-DD"),
@@ -60,9 +61,18 @@ export default function TrailAnalyticsCard({ filters }: { filters: DashboardFilt
     }
     api
       .get("/reports/trail", { params })
-      .then((res) => setData(res.data))
-      .catch((err) => message.error(errorMessage(err)))
-      .finally(() => setLoading(false));
+      .then((res) => {
+        if (!cancelled) setData(res.data);
+      })
+      .catch((err) => {
+        if (!cancelled) message.error(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [range, filters]);
 
   const chartData = (data?.by_result_code ?? []).slice(0, 10).map((r) => ({

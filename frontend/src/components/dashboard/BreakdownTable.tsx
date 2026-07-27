@@ -59,6 +59,7 @@ export default function BreakdownTable({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const params: Record<string, string> = { month: filters.month, dimension };
     for (const key of ["company_id", "branch_id", "team_id", "agent_id", "product", "bucket"] as const) {
@@ -66,9 +67,20 @@ export default function BreakdownTable({
     }
     api
       .get("/reports/breakdown", { params })
-      .then((res) => setRows(res.data.rows))
-      .catch((err) => message.error(errorMessage(err)))
-      .finally(() => setLoading(false));
+      .then((res) => {
+        if (!cancelled) setRows(res.data.rows);
+      })
+      .catch((err) => {
+        if (!cancelled) message.error(errorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    // A fast dimension/filter switch must not let an earlier, slower
+    // response land after a newer one and repaint stale rows.
+    return () => {
+      cancelled = true;
+    };
   }, [dimension, filters]);
 
   return (

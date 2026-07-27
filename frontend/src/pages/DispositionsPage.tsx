@@ -50,6 +50,7 @@ export default function DispositionsPage() {
 
   const [codes, setCodes] = useState<DispositionCode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showInactive, setShowInactive] = useState(false);
   const [editing, setEditing] = useState<DispositionCode | "new" | null>(null);
   const [saving, setSaving] = useState(false);
@@ -57,11 +58,14 @@ export default function DispositionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await api.get("/dispositions", {
         params: showInactive ? { include_inactive: "true" } : {},
       });
       setCodes(res.data.disposition_codes);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -123,7 +127,7 @@ export default function DispositionsPage() {
     }
   };
 
-  const toggleActive = async (code: DispositionCode) => {
+  const applyToggle = async (code: DispositionCode) => {
     try {
       await api.patch(`/dispositions/${code.id}`, { is_active: !code.is_active });
       message.success(code.is_active ? "Code retired" : "Code re-activated");
@@ -131,6 +135,19 @@ export default function DispositionsPage() {
     } catch (err) {
       message.error(errorMessage(err));
     }
+  };
+
+  const toggleActive = (code: DispositionCode) => {
+    // Re-activating is harmless; retiring hides the code from every agent's
+    // call-log dropdown immediately -- worth a confirmation, not silent.
+    if (!code.is_active) return applyToggle(code);
+    Modal.confirm({
+      title: `Retire "${code.description}"?`,
+      content: "Agents will no longer be able to select this code when logging a call.",
+      okText: "Retire",
+      okButtonProps: { danger: true },
+      onOk: () => applyToggle(code),
+    });
   };
 
   const needsFlags = (code: DispositionCode) =>
@@ -170,6 +187,16 @@ export default function DispositionsPage() {
           style={{ marginBottom: 16 }}
           message={`${uncategorizedCount} code${uncategorizedCount === 1 ? "" : "s"} without a channel`}
           description="These are custom codes that don't match a known FV/OC/LG prefix from the master list. Edit each to assign Field Visit or On-Call so it appears in the agent picker."
+        />
+      )}
+
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message={loadError}
+          action={<Button size="small" onClick={() => load()}>Retry</Button>}
+          style={{ marginBottom: 16 }}
         />
       )}
 

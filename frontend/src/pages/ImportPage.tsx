@@ -111,6 +111,20 @@ function ImportWizard() {
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
 
+  // A refresh at the mapping or preview step previously destroyed the
+  // entire column mapping with no warning -- for a 20-column ledger that's
+  // the ~40 dropdown clicks from 4.5 gone in one accidental Cmd+R. Nothing
+  // to lose yet at step 0 (no file parsed), and step 3 is already committed.
+  useEffect(() => {
+    if (step !== 1 && step !== 2) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [step]);
+
   // Step 0
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<string | null>(null);
@@ -144,7 +158,7 @@ function ImportWizard() {
   const [result, setResult] = useState<CommitResult | null>(null);
 
   useEffect(() => {
-    api.get("/companies").then((r) => setCompanies(r.data.companies));
+    api.get("/companies").then((r) => setCompanies(r.data.companies)).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   // Load templates when company changes
@@ -156,7 +170,8 @@ function ImportWizard() {
         setTemplates(
           (r.data.templates as ImportTemplate[]).filter((t) => t.is_active),
         ),
-      );
+      )
+      .catch((err) => message.error(errorMessage(err)));
   }, [companyId]);
 
   // ── Step 0: upload file ──────────────────────────────────────────────────
@@ -166,12 +181,10 @@ function ImportWizard() {
       ? { mode, allocation_month: allocationMonth.format("YYYY-MM-01") }
       : { mode };
 
+  const canUpload = !!companyId && (mode !== "allocation" || !!allocationMonth) && !!file;
+
   const handleUpload = async () => {
-    if (!companyId) return message.error("Select a company first");
-    if (mode === "allocation" && !allocationMonth) {
-      return message.error("Pick the allocation month first");
-    }
-    if (!file) return message.error("Attach an Excel file (.xlsx)");
+    if (!canUpload) return; // unreachable via the UI; the button is disabled until this is true
     setLoading(true);
     try {
       const fd = new FormData();
@@ -342,7 +355,17 @@ function ImportWizard() {
       <Upload.Dragger
         accept=".xlsx"
         maxCount={1}
-        beforeUpload={(f) => { setFile(f as RcFile); return false; }}
+        beforeUpload={(f) => {
+          // Previously this was just a hint below the dragger -- a 40 MB
+          // file uploaded in full over 2G/3G and only failed minutes later,
+          // server-side, after the wait.
+          if (f.size > 15 * 1024 * 1024) {
+            message.error("File is larger than 15 MB — split it or ask the sender for a smaller export.");
+            return Upload.LIST_IGNORE;
+          }
+          setFile(f as RcFile);
+          return false;
+        }}
         onRemove={() => setFile(null)}
         fileList={file ? [file as unknown as import("antd").UploadFile] : []}
       >
@@ -359,6 +382,7 @@ function ImportWizard() {
         icon={<CloudUploadOutlined />}
         onClick={handleUpload}
         loading={loading}
+        disabled={!canUpload}
         style={{ height: 48, paddingInline: 32 }}
       >
         Upload & Detect Columns
@@ -923,6 +947,7 @@ function ImportHistory() {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [runs, setRuns] = useState<ImportRun[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [rolling, setRolling] = useState<string | null>(null);
 
@@ -964,15 +989,18 @@ function ImportHistory() {
   };
 
   useEffect(() => {
-    api.get("/companies").then((r) => setCompanies(r.data.companies));
+    api.get("/companies").then((r) => setCompanies(r.data.companies)).catch((err) => message.error(errorMessage(err)));
   }, []);
 
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await api.get("/imports/runs", { params: { company_id: companyId } });
       setRuns(res.data.runs);
+    } catch (err) {
+      setLoadError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -991,6 +1019,17 @@ function ImportHistory() {
         onChange={setCompanyId}
         options={companies.map((c) => ({ value: c.id, label: c.name }))}
       />
+
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message={loadError}
+          action={<Button size="small" onClick={() => load()}>Retry</Button>}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Table
         rowKey="id"
         loading={loading}

@@ -178,7 +178,79 @@ router.get(
   }),
 );
 
-/** Approve (applies the allow-listed changes transactionally) or reject. */
+/**
+ * Approve (applies the allow-listed changes transactionally) or reject one
+ * request. Shared by the single-request route below and the bulk route.
+ */
+async function decideOne(
+  agencyId: string,
+  userId: string,
+  clamp: BranchClamp,
+  id: string,
+  approve: boolean,
+  note: string | undefined,
+) {
+  // A branch_manager can only decide requests whose underlying customer
+  // is in their own branch -- same three-way COALESCE join as GET / above,
+  // since correction_requests doesn't carry a customer_id of its own.
+  const reqParams: unknown[] = [id, agencyId];
+  const reqClampSql = coalescedCustomerBranchClamp(clamp, reqParams);
+  const reqRes = await pool.query(
+    `SELECT cr.* FROM correction_requests cr
+       JOIN users u ON u.id = cr.requested_by
+       LEFT JOIN payments py ON cr.record_type = 'payment' AND py.id = cr.record_id
+       LEFT JOIN customers cust_p ON cust_p.id = py.customer_id
+       LEFT JOIN call_logs cl ON cr.record_type = 'call_log' AND cl.id = cr.record_id
+       LEFT JOIN customers cust_c ON cust_c.id = cl.customer_id
+       LEFT JOIN ptps pt ON cr.record_type = 'ptp' AND pt.id = cr.record_id
+       LEFT JOIN customers cust_t ON cust_t.id = pt.customer_id
+      WHERE cr.id = $1 AND u.agency_id = $2${reqClampSql}`,
+    reqParams,
+  );
+  const request = reqRes.rows[0];
+  if (!request) throw new HttpError(404, "Request not found");
+  if (request.status !== "pending") throw new HttpError(409, "Request already decided");
+
+  const recordType = request.record_type as RecordType;
+  const proposedChanges = request.proposed_changes as Record<string, unknown>;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    if (approve) {
+      assertAllowedFields(recordType, proposedChanges);
+      const table = { payment: "payments", call_log: "call_logs", ptp: "ptps" }[recordType];
+      const setClauses: string[] = [];
+      const values: unknown[] = [];
+      for (const [field, value] of Object.entries(proposedChanges)) {
+        values.push(value);
+        setClauses.push(`${field} = $${values.length}`);
+      }
+      values.push(request.record_id);
+      await client.query(
+        `UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = $${values.length}`,
+        values,
+      );
+    }
+
+    const updated = await client.query(
+      `UPDATE correction_requests
+          SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4
+        WHERE id = $1 RETURNING *`,
+      [id, approve ? "approved" : "rejected", userId, note ?? null],
+    );
+
+    await client.query("COMMIT");
+    return updated.rows[0];
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 router.post(
   "/:id/decide",
   requirePermission("customers.allocate"),
@@ -190,67 +262,41 @@ router.post(
         note: z.string().trim().max(500).optional(),
       })
       .parse(req.body);
-
-    // A branch_manager can only decide requests whose underlying customer
-    // is in their own branch -- same three-way COALESCE join as GET / above,
-    // since correction_requests doesn't carry a customer_id of its own.
     const clamp = await resolveBranchClamp(req.user!);
-    const reqParams: unknown[] = [id, req.user!.agency_id];
-    const reqClampSql = coalescedCustomerBranchClamp(clamp, reqParams);
-    const reqRes = await pool.query(
-      `SELECT cr.* FROM correction_requests cr
-         JOIN users u ON u.id = cr.requested_by
-         LEFT JOIN payments py ON cr.record_type = 'payment' AND py.id = cr.record_id
-         LEFT JOIN customers cust_p ON cust_p.id = py.customer_id
-         LEFT JOIN call_logs cl ON cr.record_type = 'call_log' AND cl.id = cr.record_id
-         LEFT JOIN customers cust_c ON cust_c.id = cl.customer_id
-         LEFT JOIN ptps pt ON cr.record_type = 'ptp' AND pt.id = cr.record_id
-         LEFT JOIN customers cust_t ON cust_t.id = pt.customer_id
-        WHERE cr.id = $1 AND u.agency_id = $2${reqClampSql}`,
-      reqParams,
-    );
-    const request = reqRes.rows[0];
-    if (!request) throw new HttpError(404, "Request not found");
-    if (request.status !== "pending") throw new HttpError(409, "Request already decided");
+    const request = await decideOne(req.user!.agency_id, req.user!.id, clamp, id, body.approve, body.note);
+    res.json({ request });
+  }),
+);
 
-    const recordType = request.record_type as RecordType;
-    const proposedChanges = request.proposed_changes as Record<string, unknown>;
+/**
+ * Bulk approve/reject -- mirrors import-reviews.ts's bulk-decision: each id
+ * is decided independently (its own transaction), so one already-decided
+ * request in the batch doesn't roll back everyone else's.
+ */
+router.post(
+  "/bulk-decide",
+  requirePermission("customers.allocate"),
+  asyncHandler(async (req, res) => {
+    const body = z
+      .object({
+        ids: z.array(z.string().uuid()).min(1).max(200),
+        approve: z.boolean(),
+        note: z.string().trim().max(500).optional(),
+      })
+      .parse(req.body);
 
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      if (body.approve) {
-        assertAllowedFields(recordType, proposedChanges);
-        const table = { payment: "payments", call_log: "call_logs", ptp: "ptps" }[recordType];
-        const setClauses: string[] = [];
-        const values: unknown[] = [];
-        for (const [field, value] of Object.entries(proposedChanges)) {
-          values.push(value);
-          setClauses.push(`${field} = $${values.length}`);
-        }
-        values.push(request.record_id);
-        await client.query(
-          `UPDATE ${table} SET ${setClauses.join(", ")} WHERE id = $${values.length}`,
-          values,
-        );
+    const clamp = await resolveBranchClamp(req.user!);
+    const applied: string[] = [];
+    const skipped: { id: string; reason: string }[] = [];
+    for (const id of body.ids) {
+      try {
+        await decideOne(req.user!.agency_id, req.user!.id, clamp, id, body.approve, body.note);
+        applied.push(id);
+      } catch (err) {
+        skipped.push({ id, reason: err instanceof HttpError ? err.message : "Unexpected error" });
       }
-
-      const updated = await client.query(
-        `UPDATE correction_requests
-            SET status = $2, decided_by = $3, decided_at = now(), decision_note = $4
-          WHERE id = $1 RETURNING *`,
-        [id, body.approve ? "approved" : "rejected", req.user!.id, body.note ?? null],
-      );
-
-      await client.query("COMMIT");
-      res.json({ request: updated.rows[0] });
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
     }
+    res.json({ applied, skipped });
   }),
 );
 

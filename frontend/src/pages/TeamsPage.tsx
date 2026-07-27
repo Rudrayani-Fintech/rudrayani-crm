@@ -1,6 +1,7 @@
-import { Alert, Button, Form, Input, Modal, Select, Table, Typography, message, Space } from "antd";
+import { Alert, Button, Empty, Form, Input, Modal, Select, Table, Typography, message, Space } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
 import type { Branch, Team } from "../types";
 
@@ -54,20 +55,18 @@ export default function TeamsPage() {
     }
   };
 
+  const openCreate = () => {
+    form.resetFields();
+    setEditing("new");
+  };
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
         <Typography.Title level={3} style={{ margin: 0 }}>
           Teams
         </Typography.Title>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            form.resetFields();
-            setEditing("new");
-          }}
-        >
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate} disabled={branches.length === 0}>
           Add team
         </Button>
       </div>
@@ -87,6 +86,22 @@ export default function TeamsPage() {
         loading={loading}
         dataSource={teams}
         pagination={false}
+        locale={{
+          emptyText:
+            branches.length === 0 ? (
+              <Empty description="No branches yet — a team needs one to belong to">
+                <Link to="/branches">
+                  <Button type="primary">Add a branch first</Button>
+                </Link>
+              </Empty>
+            ) : (
+              <Empty description="No teams yet">
+                <Button type="primary" onClick={openCreate}>
+                  Add your first team
+                </Button>
+              </Empty>
+            ),
+        }}
         columns={[
           { title: "Team", dataIndex: "name" },
           { title: "Branch", dataIndex: "branch_name" },

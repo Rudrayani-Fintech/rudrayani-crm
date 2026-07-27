@@ -14,7 +14,7 @@ import {
 } from "antd";
 import { DownloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 import { downloadCsv } from "../utils/csv";
@@ -262,7 +262,21 @@ export default function CustomersPage() {
         rowKey="id"
         loading={loading}
         dataSource={customers}
-        locale={{ emptyText: <Empty description="No customers found — import data first" /> }}
+        locale={{
+          emptyText:
+            companyId || customerBranch || product || bucket || status || query ? (
+              <Empty description="No customers match your filters" />
+            ) : (
+              // Previously had the right words but no way to act on them --
+              // an admin reading "import data first" still had to find the
+              // Import page in the nav themselves.
+              <Empty description="No customers found — import data first">
+                <Link to="/import">
+                  <Button type="primary">Go to Import</Button>
+                </Link>
+              </Empty>
+            ),
+        }}
         onRow={(record) => ({
           onClick: () => setDetailId(record.id),
           style: { cursor: "pointer" },

@@ -19,8 +19,11 @@ import AgentDetailDrawer from "../components/AgentDetailDrawer";
 import BranchDetailDrawer from "../components/BranchDetailDrawer";
 import TeamDetailDrawer from "../components/TeamDetailDrawer";
 import DashboardCustomizer from "../components/dashboard/DashboardCustomizer";
+import PendingApprovalsAlert from "../components/dashboard/PendingApprovalsAlert";
+import SetupChecklist from "../components/dashboard/SetupChecklist";
 import { applyLayout, type DashboardRenderCtx } from "../components/dashboard/widgetRegistry";
 import { useDashboardPreferences } from "../hooks/useDashboardPreferences";
+import { useWorkScope } from "../scope/WorkScopeContext";
 import {
   type DashboardData,
   type DashboardFilters,
@@ -61,17 +64,19 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [customizerOpen, setCustomizerOpen] = useState(false);
-  const [myWork, setMyWork] = useState(false);
+  // Lifted to an app-level context (see AppLayout's header switch) so this
+  // page, MyWorklistPage's list scope, and its Today section all share one
+  // "My Team ↔ My Work" preference instead of three independent controls.
+  const { myWorkOnly: myWork } = useWorkScope();
   const [myTeamDrawer, setMyTeamDrawer] = useState<{ id: string; name: string } | null>(null);
   const [myBranchId, setMyBranchId] = useState<string | null>(null);
   const [myAgentDrawer, setMyAgentDrawer] = useState(false);
 
   // A branch_manager may ALSO carry collections work (agent_type set) --
   // "additional responsibilities, the core work remains the same." The
-  // toggle lets them flip between their management view (branch aggregate)
-  // and their own personal worklist numbers, mirroring the original
-  // brief's "My Team" vs "My Work" ask.
-  const hasAgentWork = !!user?.agent_type;
+  // header's My Team/My Work switch (AppLayout.tsx) lets them flip between
+  // their management view (branch aggregate) and their own personal
+  // worklist numbers, mirroring the original brief's ask.
   const isBranchManager = !!user?.capabilities.includes("branch_manager");
   const myBranch = useMemo(() => branches.find((b) => b.branch_manager_id === user?.id), [branches, user]);
   // Every team in the branch_manager's own branch, for the team drill-down
@@ -188,6 +193,9 @@ export default function DashboardPage() {
 
   return (
     <div>
+      {hasPermission("companies.manage") && <SetupChecklist />}
+      {hasPermission("customers.allocate") && <PendingApprovalsAlert />}
+
       {/* Product tabs (blueprint top row) */}
       <Tabs
         activeKey={product ?? ALL}
@@ -223,13 +231,6 @@ export default function DashboardPage() {
             <Switch checked={amountMode} onChange={setAmountMode} />
             <Typography.Text type="secondary">Amount</Typography.Text>
           </Space>
-          {hasAgentWork && (
-            <Space size={6}>
-              <Typography.Text type="secondary">My Team/Branch</Typography.Text>
-              <Switch checked={myWork} onChange={setMyWork} />
-              <Typography.Text type="secondary">My Work</Typography.Text>
-            </Space>
-          )}
           {isBranchManager && myBranch && (
             <Button onClick={() => setMyBranchId(myBranch.id)}>My Branch</Button>
           )}

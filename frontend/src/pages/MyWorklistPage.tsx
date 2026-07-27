@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Collapse, Input, Modal, Segmented, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Badge, Button, Collapse, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { CalendarOutlined, DollarOutlined, EditOutlined, EnvironmentOutlined, FileTextOutlined, PhoneOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -9,6 +9,7 @@ import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 import LogCallModal from "../components/LogCallModal";
 import RecordPaymentModal from "../components/RecordPaymentModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "../components/ReportCorrectionModal";
+import { useWorkScope } from "../scope/WorkScopeContext";
 import { palette } from "../theme/tokens";
 import type { DispositionCode, WorklistCustomer } from "../types";
 
@@ -93,7 +94,12 @@ export default function MyWorklistPage() {
   const [filterCustomerBranch, setFilterCustomerBranch] = useState<string | undefined>();
   const [filterProduct, setFilterProduct] = useState<string | undefined>();
   const [filterBucket, setFilterBucket] = useState<string | undefined>();
-  const [scope, setScope] = useState<"personal" | "team">("personal");
+  // Driven by the one app-level "My Team ↔ My Work" switch in AppLayout's
+  // header (see WorkScopeContext) instead of its own Segmented control --
+  // usage below stays gated on isBranchManager, so this has no effect for
+  // a dual-capability team_lead flipping the same header switch.
+  const { myWorkOnly } = useWorkScope();
+  const scope: "personal" | "team" = myWorkOnly ? "personal" : "team";
 
   // Companies actually present in the worklist -- cheap client-side derivation
   // (mirrors the mobile app's same approach), no new endpoint. Company itself
@@ -121,7 +127,7 @@ export default function MyWorklistPage() {
   // Today's Work
   const [todayActivity, setTodayActivity] = useState<AgentActivityRow[]>([]);
   const [todayLoading, setTodayLoading] = useState(false);
-  const [todayScope, setTodayScope] = useState<"personal" | "branch">("personal");
+  const todayScope: "personal" | "branch" = myWorkOnly ? "personal" : "branch";
   const [todayDisposition, setTodayDisposition] = useState<string | undefined>();
   const [correctionTarget, setCorrectionTarget] = useState<AgentActivityRow | null>(null);
 
@@ -213,19 +219,6 @@ export default function MyWorklistPage() {
       <Typography.Text type="secondary">
         {displayedCustomers.length} customers {scope === "team" ? "assigned to your team" : "assigned to you"}
       </Typography.Text>
-
-      {isBranchManager && (
-        <div style={{ marginTop: 12 }}>
-          <Segmented
-            value={scope}
-            onChange={(v) => setScope(v as "personal" | "team")}
-            options={[
-              { label: "Personal", value: "personal" },
-              { label: "Team", value: "team" },
-            ]}
-          />
-        </div>
-      )}
 
       <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Input.Search
@@ -350,16 +343,6 @@ export default function MyWorklistPage() {
               children: (
                 <Space direction="vertical" style={{ width: "100%" }} size="middle">
                   <Space wrap onClick={(e) => e.stopPropagation()}>
-                    {isBranchManager && (
-                      <Segmented
-                        value={todayScope}
-                        onChange={(v) => setTodayScope(v as "personal" | "branch")}
-                        options={[
-                          { label: "Personal", value: "personal" },
-                          { label: "Branch", value: "branch" },
-                        ]}
-                      />
-                    )}
                     <Select
                       title="All dispositions" placeholder="Filter by disposition code"
                       allowClear

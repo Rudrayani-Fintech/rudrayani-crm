@@ -1,6 +1,7 @@
-import { Alert, Button, InputNumber, Modal, Radio, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Empty, InputNumber, Modal, Radio, Select, Space, Table, Tag, Typography, message } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
 
 type Bucket = {
@@ -138,6 +139,20 @@ export default function BucketsPage() {
         loading={loading}
         dataSource={buckets}
         pagination={false}
+        locale={{
+          emptyText: !companyId ? (
+            <Empty description="Select a company above to see its buckets" />
+          ) : (
+            // Bucket labels arrive automatically from imports (see the
+            // module doc comment) -- an empty list for a selected company
+            // almost always means nothing has been imported for it yet.
+            <Empty description="No buckets yet — they're created automatically from your first import for this company">
+              <Link to="/import">
+                <Button type="primary">Go to Import</Button>
+              </Link>
+            </Empty>
+          ),
+        }}
         columns={[
           {
             title: "Order",

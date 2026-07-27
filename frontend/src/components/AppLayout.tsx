@@ -1,4 +1,4 @@
-import { Layout, Menu, Spin, Typography, Space, Tag, Button, Tooltip } from "antd";
+import { Layout, Menu, Spin, Typography, Space, Switch, Tag, Button, Tooltip } from "antd";
 import { Suspense, useState } from "react";
 import {
   ApartmentOutlined,
@@ -29,6 +29,7 @@ import { useThemeMode } from "../theme/ThemeModeProvider";
 import { CAPABILITY_LABELS } from "../types";
 import AlertsBell from "./AlertsBell";
 import ErrorBoundary from "./ErrorBoundary";
+import { useWorkScope } from "../scope/WorkScopeContext";
 
 const { Sider, Header, Content } = Layout;
 
@@ -37,6 +38,12 @@ export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { mode, toggle } = useThemeMode();
+  const { myWorkOnly, setMyWorkOnly } = useWorkScope();
+  // A dual-capability user (works their own book AND manages a team/branch)
+  // previously had to reconcile three separate, differently-labelled
+  // controls across two pages to mean the same thing. One switch, here,
+  // drives all of them now.
+  const hasAgentWork = !!user?.agent_type;
   // Sider's own breakpoint="lg" collapses it to 0 width below 992px with no
   // way back in -- there was no trigger anywhere to reopen it, so the whole
   // nav simply vanished on a phone. Controlling it ourselves with a header
@@ -231,6 +238,17 @@ export default function AppLayout() {
             <Typography.Text strong>{user?.full_name}</Typography.Text>
           </Space>
           <Space>
+            {hasAgentWork && (
+              <Space size={6}>
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                  My Team/Branch
+                </Typography.Text>
+                <Switch checked={myWorkOnly} onChange={setMyWorkOnly} size="small" />
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                  My Work
+                </Typography.Text>
+              </Space>
+            )}
             <Tooltip title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
               <Button
                 type="text"

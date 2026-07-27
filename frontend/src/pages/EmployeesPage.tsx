@@ -1,6 +1,7 @@
 import {
   Alert,
   Button,
+  Empty,
   Form,
   Input,
   Modal,
@@ -431,6 +432,22 @@ export default function EmployeesPage() {
         loading={loading}
         dataSource={filteredEmployees}
         scroll={{ x: 900 }}
+        locale={{
+          emptyText:
+            search || filterBranch || filterTeam || filterCapability || filterDesignation || filterCustomerBranch || filterProduct ? (
+              <Empty description="No employees match your filters" />
+            ) : (
+              // The #1 day-1 task for a new agency previously landed on
+              // AntD's bare "No Data" with zero guidance on what to do.
+              <Empty description="No employees yet">
+                {hasPermission("employees.create") && (
+                  <Button type="primary" onClick={openCreate}>
+                    Add your first employee
+                  </Button>
+                )}
+              </Empty>
+            ),
+        }}
         columns={[
           { title: "Name", dataIndex: "full_name" },
           { title: "Phone", dataIndex: "phone" },

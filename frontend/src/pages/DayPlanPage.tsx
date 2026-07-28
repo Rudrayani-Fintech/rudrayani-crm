@@ -14,6 +14,7 @@ import {
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { api } from "../api/client";
+import { rupees as rupee } from "../utils/money";
 
 const { Text } = Typography;
 
@@ -34,12 +35,6 @@ interface AgentDetail {
   ptps: { id: string; customer_name: string; loan_number: string; amount: number; promised_date: string }[];
   reminders: { id: string; customer_name: string | null; loan_number: string | null; remind_at: string; note: string | null }[];
 }
-
-const rupee = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 0,
-});
 
 function AttendanceTag({ attendance }: { attendance: DayPlanAgent["attendance"] }) {
   if (attendance.on_duty) return <Tag color="green">On duty since {dayjs(attendance.first_in).format("HH:mm")}</Tag>;
@@ -88,7 +83,7 @@ function AgentDetailRow({ userId, date }: { userId: string; date: string }) {
             columns={[
               { title: "Customer", dataIndex: "customer_name" },
               { title: "Loan No.", dataIndex: "loan_number" },
-              { title: "Amount", dataIndex: "amount", render: (v: number) => rupee.format(Number(v)) },
+              { title: "Amount", dataIndex: "amount", render: (v: number) => rupee(Number(v)) },
               { title: "Promised", dataIndex: "promised_date", render: (v: string) => dayjs(v).format("DD MMM") },
             ]}
           />
@@ -149,7 +144,7 @@ export default function DayPlanPage() {
       render: (_: unknown, row: DayPlanAgent) =>
         row.ptps_due.count > 0 ? (
           <Tag color="orange">
-            {row.ptps_due.count} · {rupee.format(row.ptps_due.total_amount)}
+            {row.ptps_due.count} · {rupee(row.ptps_due.total_amount)}
           </Tag>
         ) : (
           "—"
@@ -167,7 +162,7 @@ export default function DayPlanPage() {
       key: "payments",
       render: (_: unknown, row: DayPlanAgent) =>
         row.activity.payments_count > 0
-          ? `${row.activity.payments_count} · ${rupee.format(row.activity.payments_total)}`
+          ? `${row.activity.payments_count} · ${rupee(row.activity.payments_total)}`
           : "—",
     },
   ];

@@ -25,6 +25,7 @@ import type { UploadProps } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { rupees as fmtAmount } from "../utils/money";
 import PtpFormModal, { type PtpRecord } from "./PtpFormModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "./ReportCorrectionModal";
 
@@ -88,8 +89,6 @@ interface CustomerDetail {
   snapshots: { month: string; bucket: string | null; due_amount: string | null; emi: string | null; product: string | null }[];
 }
 
-const fmtAmount = (v: string | number | null | undefined) =>
-  v == null || v === "" ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const orDash = (v: string | null | undefined) => (v == null || v === "" ? "-" : v);
 
 const STATUS_TAG: Record<string, { color: string; label: string }> = {

@@ -106,14 +106,14 @@ export default function AttendancePage() {
     {
       title: "Punch In",
       dataIndex: "punch_in_at",
-      render: (v: string) => new Date(v).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" }),
+      render: (v: string) => dayjs(v).format("DD MMM YYYY, HH:mm"),
     },
     {
       title: "Punch Out",
       dataIndex: "punch_out_at",
       render: (v: string | null) =>
         v
-          ? new Date(v).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })
+          ? dayjs(v).format("DD MMM YYYY, HH:mm")
           : <Tag color="green">On Duty</Tag>,
     },
     {

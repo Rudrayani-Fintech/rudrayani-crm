@@ -1,6 +1,7 @@
 ﻿import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -143,6 +144,9 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
               createdAt: DateTime.now(),
             ));
         if (mounted) {
+          // Lighter than the confirmed-recorded haptic below -- captured,
+          // but not yet actually money-in-the-bank confirmed by the server.
+          HapticFeedback.lightImpact();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('No network — payment saved offline, will sync automatically'),
@@ -158,6 +162,10 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
       if (mounted) {
         ref.invalidate(worklistProvider);
         ref.invalidate(dispositionCodesProvider);
+        // On a noisy street a SnackBar alone is easy to miss entirely --
+        // this is the one moment in the app where the agent most needs to
+        // *feel* that money was actually recorded, not just glance at it.
+        HapticFeedback.mediumImpact();
         // A receipt number only exists once the server has actually
         // inserted the row (never true on the offline-queue path above) --
         // previously the flow ended here with just a SnackBar and nothing

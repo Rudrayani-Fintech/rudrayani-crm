@@ -17,11 +17,14 @@ import {
   message,
 } from "antd";
 import { HistoryOutlined, UserSwitchOutlined, PlusOutlined } from "@ant-design/icons";
+import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { bucketSeverityColor, useBucketSeverity, type BucketSeverityMeta } from "../hooks/useBucketSeverity";
 import type { AllocationLog, Company, Customer, Employee } from "../types";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
+import { rupees as fmtAmount } from "../utils/money";
 
 interface Product {
   id: string;
@@ -29,11 +32,11 @@ interface Product {
   canonical_label: string;
 }
 
-const fmtAmount = (v: string | null) =>
-  v == null ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
-
 /** Shared column set for both queues. */
-const getBaseColumns = (onOpenDetail: (customerId: string) => void) => [
+const getBaseColumns = (
+  onOpenDetail: (customerId: string) => void,
+  bucketSeverity: Map<string, BucketSeverityMeta>,
+) => [
   {
     title: "",
     key: "details",
@@ -66,7 +69,7 @@ const getBaseColumns = (onOpenDetail: (customerId: string) => void) => [
     title: "Bucket",
     dataIndex: "bucket",
     width: 80,
-    render: (v: string | null) => (v ? <Tag color="orange">{v}</Tag> : "—"),
+    render: (v: string | null) => (v ? <Tag color={bucketSeverityColor(v, bucketSeverity)}>{v}</Tag> : "—"),
   },
   {
     title: "Due Amount",
@@ -275,6 +278,7 @@ function FilterRow({
 // ──────────────────────────────────────────────────────────────────────────────
 
 function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void }) {
+  const bucketSeverity = useBucketSeverity();
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const customerBranches = useCustomerBranches();
@@ -510,7 +514,7 @@ function UnallocatedQueue({ onOpenDetail }: { onOpenDetail: (id: string) => void
           onChange: (pg, ps) => { setPageSize(ps); load(pg, ps); },
         }}
         scroll={{ x: 1100 }}
-        columns={getBaseColumns(onOpenDetail)}
+        columns={getBaseColumns(onOpenDetail, bucketSeverity)}
       />
     </div>
   );
@@ -527,6 +531,7 @@ function AllocatedList({
   onOpenDetail: (id: string) => void;
   onGoToUnallocated: () => void;
 }) {
+  const bucketSeverity = useBucketSeverity();
   const filters = useCompanyFilters();
   const branchTeam = useBranchTeam();
   const customerBranches = useCustomerBranches();
@@ -650,7 +655,7 @@ function AllocatedList({
 
   const columns = useMemo(
     () => [
-      ...getBaseColumns(onOpenDetail),
+      ...getBaseColumns(onOpenDetail, bucketSeverity),
       {
         title: "Telecaller",
         dataIndex: "assigned_agent_name",
@@ -688,7 +693,7 @@ function AllocatedList({
         ),
       },
     ],
-    [onOpenDetail, openHistory, openRealloc],
+    [onOpenDetail, openHistory, openRealloc, bucketSeverity],
   );
 
   return (
@@ -872,7 +877,7 @@ function AllocatedList({
                     </Typography.Text>
                   )}
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    by {log.allocated_by_name} · {new Date(log.created_at).toLocaleString("en-IN")}
+                    by {log.allocated_by_name} · {dayjs(log.created_at).format("DD MMM YYYY, HH:mm")}
                   </Typography.Text>
                 </div>
               ),

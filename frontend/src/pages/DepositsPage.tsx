@@ -15,13 +15,8 @@ import { CheckOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { rupees as rupee } from "../utils/money";
 import type { Company } from "../types";
-
-const rupee = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 0,
-});
 
 type DepositRow = {
   id: string;
@@ -101,7 +96,7 @@ export default function DepositsPage() {
     // directly in the database.
     Modal.confirm({
       title: `Mark ${selected.length} payment(s) deposited?`,
-      content: `Total ${rupee.format(total)}. This confirms the cash reached the bank and cannot be undone from here.`,
+      content: `Total ${rupee(total)}. This confirms the cash reached the bank and cannot be undone from here.`,
       okText: "Mark deposited",
       onOk: applyMarkDeposited,
     });
@@ -154,7 +149,7 @@ export default function DepositsPage() {
         </Button>
         {filter !== "deposited" && (
           <Typography.Text type="secondary">
-            Pending total: <span className="money">{rupee.format(pendingTotal)}</span>
+            Pending total: <span className="money">{rupee(pendingTotal)}</span>
           </Typography.Text>
         )}
       </Space>
@@ -190,7 +185,7 @@ export default function DepositsPage() {
             title: "Amount",
             dataIndex: "amount",
             align: "right",
-            render: (v: string) => <span className="money">{rupee.format(Number(v))}</span>,
+            render: (v: string) => <span className="money">{rupee(Number(v))}</span>,
           },
           { title: "Mode", dataIndex: "mode", render: (v) => v ?? "—" },
           {

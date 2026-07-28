@@ -40,6 +40,10 @@ abstract class AppColors {
   // Neutral
   static const onPrimary = Colors.white;
   static const textSecondary = Color(0xFF64748B);
+  /// ~2.6:1 contrast on white -- fails WCAG AA (needs 4.5:1) for body text.
+  /// Safe only for genuinely decorative use (a disabled-state hint, a
+  /// watermark) at 14px+; never for a subtitle, badge, or anything meant to
+  /// actually be read outdoors. Use [textSecondary] instead for real content.
   static const textTertiary = Color(0xFF94A3B8);
   static const border = Color(0xFFCBD5E1);
 }
@@ -97,6 +101,20 @@ ThemeData buildAppTheme() {
     ),
     useMaterial3: true,
     fontFamily: 'Inter',
+    // No textTheme was ever set, so every screen fell back to Flutter's own
+    // Material defaults or, more often, a hand-picked inline TextStyle --
+    // several as small as 10-11px. The app is used outdoors in direct
+    // sunlight (see the "no dark mode" note above); a 14px floor here is
+    // the same "strict, not aspirational" floor AppDimens.tapTarget already
+    // applies to touch targets, just for text.
+    textTheme: const TextTheme(
+      bodyLarge: TextStyle(fontSize: 16),
+      bodyMedium: TextStyle(fontSize: 14),
+      bodySmall: TextStyle(fontSize: 14),
+      labelLarge: TextStyle(fontSize: 14),
+      labelMedium: TextStyle(fontSize: 14),
+      labelSmall: TextStyle(fontSize: 14),
+    ),
     inputDecorationTheme: const InputDecorationTheme(
       border: OutlineInputBorder(),
     ),

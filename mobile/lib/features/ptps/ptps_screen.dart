@@ -7,9 +7,10 @@ import '../../core/utils/friendly_error.dart';
 import '../../core/utils/messaging.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/parser.dart';
+import '../../core/utils/money.dart' as money;
 import '../worklist/worklist_provider.dart';
 
-final _rupee = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+String _rupee(num? v) => money.rupees(v);
 final _date = DateFormat('dd MMM yyyy');
 
 final ptpListProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, customerId) async {
@@ -171,7 +172,7 @@ class PtpsScreen extends ConsumerWidget {
                             children: [
                               if (amount != null)
                                 Text(
-                                  _rupee.format(amount),
+                                  _rupee(amount),
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16).tabular,
                                 ),
                               if (promised != null)
@@ -357,7 +358,7 @@ class _PtpFormSheetState extends ConsumerState<_PtpFormSheet> {
                       mobileNumber: mobileNumber,
                       viaWhatsApp: true,
                       message: 'Hi ${customer?.customerName ?? ''}, confirming your promise to pay '
-                          '${amount != null ? _rupee.format(amount) : ''} by ${_date.formatted}. '
+                          '${amount != null ? _rupee(amount) : ''} by ${_date.formatted}. '
                           'Thank you — Rudrayani Fintech',
                     ),
                   ),
@@ -373,7 +374,7 @@ class _PtpFormSheetState extends ConsumerState<_PtpFormSheet> {
                       mobileNumber: mobileNumber,
                       viaWhatsApp: false,
                       message: 'Hi ${customer?.customerName ?? ''}, confirming your promise to pay '
-                          '${amount != null ? _rupee.format(amount) : ''} by ${_date.formatted}. '
+                          '${amount != null ? _rupee(amount) : ''} by ${_date.formatted}. '
                           'Thank you — Rudrayani Fintech',
                     ),
                   ),

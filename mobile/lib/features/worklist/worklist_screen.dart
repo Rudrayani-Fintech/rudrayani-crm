@@ -11,14 +11,11 @@ import '../../core/theme/app_theme.dart';
 import '../../core/tracking/tracking_service.dart';
 import '../../core/utils/friendly_error.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/money.dart' as money;
 import 'worklist_provider.dart';
 import '../reminders/today_section.dart';
 
-final _rupee = NumberFormat.currency(
-  locale: 'en_IN',
-  symbol: '₹',
-  decimalDigits: 0,
-);
+String _rupee(num? v) => money.rupees(v);
 
 class WorklistScreen extends ConsumerStatefulWidget {
   const WorklistScreen({super.key});
@@ -80,7 +77,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
             Text(
               userName,
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 14,
                 color: AppColors.onPrimary.withValues(alpha: 0.7),
               ),
             ),
@@ -125,7 +122,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: const Text(
                 'Offline — showing your last saved worklist',
-                style: TextStyle(fontSize: 12, color: AppColors.warningStrong),
+                style: TextStyle(fontSize: 14, color: AppColors.warningStrong),
                 textAlign: TextAlign.center,
               ),
             ),
@@ -484,7 +481,7 @@ class _CustomerCard extends StatelessWidget {
             children: [
               Text(
                 '${customer.loanNumber} · ${customer.companyName}',
-                style: const TextStyle(fontSize: 12),
+                style: const TextStyle(fontSize: 14),
               ),
               if (customer.mobileNumber.isNotEmpty)
                 GestureDetector(
@@ -492,12 +489,12 @@ class _CustomerCard extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.call, size: 12, color: AppColors.success),
+                      const Icon(Icons.call, size: 14, color: AppColors.success),
                       const SizedBox(width: 4),
                       Text(
                         customer.mobileNumber,
                         style: const TextStyle(
-                          fontSize: 12,
+                          fontSize: 14,
                           color: AppColors.success,
                           fontWeight: FontWeight.w600,
                         ),
@@ -507,17 +504,17 @@ class _CustomerCard extends StatelessWidget {
                 ),
               if (customer.dueAmount != null)
                 Text(
-                  'Due: ${_rupee.format(customer.dueAmount)}',
+                  'Due: ${_rupee(customer.dueAmount)}',
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ).tabular,
                 ),
               if (customer.emi != null)
                 Text(
-                  'EMI: ${_rupee.format(customer.emi)}',
+                  'EMI: ${_rupee(customer.emi)}',
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ).tabular,
                 ),
@@ -525,15 +522,18 @@ class _CustomerCard extends StatelessWidget {
                 Text(
                   'Last: ${customer.lastResultCode}',
                   style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textTertiary,
+                    fontSize: 14,
+                    // textTertiary fails WCAG AA at any size, let alone the
+                    // 11px this used to render at -- textSecondary reads
+                    // outdoors, this didn't.
+                    color: AppColors.textSecondary,
                   ),
                 ),
               if (hasPtp)
                 Text(
-                  'PTP: ${_rupee.format(customer.ptpAmount)} on ${DateFormat('dd MMM').format(customer.ptpDate!)}',
+                  'PTP: ${_rupee(customer.ptpAmount)} on ${DateFormat('dd MMM').format(customer.ptpDate!)}',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: 14,
                     color: ptpDue
                         ? AppColors.warningStrong
                         : AppColors.successStrong,
@@ -545,7 +545,7 @@ class _CustomerCard extends StatelessWidget {
                   child: Text(
                     'Normalized this month (pending lender confirmation)',
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: 14,
                       color: AppColors.info,
                       fontWeight: FontWeight.w600,
                     ),

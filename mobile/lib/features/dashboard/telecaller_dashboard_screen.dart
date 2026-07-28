@@ -5,16 +5,12 @@ import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/friendly_error.dart';
+import '../../core/utils/money.dart' as money;
 import '../../core/utils/parser.dart';
 import 'package:go_router/go_router.dart';
 import 'dashboard_widgets.dart';
 
-String _lakh(num? v) {
-  if (v == null) return '—';
-  final l = v / 100000;
-  if (l.abs() >= 0.01) return '${l.toStringAsFixed(2)}L';
-  return NumberFormat.decimalPattern('en_IN').format(v);
-}
+String _lakh(num? v) => money.lakh(v);
 
 // Business rule confirmed against Trail_Codes.xlsx (report-service.ts
 // trailAnalytics()): a call counts as "connected" (reached the customer or

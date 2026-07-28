@@ -4,12 +4,9 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import 'reminders_provider.dart';
 import '../../core/utils/parser.dart';
+import '../../core/utils/money.dart' as money;
 
-final _rupee = NumberFormat.currency(
-  locale: 'en_IN',
-  symbol: '₹',
-  decimalDigits: 0,
-);
+String _rupee(num? v) => money.rupees(v);
 final _time = DateFormat('HH:mm');
 
 /// Collapsible strip of everything due today: manual reminders (swipe/tap to
@@ -89,7 +86,7 @@ class _TodaySectionState extends ConsumerState<TodaySection> {
                     child: Text(
                       '$total',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 14,
                         fontWeight: FontWeight.bold,
                         color: hero ? AppColors.onPrimary : AppColors.primary,
                       ),
@@ -140,7 +137,7 @@ class _ReminderTile extends ConsumerWidget {
       ),
       title: Text(
         customerName ?? (note?.isNotEmpty == true ? note! : 'Reminder'),
-        style: TextStyle(fontSize: 13, color: textColor),
+        style: TextStyle(fontSize: 14, color: textColor),
       ),
       subtitle: Text(
         [
@@ -148,8 +145,8 @@ class _ReminderTile extends ConsumerWidget {
           if (customerName != null && note?.isNotEmpty == true) note,
         ].join(' · '),
         style: TextStyle(
-          fontSize: 11,
-          color: heroMode ? AppColors.onPrimary.withValues(alpha: 0.65) : AppColors.textTertiary,
+          fontSize: 14,
+          color: heroMode ? AppColors.onPrimary.withValues(alpha: 0.65) : AppColors.textSecondary,
         ),
       ),
       trailing: IconButton(
@@ -206,16 +203,16 @@ class _PtpTile extends StatelessWidget {
       ),
       title: Text(
         ptp['customer_name'] as String? ?? '',
-        style: TextStyle(fontSize: 13, color: textColor),
+        style: TextStyle(fontSize: 14, color: textColor),
       ),
       subtitle: Text(
-        'PTP${amount != null ? ': ${_rupee.format(amount)}' : ''}'
+        'PTP${amount != null ? ': ${_rupee(amount)}' : ''}'
         '${overdue ? ' · Overdue' : ''}',
         style: TextStyle(
-          fontSize: 11,
+          fontSize: 14,
           color: heroMode
               ? AppColors.onPrimary.withValues(alpha: 0.65)
-              : (overdue ? AppColors.error : AppColors.textTertiary),
+              : (overdue ? AppColors.error : AppColors.textSecondary),
         ).tabular,
       ),
     );

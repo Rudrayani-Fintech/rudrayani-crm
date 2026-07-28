@@ -48,20 +48,22 @@ class SyncBanner extends ConsumerWidget {
                         ? 'Syncing ${q.pending} offline action(s)…'
                         : '${q.pending} action(s) waiting to sync — tap to view'),
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 14,
                   color: q.lastError != null ? AppColors.errorStrong : AppColors.warningStrong,
                 ),
               ),
             ),
             if (q.lastError != null)
               TextButton(
+                style: TextButton.styleFrom(minimumSize: const Size(0, AppDimens.tapTarget)),
                 onPressed: () => ref.read(offlineQueueProvider.notifier).clearError(),
-                child: const Text('Dismiss', style: TextStyle(fontSize: 12)),
+                child: const Text('Dismiss', style: TextStyle(fontSize: 14)),
               )
             else if (!q.syncing)
               TextButton(
+                style: TextButton.styleFrom(minimumSize: const Size(0, AppDimens.tapTarget)),
                 onPressed: () => ref.read(offlineQueueProvider.notifier).flush(),
-                child: const Text('Sync now', style: TextStyle(fontSize: 12)),
+                child: const Text('Sync now', style: TextStyle(fontSize: 14)),
               ),
           ],
         ),
@@ -118,10 +120,11 @@ class _PendingSyncSheet extends ConsumerWidget {
                           subtitle: Text(
                             '${DateFormat('dd MMM, HH:mm').format(item.createdAt.toLocal())}'
                             '${item.deadLetter ? ' · failed after ${item.retryCount} attempts' : item.retryCount > 0 ? ' · retried ${item.retryCount}x' : ''}',
-                            style: const TextStyle(fontSize: 12),
+                            style: const TextStyle(fontSize: 14),
                           ),
                           trailing: item.deadLetter
                               ? TextButton(
+                                  style: TextButton.styleFrom(minimumSize: const Size(0, AppDimens.tapTarget)),
                                   onPressed: () => ref.read(offlineQueueProvider.notifier).discard(item.clientKey),
                                   child: const Text('Discard'),
                                 )

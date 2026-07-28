@@ -31,7 +31,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { RcFile } from "antd/es/upload";
-import type { Dayjs } from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
@@ -1040,7 +1040,7 @@ function ImportHistory() {
             title: "Date",
             dataIndex: "created_at",
             width: 170,
-            render: (v: string) => new Date(v).toLocaleString("en-IN"),
+            render: (v: string) => dayjs(v).format("DD MMM YYYY, HH:mm"),
           },
           { title: "File", dataIndex: "file_name", render: (v) => v ?? "—" },
           { title: "Template", dataIndex: "template_name", render: (v) => v ?? "—" },

@@ -4,14 +4,12 @@ import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { rupees as fmtAmount } from "../utils/money";
 import type { ReallocationRequest, ReallocationStatus } from "../types";
 
 dayjs.extend(relativeTime);
 
 type StatusFilter = ReallocationStatus | "all";
-
-const fmtAmount = (v: string | number | null | undefined) =>
-  v == null ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 const STATUS_TAG: Record<ReallocationStatus, { color: string; label: string }> = {
   pending: { color: "gold", label: "Pending" },

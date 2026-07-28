@@ -200,6 +200,17 @@ export default function AppLayout() {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
+      <style>{`
+        /* The header row (name, My Team/Work toggle, theme toggle, alerts,
+           capability tags, logout) previously had no wrap/overflow guard
+           and no narrow-screen fallback -- on a phone-width viewport it
+           either broke the page's own layout or clipped the logout button.
+           Capability tags are the least essential item here, so they're
+           the first to go; app-header itself scrolls as a last resort. */
+        @media (max-width: 600px) {
+          .header-capability-tags { display: none; }
+        }
+      `}</style>
       <Sider
         breakpoint="lg"
         collapsedWidth={0}
@@ -225,11 +236,13 @@ export default function AppLayout() {
       </Sider>
       <Layout>
         <Header
+          className="app-header"
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
             paddingInline: 24,
+            overflowX: "auto",
           }}
         >
           <Space>
@@ -263,11 +276,13 @@ export default function AppLayout() {
               />
             </Tooltip>
             <AlertsBell />
-            {user?.capabilities.map((c) => (
-              <Tag color="blue" key={c}>
-                {CAPABILITY_LABELS[c]}
-              </Tag>
-            ))}
+            <span className="header-capability-tags">
+              {user?.capabilities.map((c) => (
+                <Tag color="blue" key={c}>
+                  {CAPABILITY_LABELS[c]}
+                </Tag>
+              ))}
+            </span>
             <Button
               icon={<LogoutOutlined />}
               onClick={async () => {

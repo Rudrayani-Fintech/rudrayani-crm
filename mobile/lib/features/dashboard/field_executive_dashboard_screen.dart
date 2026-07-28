@@ -6,16 +6,12 @@ import '../../core/auth/auth_provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/friendly_error.dart';
+import '../../core/utils/money.dart' as money;
 import '../../core/utils/parser.dart';
 import 'package:go_router/go_router.dart';
 import 'dashboard_widgets.dart';
 
-String _lakh(num? v) {
-  if (v == null) return '—';
-  final l = v / 100000;
-  if (l.abs() >= 0.01) return '${l.toStringAsFixed(2)}L';
-  return NumberFormat.decimalPattern('en_IN').format(v);
-}
+String _lakh(num? v) => money.lakh(v);
 
 /// Own attendance/GPS + receipts for today. /tracking/team-day is
 /// self-scoped for a field_agent (Phase 12: tracking.view granted with a

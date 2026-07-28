@@ -19,6 +19,7 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { palette } from "../theme/tokens";
+import { rupees as fmtAmount } from "../utils/money";
 import type { Company, ReviewItem, ReviewItemType } from "../types";
 
 dayjs.extend(relativeTime);
@@ -29,9 +30,6 @@ const TYPE_TAG: Record<ReviewItemType, { color: string; label: string }> = {
   reactivation: { color: "orange", label: "Reactivation" },
   update: { color: "gold", label: "Update" },
 };
-
-const fmtAmount = (v: number | string | null | undefined) =>
-  v == null ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 interface ItemDetail {
   item: ReviewItem;

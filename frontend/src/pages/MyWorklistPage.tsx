@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Collapse, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Badge, Button, Collapse, Input, Modal, Select, Space, Table, Tag, Typography, message, theme } from "antd";
 import { CalendarOutlined, DollarOutlined, EditOutlined, EnvironmentOutlined, FileTextOutlined, PhoneOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
@@ -9,14 +9,13 @@ import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
 import LogCallModal from "../components/LogCallModal";
 import RecordPaymentModal from "../components/RecordPaymentModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "../components/ReportCorrectionModal";
+import { bucketSeverityColor, useBucketSeverity } from "../hooks/useBucketSeverity";
 import { useWorkScope } from "../scope/WorkScopeContext";
 import { palette } from "../theme/tokens";
+import { rupees as fmtAmount } from "../utils/money";
 import type { DispositionCode, WorklistCustomer } from "../types";
 
 dayjs.extend(relativeTime);
-
-const fmtAmount = (v: string | number | null | undefined) =>
-  v == null ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 interface ReminderDue {
   id: string;
@@ -79,6 +78,13 @@ const CORRECTABLE_KIND: Partial<Record<AgentActivityRow["kind"], CorrectableReco
  * (GET /worklist), but a denser table suited to a desk/keyboard.
  */
 export default function MyWorklistPage() {
+  // palette.border below used to be the static, light-mode-only value --
+  // in dark mode this list-item divider stayed light-gray on a dark
+  // surface, mismatching every other border on the page. token.useToken()
+  // resolves to whichever mode is actually active (see SummaryStat.tsx for
+  // the same fix applied to a card background).
+  const { token } = theme.useToken();
+  const bucketSeverity = useBucketSeverity();
   const { user } = useAuth();
   const isBranchManager = !!user?.capabilities.includes("branch_manager");
 
@@ -369,7 +375,7 @@ export default function MyWorklistPage() {
                             justifyContent: "space-between",
                             gap: 12,
                             padding: "8px 12px",
-                            border: `1px solid ${palette.border}`,
+                            border: `1px solid ${token.colorBorderSecondary}`,
                             borderRadius: 6,
                           }}
                         >
@@ -462,7 +468,7 @@ export default function MyWorklistPage() {
             title: "Bucket",
             dataIndex: "bucket",
             width: 80,
-            render: (v: string | null) => (v ? <Tag color="orange">{v}</Tag> : "-"),
+            render: (v: string | null) => (v ? <Tag color={bucketSeverityColor(v, bucketSeverity)}>{v}</Tag> : "-"),
           },
           {
             title: "Due Amount",

@@ -37,7 +37,7 @@ class DashboardStatCard extends StatelessWidget {
           children: [
             Text(
               label,
-              style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, letterSpacing: 0.3),
+              style: const TextStyle(fontSize: 14, color: AppColors.textSecondary, letterSpacing: 0.3),
             ),
             const SizedBox(height: 2),
             Text(
@@ -47,7 +47,7 @@ class DashboardStatCard extends StatelessWidget {
             ),
             if (sub != null) ...[
               const SizedBox(height: 2),
-              Text(sub!, style: const TextStyle(fontSize: 11, color: AppColors.textTertiary).tabular),
+              Text(sub!, style: const TextStyle(fontSize: 14, color: AppColors.textSecondary).tabular),
             ],
           ],
         ),
@@ -119,9 +119,9 @@ class DashboardGapCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                 const SizedBox(height: 2),
-                Text(reason, style: const TextStyle(fontSize: 11, color: AppColors.textTertiary)),
+                Text(reason, style: const TextStyle(fontSize: 14, color: AppColors.textSecondary)),
               ],
             ),
           ),

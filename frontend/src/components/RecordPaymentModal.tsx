@@ -5,6 +5,7 @@ import type { UploadFile } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { api, errorMessage } from "../api/client";
 import { palette } from "../theme/tokens";
+import { rupees } from "../utils/money";
 
 const MODE_OPTIONS = ["Cash", "NEFT", "RTGS", "UPI", "Cheque", "DD"].map((m) => ({ value: m, label: m }));
 // Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI).
@@ -122,7 +123,7 @@ export default function RecordPaymentModal({
               }}
             >
               <Typography.Text style={{ fontSize: 12, color: palette.warning }}>
-                This is more than what&apos;s owed (₹{dueAmount!.toLocaleString("en-IN")} due). Double-check
+                This is more than what&apos;s owed ({rupees(dueAmount)} due). Double-check
                 the amount.
               </Typography.Text>
               <div>

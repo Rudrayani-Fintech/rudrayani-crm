@@ -2,6 +2,7 @@ import { Collapse, Descriptions, Drawer, Space, Spin, Table, Tag, message } from
 import dayjs from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { rupees as fmtAmount } from "../utils/money";
 import BreakdownTable from "./dashboard/BreakdownTable";
 import type { DashboardFilters } from "./dashboard/types";
 
@@ -50,8 +51,6 @@ interface BranchDetail {
   };
 }
 
-const fmtAmount = (v: string | number | null | undefined) =>
-  v == null || v === "" ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const orDash = (v: string | number | null | undefined) => (v == null || v === "" ? "-" : v);
 
 const METRIC_LABEL: Record<string, string> = {

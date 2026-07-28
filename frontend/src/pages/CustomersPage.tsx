@@ -17,7 +17,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
+import { bucketSeverityColor, useBucketSeverity } from "../hooks/useBucketSeverity";
 import { downloadCsv } from "../utils/csv";
+import { rupees as fmtAmount } from "../utils/money";
 import type { Company, Customer } from "../types";
 
 const STATUS_TAG: Record<string, { color: string; label: string }> = {
@@ -38,6 +40,7 @@ interface Product {
 // instead of undoing the last filter change, and a customer drawer could
 // never be linked to a colleague (no URL represented it at all).
 export default function CustomersPage() {
+  const bucketSeverity = useBucketSeverity();
   const [searchParams, setSearchParams] = useSearchParams();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [customerBranches, setCustomerBranches] = useState<{value: string; label: string}[]>([]);
@@ -134,9 +137,6 @@ export default function CustomersPage() {
   useEffect(() => {
     load(1);
   }, [load]);
-
-  const fmtAmount = (v: string | null) =>
-    v == null ? "—" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
   return (
     <div>
@@ -317,7 +317,7 @@ export default function CustomersPage() {
             title: "Bucket",
             dataIndex: "bucket",
             width: 80,
-            render: (v) => (v ? <Tag color="orange">{v}</Tag> : "—"),
+            render: (v) => (v ? <Tag color={bucketSeverityColor(v, bucketSeverity)}>{v}</Tag> : "—"),
           },
           {
             title: "Due Amount",

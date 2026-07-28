@@ -5,12 +5,9 @@ import 'package:intl/intl.dart';
 import 'correction_request_dialog.dart';
 import 'customer_detail_provider.dart';
 import '../../../core/utils/parser.dart';
+import '../../core/utils/money.dart' as money;
 
-final _rupee = NumberFormat.currency(
-  locale: 'en_IN',
-  symbol: '₹',
-  decimalDigits: 0,
-);
+String _rupee(num? v) => money.rupees(v);
 final _dateTime = DateFormat('dd MMM yyyy, HH:mm');
 
 class _HistoryEntry {
@@ -74,7 +71,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
         at: DateTime.parse(m['paid_at'] as String),
         icon: Icons.currency_rupee,
         color: AppColors.success,
-        title: 'Payment: ${_rupee.format(parseDouble(m['amount']) ?? 0.0)}',
+        title: 'Payment: ${_rupee(parseDouble(m['amount']) ?? 0.0)}',
         subtitle: m['mode'] as String?,
         correctableRecordType: 'payment',
         recordId: m['id'] as String?,
@@ -109,7 +106,7 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
         icon: Icons.calendar_today,
         color: AppColors.accent,
         title:
-            'PTP: ${_rupee.format(parseDouble(m['amount']) ?? 0.0)} '
+            'PTP: ${_rupee(parseDouble(m['amount']) ?? 0.0)} '
             '(${m['status']})',
         subtitle: m['promised_date'] != null
             ? 'Promised ${DateFormat('dd MMM yyyy').format(DateTime.parse(m['promised_date'] as String))}'
@@ -187,7 +184,7 @@ class HistoryTimeline extends ConsumerWidget {
                     children: [
                       if (dueAmount != null) ...[
                         Text(
-                          'Due: ${_rupee.format(dueAmount)}',
+                          'Due: ${_rupee(dueAmount)}',
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
@@ -197,7 +194,7 @@ class HistoryTimeline extends ConsumerWidget {
                       ],
                       if (emi != null)
                         Text(
-                          'EMI: ${_rupee.format(emi)}',
+                          'EMI: ${_rupee(emi)}',
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,

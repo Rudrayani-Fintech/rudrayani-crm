@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { DatePicker, Input, InputNumber, Modal, Radio, Select, Space, Typography, message } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { api, errorMessage } from "../api/client";
+import { rupees } from "../utils/money";
 import type { DispositionCode } from "../types";
 
 const MODE_OPTIONS = ["NEFT", "RTGS", "Cash", "UPI", "Cheque", "DD"].map((m) => ({ value: m, label: m }));
@@ -108,7 +109,7 @@ export default function LogCallModal({
       });
       if (res.data.ptp) {
         message.success(
-          `Call logged — PTP recorded: ₹${Number(res.data.ptp.amount).toLocaleString("en-IN")} by ${dayjs(res.data.ptp.promised_date).format("DD MMM")}`,
+          `Call logged — PTP recorded: ${rupees(res.data.ptp.amount)} by ${dayjs(res.data.ptp.promised_date).format("DD MMM")}`,
         );
       } else {
         message.success("Call logged");

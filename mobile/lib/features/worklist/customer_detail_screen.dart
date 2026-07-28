@@ -10,17 +10,14 @@ import '../../core/models/customer.dart';
 import '../../core/utils/friendly_error.dart';
 import '../../core/utils/messaging.dart';
 import '../../core/widgets/state_views.dart';
+import '../../core/utils/money.dart' as money;
 import '../attachments/attachments_section.dart';
 import '../reminders/reminder_sheet.dart';
 import 'customer_detail_provider.dart';
 import 'history_timeline.dart';
 import 'worklist_provider.dart';
 
-final _rupee = NumberFormat.currency(
-  locale: 'en_IN',
-  symbol: '₹',
-  decimalDigits: 0,
-);
+String _rupee(num? v) => money.rupees(v);
 
 /// Import column headers arrive as raw keys (e.g. "customer_dob",
 /// "PAN-number") — turn them into a readable label instead of showing the
@@ -127,10 +124,10 @@ class _CustomerDetailBody extends ConsumerWidget {
     if (customer.ptpDate != null) {
       final due = DateFormat('dd MMM yyyy').format(customer.ptpDate!.toLocal());
       body = customer.ptpAmount != null
-          ? 'this is a reminder of your promised payment of ${_rupee.format(customer.ptpAmount)} by $due.'
+          ? 'this is a reminder of your promised payment of ${_rupee(customer.ptpAmount)} by $due.'
           : 'this is a reminder of your promised payment by $due.';
     } else if (customer.dueAmount != null && customer.dueAmount! > 0) {
-      body = 'this is a reminder that ${_rupee.format(customer.dueAmount)} is due on your loan '
+      body = 'this is a reminder that ${_rupee(customer.dueAmount)} is due on your loan '
           '${customer.loanNumber}. Please arrange payment at the earliest.';
     } else {
       body = 'this is a reminder regarding your loan ${customer.loanNumber}. Please get in touch at your earliest convenience.';
@@ -407,11 +404,11 @@ class _CustomerDetailBody extends ConsumerWidget {
                   if (customer.dueAmount != null)
                     _Row(
                       'Due Amount',
-                      _rupee.format(customer.dueAmount),
+                      _rupee(customer.dueAmount),
                       isMonetary: true,
                     ),
                   if (customer.emi != null)
-                    _Row('EMI', _rupee.format(customer.emi), isMonetary: true),
+                    _Row('EMI', _rupee(customer.emi), isMonetary: true),
                 ],
               ),
               const SizedBox(height: 12),
@@ -445,7 +442,7 @@ class _CustomerDetailBody extends ConsumerWidget {
                   children: [
                     _Row(
                       'Amount',
-                      _rupee.format(customer.ptpAmount),
+                      _rupee(customer.ptpAmount),
                       isMonetary: true,
                     ),
                     _Row(

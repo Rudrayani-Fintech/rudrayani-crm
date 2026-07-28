@@ -5,12 +5,10 @@ import relativeTime from "dayjs/plugin/relativeTime";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { palette } from "../theme/tokens";
+import { rupees as fmtAmount } from "../utils/money";
 import type { Employee, ReallocationRequest, ReallocationStatus } from "../types";
 
 dayjs.extend(relativeTime);
-
-const fmtAmount = (v: string | number | null | undefined) =>
-  v == null ? "-" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 const STATUS_TAG: Record<ReallocationStatus, { color: string; label: string }> = {
   pending: { color: "gold", label: "Pending" },

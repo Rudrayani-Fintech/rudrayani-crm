@@ -147,12 +147,22 @@ router.post(
         [body.agent_id, agent.team_id, body.customer_ids],
       );
 
-      for (const c of custRes.rows) {
-        if (c.assigned_agent_id === body.agent_id) continue; // no-op move, don't log
+      // One INSERT per customer previously meant up to 500 round-trips
+      // inside this same transaction for a large batch assign -- a single
+      // parallel-unnest INSERT does the same rows in one round-trip.
+      const toLog = custRes.rows.filter((c) => c.assigned_agent_id !== body.agent_id);
+      if (toLog.length > 0) {
         await client.query(
           `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
-           VALUES ($1, $2, $3, $4, $5, 'primary')`,
-          [c.id, c.assigned_agent_id, body.agent_id, req.user!.id, body.reason ?? null],
+           SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::uuid[], $5::text[], $6::text[])`,
+          [
+            toLog.map((c) => c.id),
+            toLog.map((c) => c.assigned_agent_id),
+            toLog.map(() => body.agent_id),
+            toLog.map(() => req.user!.id),
+            toLog.map(() => body.reason ?? null),
+            toLog.map(() => "primary"),
+          ],
         );
       }
 
@@ -219,12 +229,19 @@ router.post(
         [body.agent_id, body.customer_ids],
       );
 
-      for (const c of custRes.rows) {
-        if (c.assigned_field_agent_id === body.agent_id) continue;
+      const toLog = custRes.rows.filter((c) => c.assigned_field_agent_id !== body.agent_id);
+      if (toLog.length > 0) {
         await client.query(
           `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason, slot)
-           VALUES ($1, $2, $3, $4, $5, 'field')`,
-          [c.id, c.assigned_field_agent_id, body.agent_id, req.user!.id, body.reason ?? null],
+           SELECT * FROM unnest($1::uuid[], $2::uuid[], $3::uuid[], $4::uuid[], $5::text[], $6::text[])`,
+          [
+            toLog.map((c) => c.id),
+            toLog.map((c) => c.assigned_field_agent_id),
+            toLog.map(() => body.agent_id),
+            toLog.map(() => req.user!.id),
+            toLog.map(() => body.reason ?? null),
+            toLog.map(() => "field"),
+          ],
         );
       }
 

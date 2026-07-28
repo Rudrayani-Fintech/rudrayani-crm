@@ -6,8 +6,10 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import {
+  cacheParsedSheet,
   commitImport,
   computeAllocationDiff,
+  getOrParseSheet,
   hasExistingAllocationForMonth,
   parseWorkbook,
   previewNewLabels,
@@ -15,7 +17,39 @@ import {
   type ColumnMapping,
 } from "../services/import-service";
 import { resolveFieldCatalog } from "../services/field-config-service";
+import { recordAuditLog } from "../services/audit-log-service";
 import { getStorage } from "../services/storage/storage-provider";
+
+// import_row_backups.prior_values is only ever written by this app's own
+// fixed SELECT lists (see commitImport()'s "update" backup and
+// import-reviews.ts's "removal" backup) -- never from a user/CSV-supplied
+// column name -- so there's no live SQL-injection path today. This allow-
+// list exists as the same explicit, self-documenting guard
+// correction-requests.ts's assertAllowedFields() already uses for its own
+// dynamic UPDATE, so a future change to either SELECT can't silently start
+// interpolating an unvetted key here without this throwing first.
+const ROLLBACK_ALLOWED_FIELDS = new Set([
+  "customer_name",
+  "mobile_number",
+  "product",
+  "bucket",
+  "due_amount",
+  "pos",
+  "emi",
+  "due_date",
+  "custom_fields",
+  "assigned_agent_id",
+  "assigned_team_id",
+  "branch_id",
+  "status",
+]);
+
+function assertRollbackFieldsAllowed(fields: string[]): void {
+  const bad = fields.filter((f) => !ROLLBACK_ALLOWED_FIELDS.has(f));
+  if (bad.length > 0) {
+    throw new HttpError(500, `Rollback cannot restore unexpected field(s): ${bad.join(", ")}`);
+  }
+}
 
 const router = Router();
 router.use(authenticate, requirePermission("imports.manage"));
@@ -94,6 +128,9 @@ router.post(
     }
     const sheet = await parseWorkbook(req.file.buffer);
     const key = await getStorage().save("imports", "xlsx", req.file.buffer);
+    // Already parsed above -- cache it now under the key /preview and
+    // /commit will use, so they don't re-read and re-parse the same file.
+    cacheParsedSheet(key, sheet);
     res.status(201).json({
       upload_key: key,
       file_name: req.file.originalname,
@@ -133,7 +170,7 @@ router.post(
       body.template_id,
       body.column_mapping,
     );
-    const sheet = await parseWorkbook(await getStorage().read(body.upload_key));
+    const sheet = await getOrParseSheet(body.upload_key, () => getStorage().read(body.upload_key));
     const result = await validateRows(body.company_id, sheet, mapping);
 
     if (body.mode !== "allocation") {
@@ -266,7 +303,7 @@ router.post(
       body.template_id,
       body.column_mapping,
     );
-    const sheet = await parseWorkbook(await getStorage().read(body.upload_key));
+    const sheet = await getOrParseSheet(body.upload_key, () => getStorage().read(body.upload_key));
     const result = await commitImport({
       companyId: body.company_id,
       templateId,
@@ -311,38 +348,52 @@ router.delete(
   asyncHandler(async (req, res) => {
     const runId = z.string().uuid().parse(req.params.id);
 
-    const runRow = await pool.query(
-      `SELECT r.id, r.mode, r.company_id FROM import_runs r
-        JOIN companies c ON c.id = r.company_id
-       WHERE r.id = $1 AND c.agency_id = $2 AND r.deleted_at IS NULL`,
-      [runId, req.user!.agency_id],
-    );
-    if (!runRow.rows[0]) throw new HttpError(404, "Import run not found");
-    if (runRow.rows[0].mode !== "new") {
-      throw new HttpError(400, "Only new-mode import runs can be deleted");
-    }
-
-    const worked = await pool.query(
-      `SELECT 1 FROM customers c
-        WHERE c.import_run_id = $1
-          AND (c.assigned_agent_id IS NOT NULL
-            OR c.assigned_field_agent_id IS NOT NULL
-            OR EXISTS (SELECT 1 FROM payments p WHERE p.customer_id = c.id)
-            OR EXISTS (SELECT 1 FROM call_logs cl WHERE cl.customer_id = c.id)
-            OR EXISTS (SELECT 1 FROM ptps pt WHERE pt.customer_id = c.id))
-        LIMIT 1`,
-      [runId],
-    );
-    if (worked.rows.length > 0) {
-      throw new HttpError(
-        400,
-        "Cannot delete: some customers from this run have been assigned or worked. Recall them first.",
-      );
-    }
-
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+
+      // Previously both of the checks below ran as separate pool.query()
+      // calls before this transaction even started (before client.connect(),
+      // before BEGIN) -- a concurrent allocation or payment could land in
+      // that gap and be silently destroyed by the DELETE below. Running them
+      // on `client` inside the transaction, with FOR UPDATE locking the
+      // customer rows, closes the race against any writer that itself locks
+      // the row (payments.ts does). It narrows but does not fully close the
+      // race against call_logs/field_visits/ptps inserts, since those write
+      // paths don't take a row lock on customers -- closing that fully would
+      // mean adding FOR UPDATE to those insert paths too, which is out of
+      // scope for this pass.
+      const runRow = await client.query(
+        `SELECT r.id, r.mode, r.company_id FROM import_runs r
+          JOIN companies c ON c.id = r.company_id
+         WHERE r.id = $1 AND c.agency_id = $2 AND r.deleted_at IS NULL
+         FOR UPDATE OF r`,
+        [runId, req.user!.agency_id],
+      );
+      if (!runRow.rows[0]) throw new HttpError(404, "Import run not found");
+      if (runRow.rows[0].mode !== "new") {
+        throw new HttpError(400, "Only new-mode import runs can be deleted");
+      }
+
+      const worked = await client.query(
+        `SELECT 1 FROM customers c
+          WHERE c.import_run_id = $1
+            AND (c.assigned_agent_id IS NOT NULL
+              OR c.assigned_field_agent_id IS NOT NULL
+              OR EXISTS (SELECT 1 FROM payments p WHERE p.customer_id = c.id)
+              OR EXISTS (SELECT 1 FROM call_logs cl WHERE cl.customer_id = c.id)
+              OR EXISTS (SELECT 1 FROM ptps pt WHERE pt.customer_id = c.id))
+          LIMIT 1
+          FOR UPDATE OF c`,
+        [runId],
+      );
+      if (worked.rows.length > 0) {
+        throw new HttpError(
+          400,
+          "Cannot delete: some customers from this run have been assigned or worked. Recall them first.",
+        );
+      }
+
       // delete dependents before customers (FK order)
       await client.query(
         `DELETE FROM import_review_items WHERE import_run_id = $1`,
@@ -366,6 +417,13 @@ router.delete(
         `UPDATE import_runs SET deleted_at = now() WHERE id = $1`,
         [runId],
       );
+      await recordAuditLog(client, {
+        agencyId: req.user!.agency_id,
+        actorId: req.user!.id,
+        action: "import.delete_run",
+        entityType: "import_run",
+        entityId: runId,
+      });
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -387,52 +445,73 @@ router.post(
   "/runs/:id/rollback",
   asyncHandler(async (req, res) => {
     const runId = z.string().uuid().parse(req.params.id);
-    const runRow = await pool.query(
-      `SELECT r.id, r.company_id, r.rolled_back_at FROM import_runs r
-        JOIN companies c ON c.id = r.company_id
-       WHERE r.id = $1 AND c.agency_id = $2`,
-      [runId, req.user!.agency_id],
-    );
-    if (!runRow.rows[0]) throw new HttpError(404, "Import run not found");
-    if (runRow.rows[0].rolled_back_at) {
-      throw new HttpError(400, "This import run has already been rolled back");
-    }
-
-    // Get all backups for this run
-    const backups = await pool.query(
-      `SELECT id, customer_id, kind, prior_values, created_at FROM import_row_backups
-        WHERE import_run_id = $1
-        ORDER BY created_at`,
-      [runId],
-    );
-
-    if (backups.rows.length === 0) {
-      throw new HttpError(400, "No backups found for this import run");
-    }
-
-    // Check which customers have been worked since their backup was created
-    const blockedResult = await pool.query(
-      `SELECT DISTINCT irb.customer_id, c.loan_number
-         FROM import_row_backups irb
-         JOIN customers c ON c.id = irb.customer_id
-        WHERE irb.import_run_id = $1
-          AND (
-            EXISTS (SELECT 1 FROM allocation_logs al WHERE al.customer_id = irb.customer_id AND al.created_at > irb.created_at)
-            OR EXISTS (SELECT 1 FROM payments p WHERE p.customer_id = irb.customer_id AND p.created_at > irb.created_at)
-            OR EXISTS (SELECT 1 FROM call_logs cl WHERE cl.customer_id = irb.customer_id AND cl.created_at > irb.created_at)
-            OR EXISTS (SELECT 1 FROM ptps pt WHERE pt.customer_id = irb.customer_id AND pt.created_at > irb.created_at)
-            OR EXISTS (SELECT 1 FROM import_runs ir2 WHERE ir2.id != $1 AND ir2.created_at > irb.created_at AND EXISTS (SELECT 1 FROM customers c2 WHERE c2.id = irb.customer_id AND c2.import_run_id = ir2.id))
-          )`,
-      [runId],
-    );
-
-    if (blockedResult.rows.length > 0) {
-      throw new HttpError(409, `Rollback blocked: ${blockedResult.rows.length} customer(s) have been worked since. ${blockedResult.rows.map((r: { loan_number: string }) => r.loan_number).join(", ")}`);
-    }
+    let rolledBackCount = 0;
 
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+
+      // Previously the run/backups/blocked-customer checks below all ran as
+      // separate pool.query() calls before this transaction started -- a
+      // concurrent payment, call log or PTP could land in that gap and be
+      // silently overwritten by the restores below. Running them on `client`
+      // inside the transaction, with FOR UPDATE locking both the run row and
+      // the affected customer rows, closes the race against any writer that
+      // itself locks the row (payments.ts does). It narrows but does not
+      // fully close the race against call_logs/field_visits/ptps inserts,
+      // since those write paths don't take a row lock on customers.
+      const runRow = await client.query(
+        `SELECT r.id, r.company_id, r.rolled_back_at FROM import_runs r
+          JOIN companies c ON c.id = r.company_id
+         WHERE r.id = $1 AND c.agency_id = $2
+         FOR UPDATE OF r`,
+        [runId, req.user!.agency_id],
+      );
+      if (!runRow.rows[0]) throw new HttpError(404, "Import run not found");
+      if (runRow.rows[0].rolled_back_at) {
+        throw new HttpError(400, "This import run has already been rolled back");
+      }
+
+      // Get all backups for this run
+      const backups = await client.query(
+        `SELECT id, customer_id, kind, prior_values, created_at FROM import_row_backups
+          WHERE import_run_id = $1
+          ORDER BY created_at`,
+        [runId],
+      );
+
+      if (backups.rows.length === 0) {
+        throw new HttpError(400, "No backups found for this import run");
+      }
+      rolledBackCount = backups.rows.length;
+
+      // Lock every customer row this rollback will touch before checking
+      // or reversing anything, so a concurrent locked writer (payments.ts)
+      // blocks here rather than racing past this check.
+      await client.query(
+        `SELECT 1 FROM customers WHERE id = ANY($1::uuid[]) FOR UPDATE`,
+        [backups.rows.map((b) => b.customer_id)],
+      );
+
+      // Check which customers have been worked since their backup was created
+      const blockedResult = await client.query(
+        `SELECT DISTINCT irb.customer_id, c.loan_number
+           FROM import_row_backups irb
+           JOIN customers c ON c.id = irb.customer_id
+          WHERE irb.import_run_id = $1
+            AND (
+              EXISTS (SELECT 1 FROM allocation_logs al WHERE al.customer_id = irb.customer_id AND al.created_at > irb.created_at)
+              OR EXISTS (SELECT 1 FROM payments p WHERE p.customer_id = irb.customer_id AND p.created_at > irb.created_at)
+              OR EXISTS (SELECT 1 FROM call_logs cl WHERE cl.customer_id = irb.customer_id AND cl.created_at > irb.created_at)
+              OR EXISTS (SELECT 1 FROM ptps pt WHERE pt.customer_id = irb.customer_id AND pt.created_at > irb.created_at)
+              OR EXISTS (SELECT 1 FROM import_runs ir2 WHERE ir2.id != $1 AND ir2.created_at > irb.created_at AND EXISTS (SELECT 1 FROM customers c2 WHERE c2.id = irb.customer_id AND c2.import_run_id = ir2.id))
+            )`,
+        [runId],
+      );
+
+      if (blockedResult.rows.length > 0) {
+        throw new HttpError(409, `Rollback blocked: ${blockedResult.rows.length} customer(s) have been worked since. ${blockedResult.rows.map((r: { loan_number: string }) => r.loan_number).join(", ")}`);
+      }
 
       // Process each backup and reverse it per kind
       for (const backup of backups.rows) {
@@ -441,6 +520,7 @@ router.post(
         if (kind === "update") {
           // Restore prior field values
           const priorData = prior_values as Record<string, unknown>;
+          assertRollbackFieldsAllowed(Object.keys(priorData));
           const setClauses: string[] = [];
           const values: unknown[] = [customer_id];
           let paramIdx = 2;
@@ -479,6 +559,7 @@ router.post(
         } else if (kind === "removal") {
           // Reactivate by restoring prior state
           const priorData = prior_values as Record<string, unknown>;
+          assertRollbackFieldsAllowed(Object.keys(priorData));
           const setClauses: string[] = [];
           const values: unknown[] = [customer_id];
           let paramIdx = 2;
@@ -506,6 +587,15 @@ router.post(
         [runId],
       );
 
+      await recordAuditLog(client, {
+        agencyId: req.user!.agency_id,
+        actorId: req.user!.id,
+        action: "import.rollback",
+        entityType: "import_run",
+        entityId: runId,
+        details: { backups_reversed: rolledBackCount },
+      });
+
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -514,7 +604,7 @@ router.post(
       client.release();
     }
 
-    res.json({ ok: true, rolled_back_count: backups.rows.length });
+    res.json({ ok: true, rolled_back_count: rolledBackCount });
   }),
 );
 

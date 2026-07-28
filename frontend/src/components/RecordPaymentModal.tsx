@@ -75,6 +75,11 @@ export default function RecordPaymentModal({
       if (paidAt) form.append("paid_at", paidAt.format("YYYY-MM-DD"));
       form.append("close_customer", String(closeCustomer));
       if (photo) form.append("photo", photo);
+      // Mobile's offline queue has always sent this (double-submit
+      // protection on retry); the web client never did, so a double-click
+      // or a retried request after a dropped response had no protection
+      // at all here. crypto.randomUUID() needs no new dependency.
+      form.append("client_key", crypto.randomUUID());
 
       const res = await api.post("/payments", form, {
         headers: { "Content-Type": "multipart/form-data" },

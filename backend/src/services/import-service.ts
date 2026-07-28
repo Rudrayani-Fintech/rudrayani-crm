@@ -79,6 +79,33 @@ function cellToString(value: ExcelJS.CellValue): string {
   return String(value).trim();
 }
 
+// The same uploaded file is parsed at /upload, /preview, and /commit --
+// previously three full re-reads and re-parses of potentially the same
+// multi-thousand-row workbook. Keyed by the storage upload_key (immutable
+// once written), so caching it is pure -- a hit is always correct, and a
+// miss (e.g. a different server instance behind a load balancer, or the
+// entry aged out) just falls back to the original parse-from-storage path
+// with no behavior change.
+const PARSED_SHEET_CACHE_TTL_MS = 60 * 60 * 1000;
+const parsedSheetCache = new Map<string, { sheet: ParsedSheet; cachedAt: number }>();
+
+export function cacheParsedSheet(key: string, sheet: ParsedSheet): void {
+  parsedSheetCache.set(key, { sheet, cachedAt: Date.now() });
+  for (const [k, v] of parsedSheetCache) {
+    if (Date.now() - v.cachedAt > PARSED_SHEET_CACHE_TTL_MS) parsedSheetCache.delete(k);
+  }
+}
+
+/** Returns the cached parse for this upload_key if still fresh, otherwise
+ *  parses `buffer()` and caches the result under `key`. */
+export async function getOrParseSheet(key: string, buffer: () => Promise<Buffer>): Promise<ParsedSheet> {
+  const cached = parsedSheetCache.get(key);
+  if (cached && Date.now() - cached.cachedAt <= PARSED_SHEET_CACHE_TTL_MS) return cached.sheet;
+  const sheet = await parseWorkbook(await buffer());
+  cacheParsedSheet(key, sheet);
+  return sheet;
+}
+
 export async function parseWorkbook(buffer: Buffer): Promise<ParsedSheet> {
   const workbook = new ExcelJS.Workbook();
   try {

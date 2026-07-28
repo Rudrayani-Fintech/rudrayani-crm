@@ -6,12 +6,24 @@
  *   npm run seed:dispositions -- <agency_id>
  */
 import path from "node:path";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { pool } from "../config/db";
 
 const FILE_PATH = path.join(__dirname, "Trail_Codes.xlsx");
 
-type SheetRow = (string | number | undefined | null)[];
+type CellValue = string | number | undefined | null;
+
+function cellText(value: ExcelJS.CellValue): CellValue {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "object") {
+    // Rich text / hyperlink / formula-result cells.
+    const v = value as { text?: string; result?: unknown };
+    if (typeof v.text === "string") return v.text;
+    if (v.result !== undefined) return cellText(v.result as ExcelJS.CellValue);
+    return null;
+  }
+  return value as CellValue;
+}
 
 // Best-effort keyword tagging of which structured fields a template needs.
 // Review/adjust this mapping after the first run -- it's a starting point,
@@ -35,24 +47,32 @@ async function run(): Promise<void> {
     process.exit(1);
   }
 
-  const workbook = XLSX.readFile(FILE_PATH);
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json<SheetRow>(sheet, { header: 1 });
+  // Was the xlsx package (known advisories, unmaintained) -- exceljs is
+  // already a dependency and used everywhere else in this codebase for the
+  // same job, so this was the one remaining reason xlsx was installed at all.
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(FILE_PATH);
+  const sheet = workbook.worksheets[0];
+  if (!sheet) throw new Error("Trail_Codes.xlsx has no worksheets");
 
-  // Row 0 is the header: Sr, Action Code, Majorly used result code, Result code, Description, Remarks
-  const dataRows = rows
-    .slice(1)
-    .filter((r) => r.some((cell) => cell !== undefined && cell !== null));
+  // Row 1 is the header: Sr, Action Code, Majorly used result code, Result code, Description, Remarks
+  const dataRows: CellValue[][] = [];
+  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) return;
+    const cells: CellValue[] = [];
+    for (let col = 1; col <= 6; col++) cells.push(cellText(row.getCell(col).value));
+    if (cells.some((c) => c !== undefined && c !== null)) dataRows.push(cells);
+  });
 
   let inserted = 0;
   // Some rows carry only a remark: they are extra remark-template variants of the
   // disposition code above them (e.g. rows 3-10 are all "CB" call-back variants).
   // Forward-fill the parent's codes so every variant is preserved as its own row.
   let last: {
-    actionCode: string | number | undefined | null;
-    category: string | number | undefined | null;
-    resultCode: string | number | undefined | null;
-    description: string | number | undefined | null;
+    actionCode: CellValue;
+    category: CellValue;
+    resultCode: CellValue;
+    description: CellValue;
   } = { actionCode: null, category: null, resultCode: null, description: null };
 
   for (const row of dataRows) {

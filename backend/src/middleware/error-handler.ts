@@ -39,6 +39,18 @@ export function errorHandler(
     return;
   }
   if (err instanceof HttpError) {
+    // A burst of 401/403s (a scope-clamp rejecting an out-of-branch write, a
+    // token that stopped validating) is exactly the kind of thing worth
+    // seeing in logs/monitoring -- previously nothing here logged at all, so
+    // an authorization bypass attempt or a broken scope check both looked
+    // identical to normal traffic. 404/409/400 stay unlogged; those are
+    // routine and would just be noise.
+    if (err.status === 401 || err.status === 403) {
+      logger.warn(
+        { status: err.status, method: req.method, path: req.path, userId: req.user?.id },
+        err.message,
+      );
+    }
     res.status(err.status).json({ error: err.message, details: err.details });
     return;
   }

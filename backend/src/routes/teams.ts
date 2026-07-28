@@ -24,6 +24,10 @@ async function assertBranchInAgency(branchId: string, agencyId: string): Promise
 
 // Teams are a pure branch-scoped grouping (Phase 2: no per-team leader --
 // every team in a branch reports directly to that branch's branch_manager).
+// Phase 9 RBAC sweep (1B.9): GET is left open to any authenticated user in
+// the agency, same reasoning as branches.ts/dispositions.ts/buckets.ts --
+// team names only, not financial or customer data, and every role needs the
+// full list for pickers (allocation, employee assignment, report filters).
 router.get(
   "/",
   asyncHandler(async (req, res) => {

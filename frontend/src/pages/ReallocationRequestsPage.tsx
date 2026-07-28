@@ -64,12 +64,16 @@ export default function ReallocationRequestsPage() {
     void load();
   }, [load]);
 
+  // Skipped while already viewing "pending" -- load() above sets
+  // pendingCount for free from that same response, so firing this too on
+  // every load() was a guaranteed extra request for no new information.
   useEffect(() => {
+    if (status === "pending") return;
     api
       .get("/reallocation-requests", { params: { status: "pending" } })
       .then((res) => setPendingCount(res.data.total))
       .catch((err) => message.error(errorMessage(err)));
-  }, [requests]);
+  }, [status, requests]);
 
   const decide = async (id: string, approve: boolean, opts?: { new_agent_id?: string; note?: string }) => {
     try {

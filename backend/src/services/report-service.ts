@@ -207,14 +207,23 @@ function isCurrentMonth(month: string, now = new Date()): boolean {
  * mirrors reportBranchClause()'s own "only ever widen, never narrow" fix
  * for the identical problem on branch_id.
  */
-function reportTeamClause(teamId: string, params: unknown[]): string {
+function reportTeamClause(
+  teamId: string,
+  params: unknown[],
+  customerAlias: string,
+  agentCols: string[],
+): string {
   params.push(teamId);
   const n = params.length;
-  return `(s.assigned_team_id = $${n} OR EXISTS (
-    SELECT 1 FROM users rtc_agent WHERE rtc_agent.id = s.assigned_agent_id
-      AND (rtc_agent.team_id = $${n}
-           OR EXISTS (SELECT 1 FROM telecaller_teams tt WHERE tt.user_id = rtc_agent.id AND tt.team_id = $${n}))
-  ))`;
+  const parts = [`${customerAlias}.assigned_team_id = $${n}`];
+  for (const col of agentCols) {
+    parts.push(
+      `EXISTS (SELECT 1 FROM users rtc_agent WHERE rtc_agent.id = ${col}
+        AND (rtc_agent.team_id = $${n}
+             OR EXISTS (SELECT 1 FROM telecaller_teams tt WHERE tt.user_id = rtc_agent.id AND tt.team_id = $${n})))`,
+    );
+  }
+  return `(${parts.join(" OR ")})`;
 }
 
 /** WHERE fragments for the snapshot base under the resolved filters. */
@@ -228,7 +237,7 @@ function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
     conditions.push(reportBranchClause(filters.branch_id, params, "c", "tm", ["s.assigned_agent_id"]));
   }
   if (filters.team_id) {
-    conditions.push(reportTeamClause(filters.team_id, params));
+    conditions.push(reportTeamClause(filters.team_id, params, "s", ["s.assigned_agent_id"]));
   }
   if (filters.agent_id) {
     params.push(filters.agent_id);
@@ -276,8 +285,15 @@ function liveConditions(filters: ReportFilters, params: unknown[]): string[] {
     );
   }
   if (filters.team_id) {
-    params.push(filters.team_id);
-    conditions.push(`c.assigned_team_id = $${params.length}`);
+    // Previously a bare `c.assigned_team_id = $N` -- same collapse-to-zero
+    // bug as baseConditions() had (1B.4) for any team-less agent, just on
+    // the live-customers path instead of the snapshot path.
+    conditions.push(
+      reportTeamClause(filters.team_id, params, "c", [
+        "c.assigned_agent_id",
+        "c.assigned_field_agent_id",
+      ]),
+    );
   }
   if (filters.agent_id) {
     params.push(filters.agent_id);

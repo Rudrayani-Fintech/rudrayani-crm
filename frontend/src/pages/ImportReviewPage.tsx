@@ -91,14 +91,17 @@ export default function ImportReviewPage() {
     void load();
   }, [load]);
 
-  // Keep the pending badge accurate even when viewing a different status/type filter.
+  // Keep the pending badge accurate even when viewing a different status/type
+  // filter. Skipped entirely while already viewing "pending" -- load() above
+  // sets pendingCount for free from that same response, so firing this too
+  // on every load() was a guaranteed extra request for no new information.
   useEffect(() => {
-    if (!companyId) return;
+    if (!companyId || status === "pending") return;
     api
       .get("/import-reviews", { params: { company_id: companyId, status: "pending", limit: 1 } })
       .then((res) => setPendingCount(res.data.total))
       .catch((err) => message.error(errorMessage(err)));
-  }, [companyId, items]);
+  }, [companyId, status, items]);
 
   const loadDetail = async (id: string) => {
     if (expandedDetail[id]) return;

@@ -67,7 +67,7 @@ class _TodaySectionState extends ConsumerState<TodaySection> {
               "Today's Actions",
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                fontSize: hero ? 14 : 13,
+                fontSize: 14,
                 color: hero ? AppColors.onPrimary : null,
               ),
             ),
@@ -128,49 +128,56 @@ class _ReminderTile extends ConsumerWidget {
     final note = reminder['note'] as String?;
     final textColor = heroMode ? AppColors.onPrimary : null;
 
-    return ListTile(
-      dense: true,
-      leading: Icon(
-        Icons.notifications_active,
-        size: 18,
-        color: heroMode ? AppColors.onPrimary.withValues(alpha: 0.8) : AppColors.warning,
-      ),
-      title: Text(
-        customerName ?? (note?.isNotEmpty == true ? note! : 'Reminder'),
-        style: TextStyle(fontSize: 14, color: textColor),
-      ),
-      subtitle: Text(
-        [
-          _time.format(remindAt),
-          if (customerName != null && note?.isNotEmpty == true) note,
-        ].join(' · '),
-        style: TextStyle(
-          fontSize: 14,
-          color: heroMode ? AppColors.onPrimary.withValues(alpha: 0.65) : AppColors.textSecondary,
+    // dense: true alone let this row settle under AppDimens.listRow (56.0),
+    // the codebase's own "strict, not aspirational" minimum -- a reminder
+    // row is a tap target (leads to mark-done / navigation), not passive
+    // text, so it must not be smaller than any other tappable row.
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+      child: ListTile(
+        dense: true,
+        leading: Icon(
+          Icons.notifications_active,
+          size: 18,
+          color: heroMode ? AppColors.onPrimary.withValues(alpha: 0.8) : AppColors.warning,
         ),
-      ),
-      trailing: IconButton(
-        icon: Icon(
-          Icons.check_circle_outline,
-          size: 20,
-          color: heroMode ? AppColors.onPrimary : null,
+        title: Text(
+          customerName ?? (note?.isNotEmpty == true ? note! : 'Reminder'),
+          style: TextStyle(fontSize: 14, color: textColor),
         ),
-        tooltip: 'Mark done',
-        onPressed: () async {
-          try {
-            await ref
-                .read(remindersControllerProvider)
-                .markDone(reminder['id'] as String);
-          } catch (_) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Could not update — try again when online'),
-                ),
-              );
+        subtitle: Text(
+          [
+            _time.format(remindAt),
+            if (customerName != null && note?.isNotEmpty == true) note,
+          ].join(' · '),
+          style: TextStyle(
+            fontSize: 14,
+            color: heroMode ? AppColors.onPrimary.withValues(alpha: 0.65) : AppColors.textSecondary,
+          ),
+        ),
+        trailing: IconButton(
+          icon: Icon(
+            Icons.check_circle_outline,
+            size: 20,
+            color: heroMode ? AppColors.onPrimary : null,
+          ),
+          tooltip: 'Mark done',
+          onPressed: () async {
+            try {
+              await ref
+                  .read(remindersControllerProvider)
+                  .markDone(reminder['id'] as String);
+            } catch (_) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Could not update — try again when online'),
+                  ),
+                );
+              }
             }
-          }
-        },
+          },
+        ),
       ),
     );
   }
@@ -192,28 +199,31 @@ class _PtpTile extends StatelessWidget {
     final amount = parseDouble(ptp['amount']);
     final textColor = heroMode ? AppColors.onPrimary : null;
 
-    return ListTile(
-      dense: true,
-      leading: Icon(
-        Icons.schedule,
-        size: 18,
-        color: heroMode
-            ? AppColors.onPrimary.withValues(alpha: 0.8)
-            : (overdue ? AppColors.error : AppColors.warning),
-      ),
-      title: Text(
-        ptp['customer_name'] as String? ?? '',
-        style: TextStyle(fontSize: 14, color: textColor),
-      ),
-      subtitle: Text(
-        'PTP${amount != null ? ': ${_rupee(amount)}' : ''}'
-        '${overdue ? ' · Overdue' : ''}',
-        style: TextStyle(
-          fontSize: 14,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: AppDimens.listRow),
+      child: ListTile(
+        dense: true,
+        leading: Icon(
+          Icons.schedule,
+          size: 18,
           color: heroMode
-              ? AppColors.onPrimary.withValues(alpha: 0.65)
-              : (overdue ? AppColors.error : AppColors.textSecondary),
-        ).tabular,
+              ? AppColors.onPrimary.withValues(alpha: 0.8)
+              : (overdue ? AppColors.error : AppColors.warning),
+        ),
+        title: Text(
+          ptp['customer_name'] as String? ?? '',
+          style: TextStyle(fontSize: 14, color: textColor),
+        ),
+        subtitle: Text(
+          'PTP${amount != null ? ': ${_rupee(amount)}' : ''}'
+          '${overdue ? ' · Overdue' : ''}',
+          style: TextStyle(
+            fontSize: 14,
+            color: heroMode
+                ? AppColors.onPrimary.withValues(alpha: 0.65)
+                : (overdue ? AppColors.error : AppColors.textSecondary),
+          ).tabular,
+        ),
       ),
     );
   }

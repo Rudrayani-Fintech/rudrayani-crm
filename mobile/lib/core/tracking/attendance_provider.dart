@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_client.dart';
 import '../auth/auth_provider.dart';
+import '../offline/offline_queue.dart';
 import '../offline/read_cache.dart';
 import '../utils/friendly_error.dart';
 import 'tracking_service.dart';
@@ -116,12 +117,7 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
     state = state.copyWith(busy: true, error: null);
     try {
       if (_exemptFromGps) {
-        final res = await _api.post('/attendance/punch-in', data: const {});
-        state = state.copyWith(
-          punchedIn: true,
-          punchInAt: DateTime.tryParse(res.data['attendance']?['punch_in_at'] ?? ''),
-          busy: false,
-        );
+        await _punchInRequest(const {});
         return;
       }
 
@@ -138,16 +134,15 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
       // punch-in with coordinates omitted rather than blocking the agent
       // indoors or on a cold GPS start.
       final pos = await TrackingService.currentPosition();
-      final res = await _api.post('/attendance/punch-in', data: {
+      await _punchInRequest({
         if (pos != null) 'lat': pos.latitude,
         if (pos != null) 'lng': pos.longitude,
       });
+      // Starts regardless of whether the request above was confirmed or
+      // just queued offline -- tracking_task.dart already accumulates and
+      // syncs pings independently of whether the shift has landed
+      // server-side yet, so there's no reason to withhold it here.
       await TrackingService.start(pingIntervalSeconds: await _pingIntervalSeconds());
-      state = state.copyWith(
-        punchedIn: true,
-        punchInAt: DateTime.tryParse(res.data['attendance']?['punch_in_at'] ?? ''),
-        busy: false,
-      );
     } on DioException catch (e) {
       if (e.response?.statusCode == 409) {
         // Server already has an open shift — adopt it and start tracking.
@@ -158,6 +153,36 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
       }
     } catch (e) {
       state = state.copyWith(busy: false, error: _friendlyError(e));
+    }
+  }
+
+  /// Sends the punch-in request; if there's no connectivity, queues it
+  /// instead (offline_queue.dart's 'punch_in' handling opens the real shift
+  /// once it syncs) and marks the shift open locally so the agent isn't
+  /// hard-locked on the punch-in screen for the rest of the day offline --
+  /// previously punch-in had no offline fallback at all, unlike every other
+  /// money-critical action in the app.
+  Future<void> _punchInRequest(Map<String, dynamic> data) async {
+    try {
+      final res = await _api.post('/attendance/punch-in', data: data);
+      state = state.copyWith(
+        punchedIn: true,
+        punchInAt: DateTime.tryParse(res.data['attendance']?['punch_in_at'] ?? ''),
+        busy: false,
+      );
+    } catch (e) {
+      if (!isOfflineError(e)) rethrow;
+      await ref.read(offlineQueueProvider.notifier).enqueue(QueuedAction(
+            clientKey: OfflineQueueNotifier.newClientKey(),
+            type: 'punch_in',
+            payload: data,
+            createdAt: DateTime.now(),
+          ));
+      state = state.copyWith(
+        punchedIn: true,
+        punchInAt: DateTime.now(),
+        busy: false,
+      );
     }
   }
 

@@ -38,6 +38,7 @@ import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { palette } from "../theme/tokens";
 import type { Company, ImportRun, ImportTemplate } from "../types";
+import { rupees } from "../utils/money";
 
 // Owner feedback round, Phase 10: the system field list (which keys exist,
 // which are required-to-map) is no longer a hardcoded const here -- it's
@@ -546,12 +547,12 @@ function ImportWizard() {
     {
       title: "Due Amount",
       dataIndex: "due_amount",
-      render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
+      render: (v: number | null) => (v == null ? "-" : rupees(v)),
     },
     {
       title: "POS",
       dataIndex: "pos",
-      render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
+      render: (v: number | null) => (v == null ? "-" : rupees(v)),
     },
   ];
 
@@ -561,7 +562,7 @@ function ImportWizard() {
     {
       title: "EMI Due Amount",
       dataIndex: "emi",
-      render: (v: number | null) => (v == null ? "-" : v.toLocaleString("en-IN")),
+      render: (v: number | null) => (v == null ? "-" : rupees(v)),
     },
   ];
 

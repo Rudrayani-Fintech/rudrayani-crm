@@ -64,7 +64,7 @@ export default function OverviewChart({ filters }: { filters: DashboardFilters }
               Total Collection ({viewAll ? "All Months" : "Last 3 Months"})
             </Typography.Text>
             <div className="money" style={{ color: "#D1FAE5", fontSize: 22, fontWeight: 700 }}>
-              {new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(total)}
+              {lakh(total)}
             </div>
           </div>
           <a style={{ color: palette.emerald, fontSize: 13 }} onClick={() => setViewAll((v) => !v)}>

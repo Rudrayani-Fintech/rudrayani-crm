@@ -23,7 +23,7 @@ const int maxAutoRetries = 8;
 class QueuedAction {
   final String clientKey;
   final String
-  type; // 'call_log' | 'payment' | 'field_visit' | 'reminder' | 'attachment'
+  type; // 'call_log' | 'payment' | 'field_visit' | 'reminder' | 'attachment' | 'punch_in'
   final Map<String, dynamic> payload;
   final String? photoPath; // durable copy for queued payments/visits
   final DateTime createdAt;
@@ -240,18 +240,34 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
                 ),
             });
             await api.postForm('/attachments', form);
+          } else if (item.type == 'punch_in') {
+            await api.post('/attendance/punch-in', data: item.payload);
           }
           await _remove(box, item);
         } on DioException catch (e) {
-          if (_isOffline(e)) return; // still offline — keep everything queued
+          final failureClass = classifyFailure(e);
+          if (failureClass == FailureClass.offline) {
+            return; // still offline — keep everything queued
+          }
+          // A queued punch-in that lands after the shift was already opened
+          // some other way (e.g. the agent also punched in from a second
+          // device, or a prior sync attempt actually succeeded server-side
+          // before the response was lost) gets a 409 "Already punched in" --
+          // that is the shift existing exactly as intended, not a failure,
+          // so it's dropped quietly instead of surfaced as a rejection.
+          if (item.type == 'punch_in' && e.response?.statusCode == 409) {
+            await _remove(box, item);
+            continue;
+          }
           final label = switch (item.type) {
             'payment' => 'Payment',
             'field_visit' => 'Field visit',
             'reminder' => 'Reminder',
             'attachment' => 'Document',
+            'punch_in' => 'Punch-in',
             _ => 'Call log',
           };
-          if (_isPermanentRejection(e)) {
+          if (failureClass == FailureClass.permanent) {
             rejections.add(
               '$label could not sync: '
               '${e.response?.data?['error'] ?? e.response?.statusCode ?? e.message}',
@@ -305,23 +321,6 @@ class OfflineQueueNotifier extends StateNotifier<OfflineQueueState> {
   }
 
   void clearError() => state = state.copyWith(lastError: null);
-
-  static bool _isOffline(DioException e) =>
-      e.type == DioExceptionType.connectionError ||
-      e.type == DioExceptionType.connectionTimeout ||
-      e.type == DioExceptionType.sendTimeout ||
-      e.type == DioExceptionType.receiveTimeout ||
-      (e.type == DioExceptionType.unknown && e.error is SocketException);
-
-  /// A 4xx response is the server explicitly rejecting the record (bad
-  /// data, closed customer, retired disposition code) — retrying it won't
-  /// help, so it's safe to drop after surfacing why. Anything else with a
-  /// response (5xx) or no response at all (that isn't a recognized offline
-  /// error) is treated as transient and retried instead of deleted.
-  static bool _isPermanentRejection(DioException e) {
-    final status = e.response?.statusCode;
-    return status != null && status >= 400 && status < 500;
-  }
 }
 
 final offlineQueueProvider =
@@ -331,5 +330,38 @@ final offlineQueueProvider =
 
 /// True when this Dio failure means "no connectivity" — the caller should
 /// queue the action instead of showing an error.
-bool isOfflineError(Object e) =>
-    e is DioException && OfflineQueueNotifier._isOffline(e);
+bool isOfflineError(Object e) => e is DioException && classifyFailure(e) == FailureClass.offline;
+
+/// How a failed sync attempt should be handled. Extracted as a pure function
+/// (no Hive/network access) so the branching flush() relies on -- offline
+/// vs. permanent-4xx vs. transient-5xx -- can be unit tested directly,
+/// matching the pattern already used for resolveDashboardRole() in
+/// home_shell.dart to work around Hive/connectivity_plus platform channels
+/// not being mockable anywhere in this test suite.
+enum FailureClass {
+  /// No connectivity — keep everything queued, stop the flush entirely.
+  offline,
+
+  /// A 4xx response: the server is explicitly rejecting the record (bad
+  /// data, closed customer, retired disposition code). Retrying won't help,
+  /// so it's safe to drop after surfacing why.
+  permanent,
+
+  /// 5xx or an unrecognized error shape — retried on the next flush, up to
+  /// [maxAutoRetries], then parked as a dead letter.
+  transient,
+}
+
+FailureClass classifyFailure(DioException e) {
+  final isOffline = e.type == DioExceptionType.connectionError ||
+      e.type == DioExceptionType.connectionTimeout ||
+      e.type == DioExceptionType.sendTimeout ||
+      e.type == DioExceptionType.receiveTimeout ||
+      (e.type == DioExceptionType.unknown && e.error is SocketException);
+  if (isOffline) return FailureClass.offline;
+
+  final status = e.response?.statusCode;
+  if (status != null && status >= 400 && status < 500) return FailureClass.permanent;
+
+  return FailureClass.transient;
+}

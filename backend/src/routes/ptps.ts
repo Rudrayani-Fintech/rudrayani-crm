@@ -26,6 +26,8 @@ router.get(
       .object({
         customer_id: z.string().uuid().optional(),
         status: z.enum(["pending", "kept", "broken"]).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(200).default(100),
       })
       .parse(req.query);
 
@@ -55,6 +57,27 @@ router.get(
       if (clampSql) filters.push(clampSql.replace(/^ AND /, ""));
     }
 
+    const where = `WHERE co.agency_id = $1 ${filters.map((f) => `AND ${f}`).join("\n          ")}`;
+
+    // Previously a hard LIMIT 100 with no offset and no real total, so the
+    // client silently saw a truncated list with no way to tell more existed
+    // or to reach it -- the one caller today (mobile's PTP screen) always
+    // scopes to a single customer_id so this never bit in practice, but a
+    // future agency-wide PTP register (Phase 6.3, deferred) would hit it
+    // immediately without a real page/limit contract in place first.
+    const countParams = [...params];
+    const { rows: countRows } = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::int AS count
+         FROM ptps p
+         JOIN customers c ON c.id = p.customer_id
+         JOIN companies co ON co.id = c.company_id
+         JOIN users u ON u.id = p.agent_id
+        ${where}`,
+      countParams,
+    );
+    const total = Number(countRows[0]?.count ?? 0);
+
+    params.push(q.limit, (q.page - 1) * q.limit);
     const { rows } = await pool.query(
       `SELECT p.id, p.amount, p.promised_date, p.mode, p.status, p.created_at,
               c.id AS customer_id, c.loan_number, c.customer_name,
@@ -63,13 +86,12 @@ router.get(
          JOIN customers c ON c.id = p.customer_id
          JOIN companies co ON co.id = c.company_id
          JOIN users u ON u.id = p.agent_id
-        WHERE co.agency_id = $1
-          ${filters.map((f) => `AND ${f}`).join("\n          ")}
+        ${where}
         ORDER BY p.created_at DESC
-        LIMIT 100`,
+        LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params,
     );
-    res.json({ ptps: rows, total: rows.length });
+    res.json({ ptps: rows, total, page: q.page, limit: q.limit });
   }),
 );
 

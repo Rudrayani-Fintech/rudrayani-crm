@@ -9,6 +9,7 @@ import { detectPaymentNormalization } from "../services/bucket-movement-service"
 import { markOldestPendingPtpKept, refreshNextActionDate } from "../services/ptp-service";
 import { nextReceiptNo } from "../services/receipt-service";
 import { listDeposits } from "../services/report-service";
+import { recordAuditLog } from "../services/audit-log-service";
 import { customerWriteScopeClamp } from "../services/scope";
 import { getStorage } from "../services/storage/storage-provider";
 
@@ -43,7 +44,11 @@ const paymentBody = z.object({
   close_customer: z
     .union([z.boolean(), z.enum(["true", "false"]).transform((v) => v === "true")])
     .default(false),
-  client_key: z.string().uuid().optional(), // offline-sync idempotency key
+  // Required (not just optional) -- mobile's offline queue always sent one,
+  // but the web client didn't, so double-submit protection (a double-click,
+  // a retried request after a dropped response) simply didn't exist there.
+  // Both clients now generate one; see RecordPaymentModal.tsx.
+  client_key: z.string().uuid(),
 });
 
 /** Look up a payment previously created with this idempotency key. */
@@ -268,6 +273,16 @@ router.patch(
           AND p.deposited_at IS NULL`,
       [req.user!.id, req.user!.agency_id, body.payment_ids],
     );
+    if ((rowCount ?? 0) > 0) {
+      await recordAuditLog(pool, {
+        agencyId: req.user!.agency_id,
+        actorId: req.user!.id,
+        action: "payments.mark_deposited",
+        entityType: "payment",
+        entityId: null,
+        details: { payment_ids: body.payment_ids, marked: rowCount },
+      });
+    }
     res.json({ ok: true, marked: rowCount ?? 0 });
   }),
 );

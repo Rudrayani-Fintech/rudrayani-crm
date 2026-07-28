@@ -1134,8 +1134,12 @@ export async function dashboard(
   const filters = scope.filters;
   const days = monthDays(filters.month.slice(0, 7));
   const useTransition = await hasNextMonthSnapshot(user.agency_id, filters);
-  const agg = await classify(user.agency_id, filters, useTransition);
-  const deposits = await depositTotals(user.agency_id, filters);
+  // classify() and depositTotals() depend on nothing but filters/useTransition
+  // -- previously sequential for no reason.
+  const [agg, deposits] = await Promise.all([
+    classify(user.agency_id, filters, useTransition),
+    depositTotals(user.agency_id, filters),
+  ]);
 
   const basisOf = (metric: ReportMetric): "transition" | "payments" =>
     metric === "recovery" ? "payments" : useTransition ? "transition" : "payments";
@@ -1167,13 +1171,21 @@ export async function dashboard(
     };
   };
 
-  const collectionTarget = await resolveTarget(user.agency_id, "collection", filters);
-  const collectionBook = await bookTotals(user.agency_id, filters);
-  const [todayAmount, byType, byChannel] = await Promise.all([
-    collectedToday(user.agency_id, filters),
-    collectionByType(user.agency_id, filters),
-    collectionByChannel(user.agency_id, filters),
-  ]);
+  const [collectionTarget, collectionBook, todayAmount, byType, byChannel, resolutionBlock, rollbackBlock, normalizationBlock, recoveryBlock] =
+    await Promise.all([
+      resolveTarget(user.agency_id, "collection", filters),
+      bookTotals(user.agency_id, filters),
+      collectedToday(user.agency_id, filters),
+      collectionByType(user.agency_id, filters),
+      collectionByChannel(user.agency_id, filters),
+      // The four metric blocks each call resolveTarget() independently with
+      // a different metric -- previously four sequential await block(...)
+      // calls inside the object literal below, now run together.
+      block("resolution", agg.resolution_amount, agg.resolution_count, agg.allocated_amount, agg.allocated_count),
+      block("rollback", agg.rollback_amount, agg.rollback_count, agg.allocated_amount, agg.allocated_count),
+      block("normalization", agg.normalization_amount, agg.normalization_count, agg.allocated_amount, agg.allocated_count),
+      block("recovery", agg.recovery_amount, agg.recovery_count, agg.recovery_allocated_amount, agg.recovery_allocated_count),
+    ]);
 
   return {
     month: filters.month.slice(0, 7),
@@ -1181,34 +1193,10 @@ export async function dashboard(
     scope: { clamped_to: scope.clampedTo },
     allocated: { amount: agg.allocated_amount, count: agg.allocated_count },
     metrics: {
-      resolution: await block(
-        "resolution",
-        agg.resolution_amount,
-        agg.resolution_count,
-        agg.allocated_amount,
-        agg.allocated_count,
-      ),
-      rollback: await block(
-        "rollback",
-        agg.rollback_amount,
-        agg.rollback_count,
-        agg.allocated_amount,
-        agg.allocated_count,
-      ),
-      normalization: await block(
-        "normalization",
-        agg.normalization_amount,
-        agg.normalization_count,
-        agg.allocated_amount,
-        agg.allocated_count,
-      ),
-      recovery: await block(
-        "recovery",
-        agg.recovery_amount,
-        agg.recovery_count,
-        agg.recovery_allocated_amount,
-        agg.recovery_allocated_count,
-      ),
+      resolution: resolutionBlock,
+      rollback: rollbackBlock,
+      normalization: normalizationBlock,
+      recovery: recoveryBlock,
     },
     collection: {
       // Use deposits.collected (paymentConditions-based) — attributes to whoever
@@ -1340,17 +1328,24 @@ export async function agentBreakdown(
     ]),
   );
 
+  // All the agent rows' names/teams in one query instead of one round-trip
+  // per agent -- 30 agents previously meant 30 near-identical single-row
+  // lookups here alone, on top of the per-agent resolveTarget() calls below.
+  const allAgentIds = Array.from(new Set([...rows.map((r) => String(r.agent_id)), ...collectedByAgent.keys()]));
+  const { rows: agentInfoRows } = await pool.query<{ id: string; full_name: string; team_name: string | null }>(
+    `SELECT u.id, u.full_name, tm.name AS team_name FROM users u
+      LEFT JOIN teams tm ON tm.id = u.team_id WHERE u.id = ANY($1::uuid[])`,
+    [allAgentIds],
+  );
+  const agentInfoById = new Map(agentInfoRows.map((r) => [r.id, r]));
+
   const result: AgentReportRow[] = [];
   const processedAgentIds = new Set<string>();
 
   for (const row of rows) {
     const agentIdStr = String(row.agent_id);
     processedAgentIds.add(agentIdStr);
-    const { rows: users } = await pool.query(
-      `SELECT u.full_name, tm.name AS team_name FROM users u
-        LEFT JOIN teams tm ON tm.id = u.team_id WHERE u.id = $1`,
-      [row.agent_id],
-    );
+    const agentInfo = agentInfoById.get(agentIdStr);
     const target = await resolveTarget(user.agency_id, "collection", {
       ...filters,
       agent_id: row.agent_id as string,
@@ -1359,8 +1354,8 @@ export async function agentBreakdown(
     const actualCollected = collectedInfo?.collected_amount ?? 0;
     result.push({
       agent_id: row.agent_id,
-      full_name: users[0]?.full_name ?? "—",
-      team_name: users[0]?.team_name ?? null,
+      full_name: agentInfo?.full_name ?? "—",
+      team_name: agentInfo?.team_name ?? null,
       allocated_amount: row.allocated_amount,
       allocated_count: row.allocated_count,
       collected_amount: actualCollected,

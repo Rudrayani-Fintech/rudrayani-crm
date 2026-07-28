@@ -337,7 +337,11 @@ export default function TargetsPage() {
             </Empty>
           ),
         }}
-        pagination={false}
+        // 300 agents × 6 InputNumbers apiece was 1,800 always-mounted
+        // controlled inputs on one page. Edits are keyed by scope_id in
+        // `edits`/`saved` state (not by page), so paging the visible rows
+        // doesn't lose anything already typed on another page.
+        pagination={{ pageSize: 50, showSizeChanger: true, pageSizeOptions: [50, 100, 200] }}
         scroll={{ x: 1110 }}
         size="small"
       />

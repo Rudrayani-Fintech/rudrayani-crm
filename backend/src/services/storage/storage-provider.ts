@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { env } from "../../config/env";
+import { logger } from "../../config/logger";
 
 /**
  * File storage abstraction (confirmed decision: local disk in dev, behind an
@@ -106,6 +107,19 @@ let provider: StorageProvider | undefined;
 
 export function getStorage(): StorageProvider {
   if (!provider) {
+    const hasR2Config = env.R2_ENDPOINT && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET;
+    if (!hasR2Config && env.NODE_ENV === "production") {
+      // Render (and most hosted platforms) wipe or don't persist local disk
+      // across deploys/restarts -- silently falling back to LocalDiskStorage
+      // here meant every payment photo, signature, and import file uploaded
+      // since the last deploy was gone on the next one, with nothing in the
+      // logs to explain why until someone noticed a missing photo.
+      logger.warn(
+        "R2 storage is not configured (R2_ENDPOINT/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET) " +
+          "but NODE_ENV=production -- falling back to local disk storage, which does NOT survive a redeploy " +
+          "on Render. Uploaded files (payment photos, signatures, import spreadsheets) will be lost on the next deploy.",
+      );
+    }
     provider =
       env.R2_ENDPOINT && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET
         ? new S3CompatibleStorage(

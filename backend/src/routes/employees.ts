@@ -9,6 +9,7 @@ import { capabilitiesHavePermission } from "../services/permission-service";
 import { dimensionBreakdown, type BreakdownRow } from "../services/report-service";
 import { assertBranchManager } from "./branches";
 import { getSmsProvider } from "../services/sms/sms-provider";
+import { recordAuditLog } from "../services/audit-log-service";
 import { logger } from "../config/logger";
 import { resolveBranchClamp } from "../services/scope";
 import {
@@ -886,6 +887,34 @@ router.patch(
       );
       updatedUser = rows[0];
 
+      // Audit trail for the changes that actually matter operationally --
+      // capability/designation, branch/team reassignment, and deactivation.
+      // Written inside this same transaction so it commits or rolls back
+      // atomically with the change it describes.
+      const changedFields: Record<string, unknown> = {};
+      if (body.designation !== undefined && body.designation !== existing.designation) {
+        changedFields.designation = { from: existing.designation, to: body.designation };
+      }
+      if (body.branch_id !== undefined && body.branch_id !== existing.branch_id) {
+        changedFields.branch_id = { from: existing.branch_id, to: body.branch_id };
+      }
+      if (body.team_id !== undefined && body.team_id !== existing.team_id) {
+        changedFields.team_id = { from: existing.team_id, to: body.team_id };
+      }
+      if (body.is_active !== undefined && body.is_active !== existing.is_active) {
+        changedFields.is_active = { from: existing.is_active, to: body.is_active };
+      }
+      if (Object.keys(changedFields).length > 0) {
+        await recordAuditLog(client, {
+          agencyId: req.user!.agency_id,
+          actorId: req.user!.id,
+          action: "employee.update",
+          entityType: "user",
+          entityId: req.params.id,
+          details: changedFields,
+        });
+      }
+
       await client.query("COMMIT");
     } catch (err) {
       await client.query("ROLLBACK");
@@ -930,6 +959,13 @@ router.post(
       "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
       [req.params.id],
     );
+    await recordAuditLog(pool, {
+      agencyId: req.user!.agency_id,
+      actorId: req.user!.id,
+      action: "employee.reset_password",
+      entityType: "user",
+      entityId: req.params.id,
+    });
     await notifyCredentials(rows[0].phone, body.new_password, true);
     res.json({ ok: true });
   }),

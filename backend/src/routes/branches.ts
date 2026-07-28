@@ -57,7 +57,14 @@ export async function assertBranchManager(
   }
 }
 
-// Any authenticated user in the agency can list branches (needed for pickers).
+// Phase 9 RBAC sweep (1B.9): reviewed and left open to any authenticated
+// user in the agency, same reasoning as dispositions.ts/buckets.ts -- this
+// returns branch names + manager names, not financial or customer data, and
+// branch-scoped roles are already clamped everywhere that matters (customer
+// lists, reports, allocation). Every role legitimately needs the full list
+// for pickers (assigning an employee, filtering a report by branch, etc.);
+// clamping it to the caller's own branch would break those for everyone
+// except agency_admin/operations_manager.
 router.get(
   "/",
   asyncHandler(async (req, res) => {

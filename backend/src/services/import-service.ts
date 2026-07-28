@@ -653,8 +653,9 @@ export async function commitImport(params: {
       const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, branch_id, import_run_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, branch_id, import_run_id, dpd)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+           CASE WHEN $10::date IS NULL THEN NULL ELSE GREATEST((now() AT TIME ZONE 'Asia/Kolkata')::date - $10::date, 0) END)
          ON CONFLICT (company_id, loan_number) DO NOTHING
          RETURNING id`,
         [
@@ -727,6 +728,10 @@ export async function commitImport(params: {
       );
 
       // The month's file is authoritative for bucket/amounts; blanks keep old values.
+      // dpd is recomputed from the effective due_date here too -- otherwise
+      // a freshly imported/updated customer shows dpd = NULL (or a stale
+      // value from before this import) until the nightly refresh-dpd job
+      // next runs, up to ~24h later.
       await client.query(
         `UPDATE customers
             SET customer_name   = COALESCE($2, customer_name),
@@ -740,7 +745,9 @@ export async function commitImport(params: {
                 custom_fields   = custom_fields || $10::jsonb,
                 assigned_agent_id = COALESCE($11, assigned_agent_id),
                 assigned_team_id  = COALESCE($12, assigned_team_id),
-                branch_id       = COALESCE($13, branch_id)
+                branch_id       = COALESCE($13, branch_id),
+                dpd             = CASE WHEN COALESCE($9, due_date) IS NULL THEN NULL
+                                       ELSE GREATEST((now() AT TIME ZONE 'Asia/Kolkata')::date - COALESCE($9, due_date), 0) END
           WHERE id = $1`,
         [
           cust.id,

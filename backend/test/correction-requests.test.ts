@@ -22,6 +22,7 @@ let agentId: string;
 let paymentId: string;
 let callLogId: string;
 let ptpId: string;
+let fieldVisitId: string;
 
 async function login(phone: string): Promise<string> {
   const res = await request(app).post("/api/auth/login").send({ phone, password: PASSWORD });
@@ -41,19 +42,19 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'CR Reviewer', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'CR Reviewer', $2, $3, true, 'agency_admin')`,
     [agencyId, REVIEWER_PHONE, hash],
   );
   const agent = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller)
-     VALUES ($1, 'CR Agent', $2, $3, true) RETURNING id`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, designation)
+     VALUES ($1, 'CR Agent', $2, $3, true, 'telecaller') RETURNING id`,
     [agencyId, AGENT_PHONE, hash],
   );
   agentId = agent.rows[0].id;
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller)
-     VALUES ($1, 'CR Agent 2', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, designation)
+     VALUES ($1, 'CR Agent 2', $2, $3, true, 'telecaller')`,
     [agencyId, AGENT2_PHONE, hash],
   );
 
@@ -87,6 +88,13 @@ beforeAll(async () => {
   );
   ptpId = ptp.rows[0].id;
 
+  const fieldVisit = await pool.query(
+    `INSERT INTO field_visits (customer_id, agent_id, remark)
+     VALUES ($1, $2, 'Door locked, nobody home') RETURNING id`,
+    [customerId, agentId],
+  );
+  fieldVisitId = fieldVisit.rows[0].id;
+
   reviewerToken = await login(REVIEWER_PHONE);
   agentToken = await login(AGENT_PHONE);
   agent2Token = await login(AGENT2_PHONE);
@@ -94,6 +102,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pool.query("DELETE FROM correction_requests WHERE requested_by IN (SELECT id FROM users WHERE agency_id = $1)", [agencyId]);
+  await pool.query("DELETE FROM field_visits WHERE customer_id = $1", [customerId]);
   await pool.query("DELETE FROM ptps WHERE customer_id = $1", [customerId]);
   await pool.query("DELETE FROM call_logs WHERE customer_id = $1", [customerId]);
   await pool.query("DELETE FROM payments WHERE customer_id = $1", [customerId]);
@@ -262,5 +271,27 @@ describe("correction requests", () => {
       .set("Authorization", `Bearer ${reviewerToken}`)
       .send({ approve: false });
     expect(second.status).toBe(409);
+  });
+
+  it("field visit remark correction applies on approval", async () => {
+    const submit = await request(app)
+      .post("/api/correction-requests")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .send({
+        record_type: "field_visit",
+        record_id: fieldVisitId,
+        proposed_changes: { remark: "Neighbour confirmed they still live there" },
+        reason: "original remark was incomplete",
+      });
+    expect(submit.status).toBe(201);
+
+    const decide = await request(app)
+      .post(`/api/correction-requests/${submit.body.request.id}/decide`)
+      .set("Authorization", `Bearer ${reviewerToken}`)
+      .send({ approve: true });
+    expect(decide.status).toBe(200);
+
+    const visit = await pool.query("SELECT remark FROM field_visits WHERE id = $1", [fieldVisitId]);
+    expect(visit.rows[0].remark).toBe("Neighbour confirmed they still live there");
   });
 });

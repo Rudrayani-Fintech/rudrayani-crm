@@ -25,13 +25,14 @@ import { capabilitiesOf } from "../types/user";
 const router = Router();
 router.use(authenticate);
 
-const RECORD_TYPES = ["payment", "call_log", "ptp"] as const;
+const RECORD_TYPES = ["payment", "call_log", "ptp", "field_visit"] as const;
 type RecordType = (typeof RECORD_TYPES)[number];
 
 const ALLOWED_FIELDS: Record<RecordType, readonly string[]> = {
   payment: ["amount", "mode", "paid_at"],
   call_log: ["remark"],
   ptp: ["amount", "promised_date"],
+  field_visit: ["remark"],
 };
 
 const proposedChangesSchema = z.record(z.string(), z.union([z.string(), z.number()]));
@@ -57,8 +58,9 @@ function coalescedCustomerBranchClamp(clamp: BranchClamp, params: unknown[]): st
   params.push(clamp.branchId, clamp.branchName);
   const idN = params.length - 1;
   const nameN = params.length;
-  const branchIdExpr = "COALESCE(cust_p.branch_id, cust_c.branch_id, cust_t.branch_id)";
-  const customFieldsExpr = "COALESCE(cust_p.custom_fields, cust_c.custom_fields, cust_t.custom_fields)";
+  const branchIdExpr = "COALESCE(cust_p.branch_id, cust_c.branch_id, cust_t.branch_id, cust_f.branch_id)";
+  const customFieldsExpr =
+    "COALESCE(cust_p.custom_fields, cust_c.custom_fields, cust_t.custom_fields, cust_f.custom_fields)";
   return ` AND (${branchIdExpr}::text = $${idN} OR (${branchIdExpr} IS NULL AND (${customFieldsExpr}->>'branch' ILIKE $${nameN} OR ${customFieldsExpr}->>'Branch' ILIKE $${nameN})))`;
 }
 
@@ -82,6 +84,10 @@ async function loadOwnedRecord(
             JOIN customers c ON c.id = p.customer_id
             JOIN companies co ON co.id = c.company_id
            WHERE p.id = $1 AND co.agency_id = $2 AND p.agent_id = $3`,
+    field_visit: `SELECT fv.* FROM field_visits fv
+                    JOIN customers c ON c.id = fv.customer_id
+                    JOIN companies co ON co.id = c.company_id
+                   WHERE fv.id = $1 AND co.agency_id = $2 AND fv.agent_id = $3`,
   };
   const { rows } = await pool.query(queries[recordType], [recordId, agencyId, userId]);
   if (!rows[0]) throw new HttpError(404, "Record not found, or it isn't yours");
@@ -157,9 +163,9 @@ router.get(
               cr.status, cr.decided_at, cr.decision_note, cr.created_at,
               u.id AS requested_by_id, u.full_name AS requested_by_name,
               d.full_name AS decided_by_name,
-              COALESCE(cust_p.id, cust_c.id, cust_t.id) AS customer_id,
-              COALESCE(cust_p.loan_number, cust_c.loan_number, cust_t.loan_number) AS loan_number,
-              COALESCE(cust_p.customer_name, cust_c.customer_name, cust_t.customer_name) AS customer_name
+              COALESCE(cust_p.id, cust_c.id, cust_t.id, cust_f.id) AS customer_id,
+              COALESCE(cust_p.loan_number, cust_c.loan_number, cust_t.loan_number, cust_f.loan_number) AS loan_number,
+              COALESCE(cust_p.customer_name, cust_c.customer_name, cust_t.customer_name, cust_f.customer_name) AS customer_name
          FROM correction_requests cr
          JOIN users u ON u.id = cr.requested_by
          LEFT JOIN users d ON d.id = cr.decided_by
@@ -169,6 +175,8 @@ router.get(
          LEFT JOIN customers cust_c ON cust_c.id = cl.customer_id
          LEFT JOIN ptps pt ON cr.record_type = 'ptp' AND pt.id = cr.record_id
          LEFT JOIN customers cust_t ON cust_t.id = pt.customer_id
+         LEFT JOIN field_visits fv ON cr.record_type = 'field_visit' AND fv.id = cr.record_id
+         LEFT JOIN customers cust_f ON cust_f.id = fv.customer_id
         WHERE u.agency_id = $${agencyParamIndex}
           ${filters.map((f) => `AND ${f}`).join(" ")}
         ORDER BY cr.created_at DESC`,
@@ -204,6 +212,8 @@ async function decideOne(
        LEFT JOIN customers cust_c ON cust_c.id = cl.customer_id
        LEFT JOIN ptps pt ON cr.record_type = 'ptp' AND pt.id = cr.record_id
        LEFT JOIN customers cust_t ON cust_t.id = pt.customer_id
+       LEFT JOIN field_visits fv ON cr.record_type = 'field_visit' AND fv.id = cr.record_id
+       LEFT JOIN customers cust_f ON cust_f.id = fv.customer_id
       WHERE cr.id = $1 AND u.agency_id = $2${reqClampSql}`,
     reqParams,
   );
@@ -220,7 +230,7 @@ async function decideOne(
 
     if (approve) {
       assertAllowedFields(recordType, proposedChanges);
-      const table = { payment: "payments", call_log: "call_logs", ptp: "ptps" }[recordType];
+      const table = { payment: "payments", call_log: "call_logs", ptp: "ptps", field_visit: "field_visits" }[recordType];
       const setClauses: string[] = [];
       const values: unknown[] = [];
       for (const [field, value] of Object.entries(proposedChanges)) {

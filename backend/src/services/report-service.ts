@@ -2046,8 +2046,10 @@ export interface AgentActivityRow {
   customer_name: string;
   loan_number: string;
   remark: string | null;
+  extra_remark: string | null;
   amount: string | null;
   detail: string | null;
+  edited_at: string | null;
 }
 
 /**
@@ -2090,7 +2092,7 @@ export async function agentRecentActivity(
   const branches = [
     `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at, cl.agent_id,
              c.id::text AS customer_id, c.customer_name, c.loan_number,
-             cl.remark, NULL::text AS amount, dc.action_code AS detail
+             cl.remark, cl.extra_remark, NULL::text AS amount, dc.action_code AS detail, cl.edited_at
         FROM call_logs cl
         JOIN customers c ON c.id = cl.customer_id
         JOIN companies co ON co.id = c.company_id
@@ -2102,21 +2104,21 @@ export async function agentRecentActivity(
     branches.push(
       `(SELECT 'payment', p.id::text, p.paid_at, p.collected_by_user_id,
                c.id::text, c.customer_name, c.loan_number,
-               NULL::text, p.amount::text, p.mode
+               NULL::text, NULL::text, p.amount::text, p.mode, NULL::timestamptz
           FROM payments p
           JOIN customers c ON c.id = p.customer_id
           JOIN companies co ON co.id = c.company_id
          WHERE p.collected_by_user_id = ANY($1) AND co.agency_id = $2 ${todayFor("p.paid_at")})`,
       `(SELECT 'ptp', pt.id::text, pt.created_at, pt.agent_id,
                c.id::text, c.customer_name, c.loan_number,
-               NULL::text, pt.amount::text, pt.promised_date::text
+               NULL::text, NULL::text, pt.amount::text, pt.promised_date::text, NULL::timestamptz
           FROM ptps pt
           JOIN customers c ON c.id = pt.customer_id
           JOIN companies co ON co.id = c.company_id
          WHERE pt.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("pt.created_at")})`,
       `(SELECT 'field_visit', fv.id::text, fv.created_at, fv.agent_id,
                c.id::text, c.customer_name, c.loan_number,
-               fv.remark, NULL::text, NULL::text
+               fv.remark, NULL::text, NULL::text, NULL::text, fv.edited_at
           FROM field_visits fv
           JOIN customers c ON c.id = fv.customer_id
           JOIN companies co ON co.id = c.company_id

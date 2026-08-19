@@ -122,9 +122,18 @@ export default function MyWorklistPage() {
 
   const [search, setSearch] = useState("");
   const [filterCompany, setFilterCompany] = useState<string | undefined>();
-  const [filterCustomerBranches, setFilterCustomerBranches] = useState<string[]>([]);
+  // Lazy initializers: MyWorklistPage only ever mounts once RequireAuth's
+  // `loading` gate has cleared (see App.tsx), so `user` is already resolved
+  // at this component's first render -- hydrating synchronously here means
+  // `load` below is correctly filtered from its very first identity, with
+  // no separate post-mount hydration effect racing the initial /worklist
+  // fetch (which previously caused either a lost selection or a flash of
+  // the unfiltered list depending on effect ordering).
+  const [filterCustomerBranches, setFilterCustomerBranches] = useState<string[]>(
+    () => loadPersistedFilters(user?.id).branches,
+  );
   const [filterProduct, setFilterProduct] = useState<string | undefined>();
-  const [filterBuckets, setFilterBuckets] = useState<string[]>([]);
+  const [filterBuckets, setFilterBuckets] = useState<string[]>(() => loadPersistedFilters(user?.id).buckets);
   // Driven by the one app-level "My Team ↔ My Work" switch in AppLayout's
   // header (see WorkScopeContext) instead of its own Segmented control --
   // usage below stays gated on isBranchManager, so this has no effect for
@@ -212,28 +221,6 @@ export default function MyWorklistPage() {
     api.get("/products").then((res) => setProducts(res.data.products)).catch((err) => message.error(errorMessage(err)));
   }, []);
 
-  // filtersHydrated gates the persist-on-change effect below so it can never
-  // fire with the pre-load empty state and clobber a just-restored
-  // selection -- user resolves asynchronously (AuthContext fetches
-  // /auth/me), so this hydration effect and the save effect below both key
-  // off [user?.id] and can otherwise race within the same commit before
-  // React applies the setState calls from this effect.
-  const [filtersHydrated, setFiltersHydrated] = useState(false);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    const persisted = loadPersistedFilters(user.id);
-    setFilterCustomerBranches(persisted.branches);
-    setFilterBuckets(persisted.buckets);
-    setFiltersHydrated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
-
-  useEffect(() => {
-    if (!filtersHydrated) return;
-    savePersistedFilters(user?.id, filterCustomerBranches, filterBuckets);
-  }, [user?.id, filterCustomerBranches, filterBuckets, filtersHydrated]);
-
   useEffect(() => {
     const params = isBranchManager && scope === "team" ? { scope: "team" } : undefined;
     api
@@ -304,7 +291,10 @@ export default function MyWorklistPage() {
           showSearch
           style={{ width: 220 }}
           value={filterCustomerBranches}
-          onChange={(v) => setFilterCustomerBranches(v)}
+          onChange={(v) => {
+            setFilterCustomerBranches(v);
+            savePersistedFilters(user?.id, v, filterBuckets);
+          }}
           options={filterOptions.branches.map((b) => ({ value: b, label: b }))}
           maxTagCount="responsive"
         />
@@ -325,7 +315,10 @@ export default function MyWorklistPage() {
           allowClear
           style={{ width: 180 }}
           value={filterBuckets}
-          onChange={(v) => setFilterBuckets(v)}
+          onChange={(v) => {
+            setFilterBuckets(v);
+            savePersistedFilters(user?.id, filterCustomerBranches, v);
+          }}
           options={filterOptions.buckets.map((b) => ({ value: b, label: b }))}
           maxTagCount="responsive"
         />

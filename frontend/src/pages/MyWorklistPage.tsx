@@ -17,6 +17,29 @@ import type { DispositionCode, WorklistCustomer } from "../types";
 
 dayjs.extend(relativeTime);
 
+const FILTER_STORAGE_PREFIX = "rcrm_worklist_filters_";
+
+function loadPersistedFilters(userId: string | undefined): { branches: string[]; buckets: string[] } {
+  if (!userId) return { branches: [], buckets: [] };
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_PREFIX + userId);
+    if (!raw) return { branches: [], buckets: [] };
+    const parsed = JSON.parse(raw) as { branches?: string[]; buckets?: string[] };
+    return { branches: parsed.branches ?? [], buckets: parsed.buckets ?? [] };
+  } catch {
+    return { branches: [], buckets: [] };
+  }
+}
+
+function savePersistedFilters(userId: string | undefined, branches: string[], buckets: string[]): void {
+  if (!userId) return;
+  try {
+    localStorage.setItem(FILTER_STORAGE_PREFIX + userId, JSON.stringify({ branches, buckets }));
+  } catch {
+    // Private browsing / storage disabled -- filters still work for this session.
+  }
+}
+
 interface ReminderDue {
   id: string;
   customer_id: string | null;
@@ -91,15 +114,17 @@ export default function MyWorklistPage() {
   const [customers, setCustomers] = useState<WorklistCustomer[]>([]);
   const [reminders, setReminders] = useState<ReminderDue[]>([]);
   const [ptpsDue, setPtpsDue] = useState<PtpDue[]>([]);
-  const [customerBranches, setCustomerBranches] = useState<{ value: string; label: string }[]>([]);
+  const [filterOptions, setFilterOptions] = useState<{ branches: string[]; buckets: string[] }>({
+    branches: [],
+    buckets: [],
+  });
   const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
-  const [buckets, setBuckets] = useState<{ id: string; name: string }[]>([]);
 
   const [search, setSearch] = useState("");
   const [filterCompany, setFilterCompany] = useState<string | undefined>();
-  const [filterCustomerBranch, setFilterCustomerBranch] = useState<string | undefined>();
+  const [filterCustomerBranches, setFilterCustomerBranches] = useState<string[]>([]);
   const [filterProduct, setFilterProduct] = useState<string | undefined>();
-  const [filterBucket, setFilterBucket] = useState<string | undefined>();
+  const [filterBuckets, setFilterBuckets] = useState<string[]>([]);
   // Driven by the one app-level "My Team ↔ My Work" switch in AppLayout's
   // header (see WorkScopeContext) instead of its own Segmented control --
   // usage below stays gated on isBranchManager, so this has no effect for
@@ -162,9 +187,9 @@ export default function MyWorklistPage() {
       const today = dayjs().format("YYYY-MM-DD");
       const params: Record<string, string> = {};
       if (search) params.q = search;
-      if (filterCustomerBranch) params.customer_branch = filterCustomerBranch;
+      if (filterCustomerBranches.length > 0) params.customer_branch = filterCustomerBranches.join(",");
       if (filterProduct) params.product = filterProduct;
-      if (filterBucket) params.bucket = filterBucket;
+      if (filterBuckets.length > 0) params.bucket = filterBuckets.join(",");
       if (isBranchManager && scope === "team") params.scope = "team";
 
       const [worklistRes, remindersRes, ptpsRes] = await Promise.all([
@@ -180,14 +205,42 @@ export default function MyWorklistPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterCustomerBranch, filterProduct, filterBucket, isBranchManager, scope]);
+  }, [search, filterCustomerBranches, filterProduct, filterBuckets, isBranchManager, scope]);
 
   useEffect(() => {
     api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes)).catch((err) => message.error(errorMessage(err)));
-    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches)).catch((err) => message.error(errorMessage(err)));
     api.get("/products").then((res) => setProducts(res.data.products)).catch((err) => message.error(errorMessage(err)));
-    api.get("/buckets").then((res) => setBuckets(res.data.buckets)).catch((err) => message.error(errorMessage(err)));
   }, []);
+
+  // filtersHydrated gates the persist-on-change effect below so it can never
+  // fire with the pre-load empty state and clobber a just-restored
+  // selection -- user resolves asynchronously (AuthContext fetches
+  // /auth/me), so this hydration effect and the save effect below both key
+  // off [user?.id] and can otherwise race within the same commit before
+  // React applies the setState calls from this effect.
+  const [filtersHydrated, setFiltersHydrated] = useState(false);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const persisted = loadPersistedFilters(user.id);
+    setFilterCustomerBranches(persisted.branches);
+    setFilterBuckets(persisted.buckets);
+    setFiltersHydrated(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!filtersHydrated) return;
+    savePersistedFilters(user?.id, filterCustomerBranches, filterBuckets);
+  }, [user?.id, filterCustomerBranches, filterBuckets, filtersHydrated]);
+
+  useEffect(() => {
+    const params = isBranchManager && scope === "team" ? { scope: "team" } : undefined;
+    api
+      .get("/worklist/filter-options", { params })
+      .then((res) => setFilterOptions({ branches: res.data.branches, buckets: res.data.buckets }))
+      .catch((err) => message.error(errorMessage(err)));
+  }, [isBranchManager, scope]);
 
   useEffect(() => {
     void load();
@@ -245,13 +298,15 @@ export default function MyWorklistPage() {
           options={companyOptions}
         />
         <Select
+          mode="multiple"
           title="All branches" placeholder="All branches"
           allowClear
           showSearch
-          style={{ width: 180 }}
-          value={filterCustomerBranch}
-          onChange={(v) => setFilterCustomerBranch(v ?? undefined)}
-          options={customerBranches}
+          style={{ width: 220 }}
+          value={filterCustomerBranches}
+          onChange={(v) => setFilterCustomerBranches(v)}
+          options={filterOptions.branches.map((b) => ({ value: b, label: b }))}
+          maxTagCount="responsive"
         />
         <Select
           title="All products" placeholder="All products"
@@ -265,15 +320,14 @@ export default function MyWorklistPage() {
           }))}
         />
         <Select
+          mode="multiple"
           title="All buckets" placeholder="All buckets"
           allowClear
-          style={{ width: 140 }}
-          value={filterBucket}
-          onChange={(v) => setFilterBucket(v ?? undefined)}
-          options={Array.from(new Set(buckets.map((b) => b.name))).map((label) => ({
-            value: label,
-            label,
-          }))}
+          style={{ width: 180 }}
+          value={filterBuckets}
+          onChange={(v) => setFilterBuckets(v)}
+          options={filterOptions.buckets.map((b) => ({ value: b, label: b }))}
+          maxTagCount="responsive"
         />
       </div>
 

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
-import EditRemarkModal, { type DirectEditableKind } from "../components/EditRemarkModal";
+import EditRemarkModal, { canDirectEditRecord, type DirectEditableKind } from "../components/EditRemarkModal";
 import LogCallModal from "../components/LogCallModal";
 import RecordPaymentModal from "../components/RecordPaymentModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "../components/ReportCorrectionModal";
@@ -107,8 +107,7 @@ const DIRECT_EDIT_KIND: Partial<Record<AgentActivityRow["kind"], DirectEditableK
 
 function canDirectEdit(a: AgentActivityRow, userId: string | undefined): boolean {
   if (!DIRECT_EDIT_KIND[a.kind]) return false;
-  if (a.agent_id !== userId) return false;
-  return dayjs().diff(dayjs(a.at), "hour", true) < 24;
+  return canDirectEditRecord(a.at, a.agent_id, userId);
 }
 
 /**

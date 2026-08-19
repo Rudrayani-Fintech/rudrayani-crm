@@ -211,7 +211,7 @@ router.patch(
     if (!callLog) throw new HttpError(404, "Call log not found, or it isn't yours");
 
     const ageMs = Date.now() - new Date(callLog.created_at).getTime();
-    if (ageMs > 24 * 3600 * 1000) {
+    if (ageMs >= 24 * 3600 * 1000) {
       throw new HttpError(409, "This call log is more than 24 hours old — submit a correction request instead");
     }
 

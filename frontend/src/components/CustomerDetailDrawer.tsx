@@ -27,7 +27,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { rupees as fmtAmount } from "../utils/money";
-import EditRemarkModal from "./EditRemarkModal";
+import EditRemarkModal, { canDirectEditRecord } from "./EditRemarkModal";
 import PtpFormModal, { type PtpRecord } from "./PtpFormModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "./ReportCorrectionModal";
 
@@ -310,7 +310,7 @@ export default function CustomerDetailDrawer({
                             edited {dayjs(t.edited_at).format("DD MMM, HH:mm")}
                           </Tag>
                         )}
-                        {t.agent_id === user?.id && dayjs().diff(dayjs(t.created_at), "hour", true) < 24 ? (
+                        {canDirectEditRecord(t.created_at, t.agent_id, user?.id) ? (
                           <Button
                             size="small"
                             type="link"

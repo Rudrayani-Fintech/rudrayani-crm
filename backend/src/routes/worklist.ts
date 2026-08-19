@@ -65,14 +65,25 @@ router.get(
       if (values.length > 0) {
         params.push(values);
         const n = params.length;
+        // Case-insensitive but otherwise exact copy of `values`, for the
+        // custom_fields freetext fallback below -- lowercased once here
+        // rather than wrapping lower() around every array element inline.
+        params.push(values.map((v) => v.toLowerCase()));
+        const nLower = params.length;
         // Matches on branch_id (legacy callers still pass the branch UUID,
         // e.g. CustomersPage.tsx/AllocationPage.tsx via /customers/branches'
         // {value: id}) OR on the branch's name via the `b` alias joined
         // below (GET /worklist/filter-options below returns bare branch
         // *names*, not ids, so a name must also match directly here) OR,
         // for legacy imported rows with no branch_id at all, the raw
-        // custom_fields branch text.
-        conditions += ` AND (c.branch_id::text = ANY($${n}) OR b.name = ANY($${n}) OR (c.branch_id IS NULL AND (c.custom_fields->>'branch' ILIKE ANY($${n}) OR c.custom_fields->>'Branch' ILIKE ANY($${n}))))`;
+        // custom_fields branch text. The custom_fields leg used to be
+        // `ILIKE ANY($n)`, which treats each value as a LIKE pattern --
+        // a branch name containing a literal `_` or `%` (both valid in
+        // freetext) would over-match. Values here come from an exact-value
+        // picker (this endpoint's own /filter-options), never free-typed
+        // search, so a case-insensitive exact `lower() = ANY(...)` compare
+        // is both correct and safe.
+        conditions += ` AND (c.branch_id::text = ANY($${n}) OR b.name = ANY($${n}) OR (c.branch_id IS NULL AND (lower(c.custom_fields->>'branch') = ANY($${nLower}) OR lower(c.custom_fields->>'Branch') = ANY($${nLower}))))`;
       }
     }
     if (product) {
@@ -158,7 +169,7 @@ router.get(
     const wantsTeamScope = scope === "team" && req.user!.designation === "branch_manager";
     const clamp = wantsTeamScope ? await resolveBranchClamp(req.user!) : null;
 
-    const params: unknown[] = [req.user!.id];
+    const params: unknown[] = [];
     let conditions: string;
     if (clamp) {
       const agentMatch = agentBranchClamp(clamp, params, "u").replace(/^ AND /, "");
@@ -168,7 +179,8 @@ router.get(
           OR EXISTS (SELECT 1 FROM users u WHERE u.id = c.assigned_field_agent_id AND ${fieldAgentMatch})
         ) AND c.status = 'active'`;
     } else {
-      conditions = `(c.assigned_agent_id = $1 OR c.assigned_field_agent_id = $1) AND c.status = 'active'`;
+      params.push(req.user!.id);
+      conditions = `(c.assigned_agent_id = $${params.length} OR c.assigned_field_agent_id = $${params.length}) AND c.status = 'active'`;
     }
 
     const { rows } = await pool.query<{ branch: string | null; bucket: string | null }>(

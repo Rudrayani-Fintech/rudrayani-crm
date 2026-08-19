@@ -7,12 +7,15 @@ import { hashPassword } from "../src/services/auth-service";
 const app = createApp();
 const PASSWORD = "Secret@123";
 const AGENT_PHONE = "7960000005";
+const BM_PHONE = "7960000006";
+const TEAM_AGENT_PHONE = "7960000007";
 
 let agencyId: string;
 let companyId: string;
 let branchAId: string;
 let branchBId: string;
 let agentToken: string;
+let bmToken: string;
 
 async function login(phone: string): Promise<string> {
   const res = await request(app).post("/api/auth/login").send({ phone, password: PASSWORD });
@@ -53,11 +56,41 @@ beforeAll(async () => {
     [companyId, branchAId, branchBId, agentId],
   );
 
+  // Branch-manager "My Team" scope fixture (regression for the
+  // filter-options $1-unreferenced-parameter bug -- Postgres can't
+  // determine the type of $1 when the built query only ever references
+  // $2/$3 in the clamped branch). A branch_manager managing Branch A, plus a
+  // telecaller assigned to Branch A (via users.branch_id) with an allocated
+  // active customer, mirrors the fixture style used elsewhere for
+  // resolveBranchClamp()/agentBranchClamp() coverage (see day-plan.test.ts).
+  const bm = await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, designation)
+     VALUES ($1, 'WL Filter BM', $2, $3, 'branch_manager') RETURNING id`,
+    [agencyId, BM_PHONE, hash],
+  );
+  await pool.query("UPDATE branches SET branch_manager_id = $1 WHERE id = $2", [bm.rows[0].id, branchAId]);
+
+  const teamAgent = await pool.query(
+    `INSERT INTO users (agency_id, branch_id, full_name, phone, password_hash, is_telecaller, designation)
+     VALUES ($1, $2, 'WL Filter Team Agent', $3, $4, true, 'telecaller') RETURNING id`,
+    [agencyId, branchAId, TEAM_AGENT_PHONE, hash],
+  );
+  await pool.query(
+    `INSERT INTO customers (company_id, loan_number, customer_name, mobile_number, due_amount, bucket, branch_id, assigned_agent_id)
+     VALUES ($1, 'WLF-003', 'Cust Team A1', '9800000012', 1500, '61-90', $2, $3)`,
+    [companyId, branchAId, teamAgent.rows[0].id],
+  );
+
   agentToken = await login(AGENT_PHONE);
+  bmToken = await login(BM_PHONE);
 });
 
 afterAll(async () => {
   await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId]);
+  // branches.branch_manager_id FKs to users -- clear it before deleting the
+  // branch_manager row (see branches.test.ts/day-plan.test.ts for the same
+  // pattern).
+  await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM branches WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
@@ -94,5 +127,27 @@ describe("worklist multi-value filters + filter-options", () => {
       .set("Authorization", `Bearer ${agentToken}`);
     expect(res.status).toBe(200);
     expect(res.body.customers).toHaveLength(2);
+  });
+
+  // Regression for the Critical review finding: filter-options seeded
+  // params with [req.user!.id] for $1 but the clamped (team-scope) branch
+  // of the query never referenced $1 anywhere -- only $2/$3 from the two
+  // agentBranchClamp() calls -- so Postgres couldn't determine $1's type
+  // and threw "could not determine data type of parameter $1", 500ing this
+  // endpoint for every branch_manager on scope=team (MyWorklistPage.tsx's
+  // default scope).
+  it("filter-options?scope=team succeeds for a branch_manager (no unreferenced $1)", async () => {
+    const res = await request(app)
+      .get("/api/worklist/filter-options?scope=team")
+      .set("Authorization", `Bearer ${bmToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.branches).toContain("Branch A");
+    expect(res.body.buckets).toContain("61-90");
+  });
+
+  it("GET /worklist?scope=team also succeeds for a branch_manager", async () => {
+    const res = await request(app).get("/api/worklist?scope=team").set("Authorization", `Bearer ${bmToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers.some((c: { loan_number: string }) => c.loan_number === "WLF-003")).toBe(true);
   });
 });

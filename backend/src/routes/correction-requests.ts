@@ -9,8 +9,8 @@ import { type BranchClamp, resolveBranchClamp } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 
 /**
- * Agent-initiated correction requests for a payment/call-log/PTP they
- * created — MVP hardening: previously there was no way to fix a mistaken
+ * Agent-initiated correction requests for a payment/call-log/PTP/field-visit
+ * they created — MVP hardening: previously there was no way to fix a mistaken
  * amount or a garbled remark after saving, anywhere in the app. Mirrors
  * reallocation-requests.ts's request/approve pattern almost exactly.
  *
@@ -50,7 +50,7 @@ function assertAllowedFields(recordType: RecordType, changes: Record<string, unk
 /**
  * Same branch clamp as scope.ts's customerBranchClamp(), but correction_requests
  * has no customer_id of its own -- the customer only exists behind whichever
- * of the three COALESCE'd source-table joins actually matches record_type.
+ * of the four COALESCE'd source-table joins actually matches record_type.
  * Doesn't fit the single-alias helper, so this is its own small variant.
  */
 function coalescedCustomerBranchClamp(clamp: BranchClamp, params: unknown[]): string {
@@ -94,7 +94,7 @@ async function loadOwnedRecord(
   return rows[0];
 }
 
-/** Agent flags one of their own payments/call-logs/PTPs as needing a correction. */
+/** Agent flags one of their own payments/call-logs/PTPs/field-visits as needing a correction. */
 router.post(
   "/",
   requirePermission("calls.log"),
@@ -156,7 +156,7 @@ router.get(
 
     // Agency scope is enforced by joining out to whichever table the
     // record lives in, since correction_requests itself has no agency_id.
-    // record_type picks which of the three source tables actually owns the
+    // record_type picks which of the four source tables actually owns the
     // row, so each LEFT JOIN only ever matches one of them per request.
     const { rows } = await pool.query(
       `SELECT cr.id, cr.record_type, cr.record_id, cr.reason, cr.proposed_changes,
@@ -199,7 +199,7 @@ async function decideOne(
   note: string | undefined,
 ) {
   // A branch_manager can only decide requests whose underlying customer
-  // is in their own branch -- same three-way COALESCE join as GET / above,
+  // is in their own branch -- same four-way COALESCE join as GET / above,
   // since correction_requests doesn't carry a customer_id of its own.
   const reqParams: unknown[] = [id, agencyId];
   const reqClampSql = coalescedCustomerBranchClamp(clamp, reqParams);

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Input, Modal, Typography, message } from "antd";
+import dayjs from "dayjs";
 import { api, errorMessage } from "../api/client";
 
 export type DirectEditableKind = "call" | "field_visit";
@@ -12,6 +13,24 @@ const BODY_KEY: Record<DirectEditableKind, "extra_remark" | "remark"> = {
   call: "extra_remark",
   field_visit: "remark",
 };
+
+/**
+ * Ownership + rolling-24h-window predicate backing the "Edit remark" vs
+ * "Report an error" choice -- must match the server's own PATCH .../remark
+ * window (call-logs.ts/field-visits.ts, `ageMs >= 24h`) or an agent could
+ * see an "Edit" affordance the API then rejects with 409. Shared here
+ * (rather than each caller re-deriving it) so MyWorklistPage.tsx and
+ * CustomerDetailDrawer.tsx can't drift out of sync with each other or with
+ * the server.
+ */
+export function canDirectEditRecord(
+  createdAt: string,
+  recordAgentId: string | null | undefined,
+  userId: string | undefined,
+): boolean {
+  if (!userId || recordAgentId !== userId) return false;
+  return dayjs().diff(dayjs(createdAt), "hour", true) < 24;
+}
 
 /**
  * Same-day (rolling 24h) owner-only remark edit -- distinct from

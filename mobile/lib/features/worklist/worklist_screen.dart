@@ -93,6 +93,23 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
     if (userId != null) WorklistFilterStore.save(userId, selection);
   }
 
+  // Resets every worklist filter -- search, company, quick filter, AND the
+  // server-side branch/bucket selection (persisted via _updateFilters). A
+  // stale persisted branch/bucket that no longer matches any allocated
+  // customer would otherwise be an unrecoverable dead end: no chip renders
+  // for a value absent from worklistFilterOptionsProvider's results, so
+  // there is nothing in the UI to tap to deselect it, and the filtered
+  // request (now server-side, not client-side) returns zero rows regardless
+  // of search/company/quickFilter state.
+  void _clearAllFilters() {
+    setState(() {
+      _search = '';
+      _selectedCompany = null;
+      _quickFilter = _QuickFilter.none;
+    });
+    _updateFilters(const WorklistFilterSelection());
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -377,10 +394,25 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
               ),
               data: (customers) {
                 if (customers.isEmpty) {
-                  return const EmptyState(
+                  // A previously-persisted branch/bucket selection can go
+                  // stale overnight (reallocation moves the agent off that
+                  // branch/bucket entirely) and the server-side filter then
+                  // legitimately returns zero rows -- give an explicit way
+                  // back rather than leaving the agent stuck on an
+                  // unexplained empty worklist.
+                  final activeFilters = ref.watch(worklistFiltersProvider);
+                  final hasBranchOrBucketFilter =
+                      activeFilters.branches.isNotEmpty || activeFilters.buckets.isNotEmpty;
+                  return EmptyState(
                     icon: Icons.people_outline,
                     message: 'No customers assigned today.',
                     hint: 'Pull down to refresh once new accounts land.',
+                    action: hasBranchOrBucketFilter
+                        ? TextButton(
+                            onPressed: _clearAllFilters,
+                            child: const Text('Clear filters'),
+                          )
+                        : null,
                   );
                 }
 
@@ -459,11 +491,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                     message: 'No matches for your search or filters.',
                     hint: 'Try clearing the search box or filters.',
                     action: TextButton(
-                      onPressed: () => setState(() {
-                        _search = '';
-                        _selectedCompany = null;
-                        _quickFilter = _QuickFilter.none;
-                      }),
+                      onPressed: _clearAllFilters,
                       child: const Text('Clear all filters'),
                     ),
                   );

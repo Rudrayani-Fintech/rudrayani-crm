@@ -19,7 +19,7 @@ class _HistoryEntry {
   final String title;
   final String? subtitle;
   // Only set for entries a correction request can be filed against
-  // (payment / call_log / ptp) — field_visits and attachments have no
+  // (payment / call_log / ptp / field_visit) — attachments have no
   // correction flow.
   final String? correctableRecordType;
   final String? recordId;

@@ -13,6 +13,13 @@ class WorklistFilterSelection {
 class WorklistFilterStore {
   static Box<String>? _box;
 
+  // Same control-character item separator worklist_provider.dart's
+  // `_worklistCacheKey` uses for its offline-cache key (see that file's
+  // itemSep) -- a plain '|' separator would corrupt the persisted selection
+  // for any branch/bucket name that legitimately contains a literal '|'.
+  // U+0001 can never appear in a real branch/bucket name.
+  static const _itemSep = '\u0001';
+
   static Future<Box<String>> _ensureOpen() async {
     final existing = _box;
     if (existing != null) return existing;
@@ -24,14 +31,14 @@ class WorklistFilterStore {
 
   static Future<WorklistFilterSelection> load(String userId) async {
     final box = await _ensureOpen();
-    final branches = box.get('${userId}_branches')?.split('|').where((s) => s.isNotEmpty).toList() ?? [];
-    final buckets = box.get('${userId}_buckets')?.split('|').where((s) => s.isNotEmpty).toList() ?? [];
+    final branches = box.get('${userId}_branches')?.split(_itemSep).where((s) => s.isNotEmpty).toList() ?? [];
+    final buckets = box.get('${userId}_buckets')?.split(_itemSep).where((s) => s.isNotEmpty).toList() ?? [];
     return WorklistFilterSelection(branches: branches, buckets: buckets);
   }
 
   static Future<void> save(String userId, WorklistFilterSelection selection) async {
     final box = await _ensureOpen();
-    await box.put('${userId}_branches', selection.branches.join('|'));
-    await box.put('${userId}_buckets', selection.buckets.join('|'));
+    await box.put('${userId}_branches', selection.branches.join(_itemSep));
+    await box.put('${userId}_buckets', selection.buckets.join(_itemSep));
   }
 }

@@ -1269,7 +1269,7 @@ call/visit remarks minutes after logging them with no way to fix them short
 of a manager-approved correction request — overkill for a same-day typo.
 
 ### Backend
-- **Migration `1789600000000_call-log-field-visit-edit-columns.sql`** —
+- **Migration `1788900000000_call-log-field-visit-edit-columns.sql`** —
   `call_logs.extra_remark` (free-text tail kept separate from the
   disposition-composed remark) + `edited_at` on both `call_logs` and
   `field_visits`.
@@ -1278,7 +1278,7 @@ of a manager-approved correction request — overkill for a same-day typo.
   free text only: a call log's `extra_remark` field never touches the
   disposition-composed `remark`, action/result codes, or structured
   `details` JSONB; a field visit's `remark` is the only field it accepts.
-  Past the 24h window, both return 403 pointing at the existing
+  Past the 24h window, both return 409 pointing at the existing
   correction-request flow.
 - **Migration `1789000000000_correction-requests-field-visit.sql`** +
   `correction-requests.ts` — extended the existing payment/call_log/PTP
@@ -1296,11 +1296,15 @@ of a manager-approved correction request — overkill for a same-day typo.
   (or their team's, with `?scope=team`) — deliberately narrower than the
   agency-wide branch/bucket admin lists, since an agent only ever needs to
   filter within what they can already see.
-- **17 new/extended tests** (`call-log-remark-edit.test.ts`,
+- **14 new/extended tests** (`call-log-remark-edit.test.ts`,
   `field-visit-remark-edit.test.ts`, `worklist-filters.test.ts`, extended
-  `correction-requests.test.ts`) — 24h boundary (just inside / just past),
-  non-owner rejection, free-text-only scope (disposition fields rejected),
-  multi-value filter combinations, filter-options agent/team scoping.
+  `correction-requests.test.ts`) — owner-edit happy path, non-owner
+  rejection (404), rejection once past the 24h window (409), a PTP call log
+  whose `disposition_code_id`/`details`/linked `ptps` row are asserted
+  unchanged by a remark-only edit, multi-value filter combinations, and
+  (added in the final review pass, closing the bug below) `filter-options`
+  and the main list route both succeeding for a branch_manager on
+  `scope=team`.
 
 ### Web
 - **`MyWorklistPage.tsx`** — branch and bucket filters became Ant Design
@@ -1377,5 +1381,36 @@ of a manager-approved correction request — overkill for a same-day typo.
 4. Mobile: same flow via the worklist screen's FilterChip rows and the
    history timeline's edit-remark dialog, once an emulator/device is
    available to verify against.
+
+### Final review fix wave
+Whole-branch code review after all 12 tasks landed found one Critical bug
+and several Important/Minor issues, fixed in a follow-up commit:
+- **Critical:** `GET /worklist/filter-options?scope=team` 500'd for every
+  branch_manager — the query seeded `$1` for the caller's own id but the
+  clamped (team-scope) branch of the built SQL never referenced `$1`
+  anywhere, only `$2`/`$3` from the two `agentBranchClamp()` calls, so
+  Postgres couldn't determine `$1`'s type. Fixed by only pushing/referencing
+  `$1` in the branch that actually uses it (the non-clamped, self-scope
+  case). `GET /worklist` (the main list route) was checked and does not
+  have this problem — its SELECT list references `$1` unconditionally
+  (`is_primary_for_me`/`is_field_agent_for_me`), so the placeholder is
+  always referenced regardless of scope.
+- **Important (mobile):** a stale persisted branch/bucket filter that no
+  longer matched any allocated customer was an unrecoverable dead end —
+  no chip renders for a value missing from `filter-options`, and the
+  existing "Clear all filters" button didn't reset the server-side
+  branch/bucket selection. `worklist_screen.dart`'s clear action now also
+  resets and persists `worklistFiltersProvider`, and the
+  "no customers assigned" empty state gained its own "Clear filters" button
+  whenever a branch/bucket filter is active.
+- Minor cleanup: the mobile Hive-backed filter store's `|` item separator
+  became the same `\u0001` control character `worklist_provider.dart`'s
+  cache key already uses, for the same delimiter-collision reason; the 24h
+  edit windows in both PATCH routes changed from `>` to `>=` for exact
+  spec fidelity; stale "three source tables" / "no correction flow for
+  field visits" comments in `correction-requests.ts`, `history_timeline.dart`,
+  and `ReportCorrectionModal.tsx` were updated to mention `field_visit`.
+  See `.superpowers/sdd/2026-08-18-agent-branch-bucket-filter-and-remark-edit/final-review-fix-report.md`
+  for the full list, including items deliberately left as follow-ups.
 
 ---

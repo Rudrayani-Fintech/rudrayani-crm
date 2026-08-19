@@ -209,7 +209,7 @@ router.patch(
     if (!visit) throw new HttpError(404, "Field visit not found, or it isn't yours");
 
     const ageMs = Date.now() - new Date(visit.created_at).getTime();
-    if (ageMs > 24 * 3600 * 1000) {
+    if (ageMs >= 24 * 3600 * 1000) {
       throw new HttpError(409, "This field visit is more than 24 hours old — submit a correction request instead");
     }
 

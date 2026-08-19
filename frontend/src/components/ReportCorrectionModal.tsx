@@ -29,9 +29,9 @@ const MODE_OPTIONS = ["NEFT", "RTGS", "Cash", "UPI", "Cheque", "DD"].map((m) => 
 
 /**
  * "Report an error" — lets an agent flag a mistake on their own payment /
- * call-log / PTP for a TL/ops to review and apply (POST /correction-requests).
- * Pre-filled with the record's current values; only fields the agent
- * actually changes are sent as proposed_changes.
+ * call-log / PTP / field-visit for a TL/ops to review and apply
+ * (POST /correction-requests). Pre-filled with the record's current values;
+ * only fields the agent actually changes are sent as proposed_changes.
  */
 export default function ReportCorrectionModal({
   recordType,

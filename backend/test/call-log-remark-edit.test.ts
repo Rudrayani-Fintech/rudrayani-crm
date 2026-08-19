@@ -13,6 +13,7 @@ let agencyId: string;
 let companyId: string;
 let customerId: string;
 let dispositionCodeId: string;
+let ptpDispositionCodeId: string;
 let agentToken: string;
 let agent2Token: string;
 
@@ -56,11 +57,24 @@ beforeAll(async () => {
   );
   dispositionCodeId = code.rows[0].id;
 
+  const ptpCode = await pool.query(
+    `INSERT INTO disposition_codes
+       (agency_id, action_code, category, result_code, description, remark_template, needs_amount, needs_date)
+     VALUES ($1, 'OC', 'PROMISE TO PAY', 'PTP', 'Promise to Pay', 'PTP of <amount> on <date>', true, true)
+     RETURNING id`,
+    [agencyId],
+  );
+  ptpDispositionCodeId = ptpCode.rows[0].id;
+
   agentToken = await login(AGENT_PHONE);
   agent2Token = await login(AGENT2_PHONE);
 });
 
 afterAll(async () => {
+  // ptps.call_log_id FKs to call_logs -- the PTP-edit test below creates a
+  // ptps row, so it must be cleared before call_logs or the delete violates
+  // ptps_call_log_id_fkey.
+  await pool.query("DELETE FROM ptps WHERE customer_id = $1", [customerId]);
   await pool.query("DELETE FROM call_logs WHERE customer_id = $1", [customerId]);
   await pool.query("DELETE FROM disposition_codes WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM customers WHERE id = $1", [customerId]);
@@ -122,5 +136,47 @@ describe("call log remark edit", () => {
       .set("Authorization", `Bearer ${agentToken}`)
       .send({ extra_remark: "too late now" });
     expect(edit.status).toBe(409);
+  });
+
+  it("editing the remark on a PTP call log leaves the disposition, details, and linked PTP untouched", async () => {
+    const create = await request(app)
+      .post("/api/call-logs")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .send({
+        customer_id: customerId,
+        disposition_code_id: ptpDispositionCodeId,
+        fields: { amount: 5000, date: "2026-09-01" },
+        extra_remark: "will pay via UPI",
+      });
+    expect(create.status).toBe(201);
+    const callLogId = create.body.call_log.id;
+    const ptpId = create.body.ptp.id;
+    expect(Number(create.body.ptp.amount)).toBe(5000);
+    expect(create.body.ptp.promised_date).toBe("2026-09-01");
+    expect(create.body.ptp.status).toBe("pending");
+
+    const edit = await request(app)
+      .patch(`/api/call-logs/${callLogId}/remark`)
+      .set("Authorization", `Bearer ${agentToken}`)
+      .send({ extra_remark: "actually paying via NEFT" });
+    expect(edit.status).toBe(200);
+    expect(edit.body.call_log.extra_remark).toBe("actually paying via NEFT");
+    expect(edit.body.call_log.edited_at).not.toBeNull();
+
+    const callLogRow = await pool.query(
+      "SELECT disposition_code_id, details, remark, extra_remark, edited_at FROM call_logs WHERE id = $1",
+      [callLogId],
+    );
+    // disposition_code_id and details (the structured fields the PTP/remark
+    // were derived from) must be byte-for-byte unchanged by the edit --
+    // only remark/extra_remark/edited_at are allowed to differ.
+    expect(callLogRow.rows[0].disposition_code_id).toBe(ptpDispositionCodeId);
+    expect(callLogRow.rows[0].details).toEqual({ amount: 5000, date: "2026-09-01" });
+    expect(callLogRow.rows[0].remark).not.toBe(create.body.call_log.remark);
+
+    const ptpRow = await pool.query("SELECT amount, promised_date, status FROM ptps WHERE id = $1", [ptpId]);
+    expect(Number(ptpRow.rows[0].amount)).toBe(5000);
+    expect(ptpRow.rows[0].status).toBe("pending");
+    expect(ptpRow.rows[0].promised_date).toBe("2026-09-01");
   });
 });

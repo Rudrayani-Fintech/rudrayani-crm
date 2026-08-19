@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
+import EditRemarkModal, { type DirectEditableKind } from "../components/EditRemarkModal";
 import LogCallModal from "../components/LogCallModal";
 import RecordPaymentModal from "../components/RecordPaymentModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "../components/ReportCorrectionModal";
@@ -68,8 +69,10 @@ interface AgentActivityRow {
   customer_name: string;
   loan_number: string;
   remark: string | null;
+  extra_remark: string | null;
   amount: string | null;
   detail: string | null;
+  edited_at: string | null;
 }
 
 const ACTIVITY_ICON: Record<AgentActivityRow["kind"], React.ReactNode> = {
@@ -86,13 +89,27 @@ const ACTIVITY_LABEL: Record<AgentActivityRow["kind"], string> = {
   field_visit: "Field Visit",
 };
 
-// field_visit has no correction-request equivalent -- only calls/payments/PTPs
-// are correctable (see ReportCorrectionModal's CorrectableRecordType).
 const CORRECTABLE_KIND: Partial<Record<AgentActivityRow["kind"], CorrectableRecordType>> = {
   call: "call_log",
   payment: "payment",
   ptp: "ptp",
+  field_visit: "field_visit",
 };
+
+// Same-day (rolling 24h) owner-only direct edit -- distinct from the
+// correction-request flow above (manager-approved, no time limit). Only
+// calls and field visits carry a free-text remark that's worth editing this
+// way; payments/PTPs still go through "Report an error" only.
+const DIRECT_EDIT_KIND: Partial<Record<AgentActivityRow["kind"], DirectEditableKind>> = {
+  call: "call",
+  field_visit: "field_visit",
+};
+
+function canDirectEdit(a: AgentActivityRow, userId: string | undefined): boolean {
+  if (!DIRECT_EDIT_KIND[a.kind]) return false;
+  if (a.agent_id !== userId) return false;
+  return dayjs().diff(dayjs(a.at), "hour", true) < 24;
+}
 
 /**
  * A telecaller/field agent's own worklist on web -- the properly-scoped
@@ -170,6 +187,7 @@ export default function MyWorklistPage() {
   const todayScope: "personal" | "branch" = myWorkOnly ? "personal" : "branch";
   const [todayDisposition, setTodayDisposition] = useState<string | undefined>();
   const [correctionTarget, setCorrectionTarget] = useState<AgentActivityRow | null>(null);
+  const [editRemarkTarget, setEditRemarkTarget] = useState<AgentActivityRow | null>(null);
 
   const loadTodayActivity = useCallback(async () => {
     setTodayLoading(true);
@@ -438,6 +456,11 @@ export default function MyWorklistPage() {
                               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                                 {dayjs(a.at).format("HH:mm")}
                               </Typography.Text>
+                              {a.edited_at && (
+                                <Tag color="default" style={{ fontSize: 11 }}>
+                                  edited {dayjs(a.edited_at).format("HH:mm")}
+                                </Tag>
+                              )}
                             </Space>
                             {a.remark && <Typography.Text>{a.remark}</Typography.Text>}
                             {a.amount != null && (
@@ -455,10 +478,17 @@ export default function MyWorklistPage() {
                                 /correction-requests requires the record's own
                                 agent_id to match the caller) -- showing Edit on a
                                 teammate's row in Branch scope would just 404. */}
-                            {CORRECTABLE_KIND[a.kind] && a.agent_id === user?.id && (
-                              <Button size="small" icon={<EditOutlined />} onClick={() => setCorrectionTarget(a)}>
+                            {canDirectEdit(a, user?.id) ? (
+                              <Button size="small" icon={<EditOutlined />} onClick={() => setEditRemarkTarget(a)}>
                                 Edit
                               </Button>
+                            ) : (
+                              CORRECTABLE_KIND[a.kind] &&
+                              a.agent_id === user?.id && (
+                                <Button size="small" icon={<EditOutlined />} onClick={() => setCorrectionTarget(a)}>
+                                  Edit
+                                </Button>
+                              )
                             )}
                           </Space>
                         </div>
@@ -657,12 +687,32 @@ export default function MyWorklistPage() {
               ? { remark: correctionTarget.remark ?? "" }
               : correctionTarget.kind === "payment"
                 ? { amount: Number(correctionTarget.amount), mode: correctionTarget.detail, paid_at: correctionTarget.at }
-                : { amount: Number(correctionTarget.amount), promised_date: correctionTarget.detail }
+                : correctionTarget.kind === "field_visit"
+                  ? { remark: correctionTarget.remark ?? "" }
+                  : { amount: Number(correctionTarget.amount), promised_date: correctionTarget.detail }
           }
           open={correctionTarget !== null}
           onClose={() => setCorrectionTarget(null)}
           onSubmitted={() => {
             setCorrectionTarget(null);
+            void loadTodayActivity();
+          }}
+        />
+      )}
+
+      {editRemarkTarget && DIRECT_EDIT_KIND[editRemarkTarget.kind] && (
+        <EditRemarkModal
+          kind={DIRECT_EDIT_KIND[editRemarkTarget.kind]!}
+          recordId={editRemarkTarget.id}
+          currentText={
+            editRemarkTarget.kind === "call"
+              ? (editRemarkTarget.extra_remark ?? "")
+              : (editRemarkTarget.remark ?? "")
+          }
+          open={editRemarkTarget !== null}
+          onClose={() => setEditRemarkTarget(null)}
+          onSaved={() => {
+            setEditRemarkTarget(null);
             void loadTodayActivity();
           }}
         />

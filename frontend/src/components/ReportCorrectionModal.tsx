@@ -3,7 +3,7 @@ import { DatePicker, Input, InputNumber, Modal, Select, Space, Typography, messa
 import dayjs, { type Dayjs } from "dayjs";
 import { api, errorMessage } from "../api/client";
 
-export type CorrectableRecordType = "payment" | "call_log" | "ptp";
+export type CorrectableRecordType = "payment" | "call_log" | "ptp" | "field_visit";
 
 interface FieldDef {
   key: string;
@@ -22,6 +22,7 @@ const FIELDS_BY_TYPE: Record<CorrectableRecordType, FieldDef[]> = {
     { key: "amount", label: "Amount", kind: "amount" },
     { key: "promised_date", label: "Promised Date", kind: "date" },
   ],
+  field_visit: [{ key: "remark", label: "Remark", kind: "text" }],
 };
 
 const MODE_OPTIONS = ["NEFT", "RTGS", "Cash", "UPI", "Cheque", "DD"].map((m) => ({ value: m, label: m }));

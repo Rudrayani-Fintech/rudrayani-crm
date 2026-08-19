@@ -36,17 +36,55 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   _SortOrder _sort = _SortOrder.defaultOrder;
   Timer? _debounce;
 
+  // Gates the first `ref.watch(worklistProvider)` in build() until the
+  // persisted branch/bucket selection has been loaded from Hive and pushed
+  // into worklistFiltersProvider. Without this gate, build() would watch
+  // worklistProvider once with the provider's default *empty* filter
+  // (firing an unfiltered network fetch and briefly flashing an unfiltered
+  // list), then again moments later once hydration lands -- the same race
+  // Task 8 hit and fixed on web. Unlike web's RequireAuth (which guarantees
+  // the user is resolved before anything downstream mounts), this app's
+  // router only waits for isLoggedIn + punched-in (see router.dart) --
+  // AuthNotifier.init() sets isLoggedIn:true optimistically *before*
+  // awaiting /auth/me, and attendance's own init() (which the punch-in
+  // gate depends on) runs concurrently with, not after, that call. So
+  // auth.user can genuinely still be null the moment this screen first
+  // builds; a single synchronous initState read isn't reliably enough on
+  // its own, which is why hydration is re-attempted via ref.listen in
+  // build() below, not just once in initState.
+  bool _filtersHydrated = false;
+  String? _hydratingForUserId;
+  Timer? _hydrationTimeoutTimer;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadPersistedFilters());
+    // ref is available synchronously from initState onward in
+    // flutter_riverpod -- main.dart and punch_in_screen.dart both already
+    // rely on this for their own startup reads via ref.read, so no
+    // addPostFrameCallback deferral is needed just to call ref.read here.
+    final userId = ref.read(authProvider).user?['id'] as String?;
+    if (userId != null) _hydrateFilters(userId);
+    // Safety valve: if `user` never populates this session (e.g. /auth/me
+    // keeps failing while cached tokens stay valid -- AuthNotifier.init()
+    // has no retry for that case, see its catch-all branch), don't leave
+    // this screen on a spinner forever. Filters simply won't be restored
+    // for this session, which is a strict improvement over never showing
+    // the worklist at all.
+    _hydrationTimeoutTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && !_filtersHydrated) setState(() => _filtersHydrated = true);
+    });
   }
 
-  Future<void> _loadPersistedFilters() async {
-    final userId = ref.read(authProvider).user?['id'] as String?;
-    if (userId == null) return;
-    final selection = await WorklistFilterStore.load(userId);
-    if (mounted) ref.read(worklistFiltersProvider.notifier).state = selection;
+  void _hydrateFilters(String userId) {
+    if (_hydratingForUserId == userId) return;
+    _hydratingForUserId = userId;
+    WorklistFilterStore.load(userId).then((selection) {
+      if (!mounted) return;
+      ref.read(worklistFiltersProvider.notifier).state = selection;
+      _hydrationTimeoutTimer?.cancel();
+      setState(() => _filtersHydrated = true);
+    });
   }
 
   void _updateFilters(WorklistFilterSelection selection) {
@@ -58,6 +96,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _hydrationTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -72,6 +111,19 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Catch the moment `user` becomes available if it wasn't ready yet in
+    // initState (see the comment on _filtersHydrated above) -- called
+    // unconditionally on every build, before the hydration gate below, so
+    // the listener stays registered regardless of which branch returns.
+    ref.listen<AuthState>(authProvider, (prev, next) {
+      final userId = next.user?['id'] as String?;
+      if (userId != null) _hydrateFilters(userId);
+    });
+
+    if (!_filtersHydrated) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     final auth = ref.watch(authProvider);
     final wl = ref.watch(worklistProvider);
     final user = auth.user;

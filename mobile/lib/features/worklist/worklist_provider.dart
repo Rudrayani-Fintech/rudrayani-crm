@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/read_cache.dart';
+import '../../core/offline/worklist_filter_store.dart';
 
 /// Personal (own allocations) vs Team (every allocation in the branch a
 /// branch_manager manages) -- the web equivalent is MyWorklistPage.tsx's
@@ -9,6 +10,27 @@ import '../../core/offline/read_cache.dart';
 /// UI (see WorklistScreen); everyone else always resolves to personal scope
 /// server-side regardless of what this holds.
 final worklistScopeProvider = StateProvider<String>((ref) => 'personal');
+
+/// Selected branch/bucket filter -- starts empty (show all); WorklistScreen
+/// loads the persisted selection for the current user on first build and
+/// writes it back here via the notifier whenever the agent changes it.
+final worklistFiltersProvider = StateProvider<WorklistFilterSelection>((ref) => const WorklistFilterSelection());
+
+/// Options for the filter chips -- scoped to this agent's own allocated
+/// customers (web equivalent: GET /worklist/filter-options), not the
+/// agency-wide branch/bucket admin lists.
+final worklistFilterOptionsProvider = FutureProvider<({List<String> branches, List<String> buckets})>((ref) async {
+  final api = ref.watch(apiClientProvider);
+  final scope = ref.watch(worklistScopeProvider);
+  final res = await api.get<Map<String, dynamic>>(
+    '/worklist/filter-options',
+    query: scope == 'team' ? {'scope': 'team'} : null,
+  );
+  return (
+    branches: (res.data!['branches'] as List).cast<String>(),
+    buckets: (res.data!['buckets'] as List).cast<String>(),
+  );
+});
 
 /// Whether the data currently shown by worklistProvider/customerByIdProvider
 /// came from the offline cache rather than a fresh network response --
@@ -42,10 +64,16 @@ Future<List<Map<String, dynamic>>> _fetchWithCacheFallback(
 final worklistProvider = FutureProvider<List<Customer>>((ref) async {
   final api = ref.watch(apiClientProvider);
   final scope = ref.watch(worklistScopeProvider);
-  final list = await _fetchWithCacheFallback(ref, 'worklist_$scope', () async {
+  final filters = ref.watch(worklistFiltersProvider);
+  final query = <String, dynamic>{};
+  if (scope == 'team') query['scope'] = 'team';
+  if (filters.branches.isNotEmpty) query['customer_branch'] = filters.branches.join(',');
+  if (filters.buckets.isNotEmpty) query['bucket'] = filters.buckets.join(',');
+  final cacheKey = 'worklist_${scope}_${filters.branches.join("_")}_${filters.buckets.join("_")}';
+  final list = await _fetchWithCacheFallback(ref, cacheKey, () async {
     final res = await api.get<Map<String, dynamic>>(
       '/worklist',
-      query: scope == 'team' ? {'scope': 'team'} : null,
+      query: query.isEmpty ? null : query,
     );
     return (res.data!['customers'] as List).cast<Map<String, dynamic>>();
   });

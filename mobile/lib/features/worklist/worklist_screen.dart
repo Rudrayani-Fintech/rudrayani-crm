@@ -12,6 +12,7 @@ import '../../core/tracking/tracking_service.dart';
 import '../../core/utils/friendly_error.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/money.dart' as money;
+import '../../core/offline/worklist_filter_store.dart';
 import 'worklist_provider.dart';
 import '../reminders/today_section.dart';
 
@@ -31,7 +32,6 @@ enum _SortOrder { defaultOrder, highestDue, nearestPtp, oldestContact }
 class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   String _search = '';
   String? _selectedCompany;
-  String? _selectedBucket;
   _QuickFilter _quickFilter = _QuickFilter.none;
   _SortOrder _sort = _SortOrder.defaultOrder;
   Timer? _debounce;
@@ -39,6 +39,20 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadPersistedFilters());
+  }
+
+  Future<void> _loadPersistedFilters() async {
+    final userId = ref.read(authProvider).user?['id'] as String?;
+    if (userId == null) return;
+    final selection = await WorklistFilterStore.load(userId);
+    if (mounted) ref.read(worklistFiltersProvider.notifier).state = selection;
+  }
+
+  void _updateFilters(WorklistFilterSelection selection) {
+    ref.read(worklistFiltersProvider.notifier).state = selection;
+    final userId = ref.read(authProvider).user?['id'] as String?;
+    if (userId != null) WorklistFilterStore.save(userId, selection);
   }
 
   @override
@@ -101,6 +115,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
             onPressed: () {
               ref.invalidate(worklistProvider);
               ref.invalidate(dispositionCodesProvider);
+              ref.invalidate(worklistFilterOptionsProvider);
             },
           ),
           IconButton(
@@ -169,12 +184,8 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                         .toSet()
                         .toList()
                         ..sort();
-                    final buckets = customers
-                        .map((c) => c.bucket)
-                        .whereType<String>()
-                        .toSet()
-                        .toList()
-                        ..sort();
+                    final filters = ref.watch(worklistFiltersProvider);
+                    final options = ref.watch(worklistFilterOptionsProvider);
                     return Column(
                       children: [
                         Row(
@@ -200,31 +211,70 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                                     setState(() => _selectedCompany = value),
                               ),
                             ),
-                            if (buckets.isNotEmpty) ...[
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: DropdownButton<String?>(
-                                  isExpanded: true,
-                                  value: _selectedBucket,
-                                  hint: const Text('Filter by bucket'),
-                                  items: [
-                                    const DropdownMenuItem<String?>(
-                                      value: null,
-                                      child: Text('All buckets'),
-                                    ),
-                                    ...buckets.map(
-                                      (bucket) => DropdownMenuItem(
-                                        value: bucket,
-                                        child: Text(bucket),
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (value) =>
-                                      setState(() => _selectedBucket = value),
-                                ),
-                              ),
-                            ],
                           ],
+                        ),
+                        const SizedBox(height: 8),
+                        options.when(
+                          data: (opts) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (opts.branches.isNotEmpty) ...[
+                                const Text('Branch', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: opts.branches
+                                      .map(
+                                        (b) => FilterChip(
+                                          label: Text(b),
+                                          selected: filters.branches.contains(b),
+                                          onSelected: (sel) {
+                                            final next = List<String>.from(filters.branches);
+                                            if (sel) {
+                                              next.add(b);
+                                            } else {
+                                              next.remove(b);
+                                            }
+                                            _updateFilters(
+                                              WorklistFilterSelection(branches: next, buckets: filters.buckets),
+                                            );
+                                          },
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                                const SizedBox(height: 6),
+                              ],
+                              if (opts.buckets.isNotEmpty) ...[
+                                const Text('Bucket', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: opts.buckets
+                                      .map(
+                                        (b) => FilterChip(
+                                          label: Text(b),
+                                          selected: filters.buckets.contains(b),
+                                          onSelected: (sel) {
+                                            final next = List<String>.from(filters.buckets);
+                                            if (sel) {
+                                              next.add(b);
+                                            } else {
+                                              next.remove(b);
+                                            }
+                                            _updateFilters(
+                                              WorklistFilterSelection(branches: filters.branches, buckets: next),
+                                            );
+                                          },
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ],
+                            ],
+                          ),
+                          loading: () => const SizedBox.shrink(),
+                          error: (_, _) => const SizedBox.shrink(),
                         ),
                         const SizedBox(height: 8),
                         Wrap(
@@ -270,6 +320,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                 onRetry: () {
                   ref.invalidate(worklistProvider);
                   ref.invalidate(dispositionCodesProvider);
+                  ref.invalidate(worklistFilterOptionsProvider);
                 },
               ),
               data: (customers) {
@@ -287,10 +338,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                         .where((c) => c.companyName == _selectedCompany)
                         .toList()
                     : customers;
-
-                if (_selectedBucket != null) {
-                  filtered = filtered.where((c) => c.bucket == _selectedBucket).toList();
-                }
 
                 final today = DateTime.now();
                 final todayDateOnly = DateTime(today.year, today.month, today.day);
@@ -363,7 +410,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                       onPressed: () => setState(() {
                         _search = '';
                         _selectedCompany = null;
-                        _selectedBucket = null;
                         _quickFilter = _QuickFilter.none;
                       }),
                       child: const Text('Clear all filters'),
@@ -375,6 +421,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                   onRefresh: () async {
                     ref.invalidate(worklistProvider);
                     ref.invalidate(dispositionCodesProvider);
+                    ref.invalidate(worklistFilterOptionsProvider);
                   },
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),

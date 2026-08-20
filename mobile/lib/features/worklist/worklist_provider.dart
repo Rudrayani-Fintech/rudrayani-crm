@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/read_cache.dart';
+import '../../core/offline/worklist_filter_store.dart';
 
 /// Personal (own allocations) vs Team (every allocation in the branch a
 /// branch_manager manages) -- the web equivalent is MyWorklistPage.tsx's
@@ -9,6 +10,27 @@ import '../../core/offline/read_cache.dart';
 /// UI (see WorklistScreen); everyone else always resolves to personal scope
 /// server-side regardless of what this holds.
 final worklistScopeProvider = StateProvider<String>((ref) => 'personal');
+
+/// Selected branch/bucket filter -- starts empty (show all); WorklistScreen
+/// loads the persisted selection for the current user on first build and
+/// writes it back here via the notifier whenever the agent changes it.
+final worklistFiltersProvider = StateProvider<WorklistFilterSelection>((ref) => const WorklistFilterSelection());
+
+/// Options for the filter chips -- scoped to this agent's own allocated
+/// customers (web equivalent: GET /worklist/filter-options), not the
+/// agency-wide branch/bucket admin lists.
+final worklistFilterOptionsProvider = FutureProvider<({List<String> branches, List<String> buckets})>((ref) async {
+  final api = ref.watch(apiClientProvider);
+  final scope = ref.watch(worklistScopeProvider);
+  final res = await api.get<Map<String, dynamic>>(
+    '/worklist/filter-options',
+    query: scope == 'team' ? {'scope': 'team'} : null,
+  );
+  return (
+    branches: (res.data!['branches'] as List).cast<String>(),
+    buckets: (res.data!['buckets'] as List).cast<String>(),
+  );
+});
 
 /// Whether the data currently shown by worklistProvider/customerByIdProvider
 /// came from the offline cache rather than a fresh network response --
@@ -39,13 +61,41 @@ Future<List<Map<String, dynamic>>> _fetchWithCacheFallback(
   }
 }
 
+/// Builds an unambiguous offline-read-cache key for a given scope + filter
+/// selection. A naive `list.join('_')` let two different selections
+/// collide onto the same key whenever a branch/bucket name itself
+/// contained an underscore (e.g. branches: ["A","B"] and branches: ["A_B"]
+/// both joined to "A_B") -- on the offline-fallback path that could
+/// silently serve a cached list for the wrong filter combination. `\u0001`
+/// separates names *within* a branch/bucket list; `\u0002` separates the
+/// three top-level segments (scope, branches, buckets). Both are control
+/// characters that can never appear in a real branch/bucket name, and using
+/// two *distinct* separators (rather than one) also rules out the boundary
+/// shifting between segments -- e.g. branches: ["A","B"], buckets: ["C"]
+/// vs. branches: ["A"], buckets: ["B","C"] would still collide if `\u0001`
+/// alone separated everything flat, since both reduce to the same token
+/// stream "A\u0001B\u0001C" with no marker for where the branches group
+/// ends and the buckets group begins.
+String _worklistCacheKey(String scope, WorklistFilterSelection filters) {
+  const itemSep = '\u0001';
+  const groupSep = '\u0002';
+  final segments = [scope, filters.branches.join(itemSep), filters.buckets.join(itemSep)];
+  return 'worklist_${segments.join(groupSep)}';
+}
+
 final worklistProvider = FutureProvider<List<Customer>>((ref) async {
   final api = ref.watch(apiClientProvider);
   final scope = ref.watch(worklistScopeProvider);
-  final list = await _fetchWithCacheFallback(ref, 'worklist_$scope', () async {
+  final filters = ref.watch(worklistFiltersProvider);
+  final query = <String, dynamic>{};
+  if (scope == 'team') query['scope'] = 'team';
+  if (filters.branches.isNotEmpty) query['customer_branch'] = filters.branches.join(',');
+  if (filters.buckets.isNotEmpty) query['bucket'] = filters.buckets.join(',');
+  final cacheKey = _worklistCacheKey(scope, filters);
+  final list = await _fetchWithCacheFallback(ref, cacheKey, () async {
     final res = await api.get<Map<String, dynamic>>(
       '/worklist',
-      query: scope == 'team' ? {'scope': 'team'} : null,
+      query: query.isEmpty ? null : query,
     );
     return (res.data!['customers'] as List).cast<Map<String, dynamic>>();
   });

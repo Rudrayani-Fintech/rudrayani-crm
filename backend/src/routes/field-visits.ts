@@ -181,4 +181,45 @@ router.get(
   }),
 );
 
+const editRemarkBody = z.object({
+  remark: z.string().trim().max(500),
+});
+
+/**
+ * Same-day self-edit (MVP hardening), field-visit counterpart to
+ * call-logs.ts's PATCH /:id/remark. A field visit's remark is already plain
+ * free text (no disposition-template composition), so this just overwrites
+ * it directly.
+ */
+router.patch(
+  "/:id/remark",
+  asyncHandler(async (req, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const body = editRemarkBody.parse(req.body);
+
+    const { rows } = await pool.query(
+      `SELECT fv.id, fv.created_at
+         FROM field_visits fv
+         JOIN customers c ON c.id = fv.customer_id
+         JOIN companies co ON co.id = c.company_id
+        WHERE fv.id = $1 AND co.agency_id = $2 AND fv.agent_id = $3`,
+      [id, req.user!.agency_id, req.user!.id],
+    );
+    const visit = rows[0];
+    if (!visit) throw new HttpError(404, "Field visit not found, or it isn't yours");
+
+    const ageMs = Date.now() - new Date(visit.created_at).getTime();
+    if (ageMs >= 24 * 3600 * 1000) {
+      throw new HttpError(409, "This field visit is more than 24 hours old — submit a correction request instead");
+    }
+
+    const updated = await pool.query(
+      `UPDATE field_visits SET remark = $1, edited_at = now() WHERE id = $2
+        RETURNING id, remark, edited_at`,
+      [body.remark || null, id],
+    );
+    res.json({ field_visit: updated.rows[0] });
+  }),
+);
+
 export default router;

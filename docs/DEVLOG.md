@@ -1259,3 +1259,158 @@ sufficient on its own; the mobile disposition-key bug was likewise only
 caught by reading the actual runtime data flow, not by an existing test.
 
 ---
+
+## 2026-08-19 — Agent branch/bucket worklist filter + same-day remark edit
+
+**Why:** two independent asks from the field: agents working a large book
+wanted to narrow "Today's Work" down to a branch or bucket instead of
+scrolling the whole list, and agents kept discovering typos in their own
+call/visit remarks minutes after logging them with no way to fix them short
+of a manager-approved correction request — overkill for a same-day typo.
+
+### Backend
+- **Migration `1788900000000_call-log-field-visit-edit-columns.sql`** —
+  `call_logs.extra_remark` (free-text tail kept separate from the
+  disposition-composed remark) + `edited_at` on both `call_logs` and
+  `field_visits`.
+- **`PATCH /api/call-logs/:id/remark`** and **`PATCH /api/field-visits/:id/remark`**
+  — owner-only, rolling 24h window from `created_at`, and scoped to
+  free text only: a call log's `extra_remark` field never touches the
+  disposition-composed `remark`, action/result codes, or structured
+  `details` JSONB; a field visit's `remark` is the only field it accepts.
+  Past the 24h window, both return 409 pointing at the existing
+  correction-request flow.
+- **Migration `1789000000000_correction-requests-field-visit.sql`** +
+  `correction-requests.ts` — extended the existing payment/call_log/PTP
+  correction-request record types to cover `field_visit`, so an out-of-window
+  remark fix still has an approval path (unchanged for the other three types).
+- **`GET /api/customers/:id`** and the report-service agent-activity feed
+  now expose `agent_id`, `extra_remark`, and `edited_at` on call log and
+  field visit trail entries — what the UI needs to decide whether "Edit
+  remark" (owner + in-window) or "Report an error" (everyone else / out of
+  window) should show.
+- **`GET /api/worklist`** — `customer_branch` and `bucket` query params now
+  accept comma-separated multi-value lists (previously single-value only).
+  New **`GET /api/worklist/filter-options`** returns the distinct
+  branch/bucket values across the *calling agent's own* allocated customers
+  (or their team's, with `?scope=team`) — deliberately narrower than the
+  agency-wide branch/bucket admin lists, since an agent only ever needs to
+  filter within what they can already see.
+- **14 new/extended tests** (`call-log-remark-edit.test.ts`,
+  `field-visit-remark-edit.test.ts`, `worklist-filters.test.ts`, extended
+  `correction-requests.test.ts`) — owner-edit happy path, non-owner
+  rejection (404), rejection once past the 24h window (409), a PTP call log
+  whose `disposition_code_id`/`details`/linked `ptps` row are asserted
+  unchanged by a remark-only edit, multi-value filter combinations, and
+  (added in the final review pass, closing the bug below) `filter-options`
+  and the main list route both succeeding for a branch_manager on
+  `scope=team`.
+
+### Web
+- **`MyWorklistPage.tsx`** — branch and bucket filters became Ant Design
+  multi-select dropdowns, options loaded from `/worklist/filter-options`;
+  selection persists across reload via `localStorage`. Fixed a load-time
+  race along the way: the page had been firing one unfiltered `/worklist`
+  request before the persisted selection re-applied, momentarily flashing
+  the full list.
+- **`EditRemarkModal.tsx`** (new) + **`CustomerDetailDrawer.tsx`** — the
+  history timeline now shows an "Edit remark" pencil (owner, within 24h) or
+  the existing "Report an error" flag (`ReportCorrectionModal.tsx`, now also
+  offered for field visits), never both on the same entry. An `edited_at`
+  badge marks rows that have been directly edited.
+
+### Mobile
+- **`worklist_filter_store.dart`** (new) — Hive-backed persistence of the
+  selected branches/buckets per user, restored on app restart the same way
+  the offline read cache and action queue already persist across sessions.
+  `worklist_provider.dart` gained the matching `customer_branch`/`bucket`
+  query params and a `filter-options` provider scoped the same way as web.
+- **`worklist_screen.dart`** — bucket filtering moved from a client-side
+  single-select dropdown (filtering whatever page of customers happened to
+  be loaded) to server-side multi-select `FilterChip` rows fed by
+  `filter-options`, matching the web behavior. Getting this right took two
+  follow-up fixes: an unfiltered-fetch race on first load mirroring the web
+  one (the screen now gates its first `worklistProvider` watch behind
+  loading the persisted selection from Hive, with a 3s timeout safety valve
+  since `AuthNotifier.init()` doesn't guarantee `user` is populated by
+  `initState`), and an offline-cache-key collision (`branches.join('_')`
+  could map two different filter selections onto the same cache key
+  whenever a name itself contained an underscore — fixed with two distinct
+  control-character separators, one between names within a list and one
+  between the scope/branches/buckets segments).
+- **`edit_remark_dialog.dart`** (new) — mobile counterpart to
+  `EditRemarkModal.tsx`; `history_timeline.dart` picks it over
+  `correction_request_dialog.dart` under the same owner+in-window rule as
+  web. `correction_request_dialog.dart` extended to accept `field_visit`.
+
+### Verification
+- Backend: `npm run typecheck` clean (2 pre-existing unrelated errors in
+  `e2e-allocation-lifecycle.test.ts`/`reports.test.ts`, confirmed unchanged
+  by this work via `git diff main`); `npm run lint` clean in every file this
+  plan touched (3 pre-existing errors elsewhere, likewise confirmed
+  untouched); `npm test` — the known, pre-existing baseline of 24/32 test
+  files failing on an unrelated `designation` not-null constraint (predates
+  this plan) plus `reports.test.ts`'s one known-unrelated assertion; every
+  file this plan added or touched (`call-log-remark-edit`,
+  `field-visit-remark-edit`, `worklist-filters`, `correction-requests`,
+  `branches`, `ist`, `health`, `teams`) passes.
+- Frontend: `npm run typecheck && npm run build` clean.
+- Mobile: `flutter analyze` — 0 new issues (the 4 pre-existing
+  `ptps_screen.dart` info-lints only); `flutter test` — 43/43 passing.
+- Live-server walkthrough (backend + frontend dev servers, browser
+  automation): logged in as the demo telecaller — worklist and correction-
+  requests pages render cleanly, `/worklist/filter-options` returns
+  correctly (empty arrays, since this agent has zero allocated customers in
+  the dev DB — a standing data-limitation noted in every prior mobile task
+  of this plan, so the actual filter-selection and remark-edit interactions
+  couldn't be exercised against real records). No mobile emulator available
+  in this environment either; substituted a full structural read-through of
+  the Tasks 10-11 mobile diff instead.
+
+### How to view
+1. `cd backend && npm run dev`, `cd frontend && npm run dev`, log in as the
+   demo telecaller (8888888801 / Admin@1234).
+2. **My Worklist** — once customers are allocated (Allocation page, or
+   `seed:demo`), the Branch/Bucket dropdowns show that agent's own
+   branches/buckets; multi-select, reload the page, selection holds.
+3. Log a call or field visit, open the customer's history timeline within
+   24h — the entry shows a pencil "Edit remark" icon instead of the flag;
+   edit the free-text remark, save, an "edited" badge appears. Wait past 24h
+   (or edit `created_at` in the DB for a quick check) — the icon reverts to
+   "Report an error", which still creates a pending correction request.
+4. Mobile: same flow via the worklist screen's FilterChip rows and the
+   history timeline's edit-remark dialog, once an emulator/device is
+   available to verify against.
+
+### Final review fix wave
+Whole-branch code review after all 12 tasks landed found one Critical bug
+and several Important/Minor issues, fixed in a follow-up commit:
+- **Critical:** `GET /worklist/filter-options?scope=team` 500'd for every
+  branch_manager — the query seeded `$1` for the caller's own id but the
+  clamped (team-scope) branch of the built SQL never referenced `$1`
+  anywhere, only `$2`/`$3` from the two `agentBranchClamp()` calls, so
+  Postgres couldn't determine `$1`'s type. Fixed by only pushing/referencing
+  `$1` in the branch that actually uses it (the non-clamped, self-scope
+  case). `GET /worklist` (the main list route) was checked and does not
+  have this problem — its SELECT list references `$1` unconditionally
+  (`is_primary_for_me`/`is_field_agent_for_me`), so the placeholder is
+  always referenced regardless of scope.
+- **Important (mobile):** a stale persisted branch/bucket filter that no
+  longer matched any allocated customer was an unrecoverable dead end —
+  no chip renders for a value missing from `filter-options`, and the
+  existing "Clear all filters" button didn't reset the server-side
+  branch/bucket selection. `worklist_screen.dart`'s clear action now also
+  resets and persists `worklistFiltersProvider`, and the
+  "no customers assigned" empty state gained its own "Clear filters" button
+  whenever a branch/bucket filter is active.
+- Minor cleanup: the mobile Hive-backed filter store's `|` item separator
+  became the same `\u0001` control character `worklist_provider.dart`'s
+  cache key already uses, for the same delimiter-collision reason; the 24h
+  edit windows in both PATCH routes changed from `>` to `>=` for exact
+  spec fidelity; stale "three source tables" / "no correction flow for
+  field visits" comments in `correction-requests.ts`, `history_timeline.dart`,
+  and `ReportCorrectionModal.tsx` were updated to mention `field_visit`.
+  See `.superpowers/sdd/2026-08-18-agent-branch-bucket-filter-and-remark-edit/final-review-fix-report.md`
+  for the full list, including items deliberately left as follow-ups.
+
+---

@@ -9,6 +9,7 @@ import {
   createsPtp,
   missingRequiredFields,
   type DispositionCodeRow,
+  type DispositionFields,
 } from "../services/disposition-service";
 import { refreshNextActionDate } from "../services/ptp-service";
 import { customerWriteScopeClamp } from "../services/scope";
@@ -98,13 +99,14 @@ router.post(
     try {
       await client.query("BEGIN");
       const callLog = await client.query(
-        `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, call_duration_seconds, details, client_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        `INSERT INTO call_logs (customer_id, agent_id, disposition_code_id, remark, extra_remark, call_duration_seconds, details, client_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
         [
           body.customer_id,
           req.user!.id,
           code.id,
           remark,
+          body.extra_remark ?? null,
           body.call_duration_seconds ?? null,
           JSON.stringify(body.fields),
           body.client_key ?? null,
@@ -175,6 +177,61 @@ router.get(
       [customerId, req.user!.agency_id],
     );
     res.json({ call_logs: rows });
+  }),
+);
+
+const editRemarkBody = z.object({
+  extra_remark: z.string().trim().max(500),
+});
+
+/**
+ * Same-day self-edit (MVP hardening): within 24h of logging it, the agent
+ * who created the call log can fix a typo/omission in the free-text tail
+ * without a TL approval round-trip. Only extra_remark is touched -- the
+ * disposition code and structured `details` are re-read as-is and fed back
+ * through composeRemark() so the template-driven portion of `remark` can
+ * never drift from what missingRequiredFields()/createsPtp() validated at
+ * creation time. After 24h, correction-requests.ts is the only path left.
+ */
+router.patch(
+  "/:id/remark",
+  asyncHandler(async (req, res) => {
+    const id = z.string().uuid().parse(req.params.id);
+    const body = editRemarkBody.parse(req.body);
+
+    const { rows } = await pool.query(
+      `SELECT cl.id, cl.disposition_code_id, cl.details, cl.created_at
+         FROM call_logs cl
+         JOIN customers c ON c.id = cl.customer_id
+         JOIN companies co ON co.id = c.company_id
+        WHERE cl.id = $1 AND co.agency_id = $2 AND cl.agent_id = $3`,
+      [id, req.user!.agency_id, req.user!.id],
+    );
+    const callLog = rows[0];
+    if (!callLog) throw new HttpError(404, "Call log not found, or it isn't yours");
+
+    const ageMs = Date.now() - new Date(callLog.created_at).getTime();
+    if (ageMs >= 24 * 3600 * 1000) {
+      throw new HttpError(409, "This call log is more than 24 hours old — submit a correction request instead");
+    }
+
+    let composed = "";
+    if (callLog.disposition_code_id) {
+      const codeRes = await pool.query<DispositionCodeRow>("SELECT * FROM disposition_codes WHERE id = $1", [
+        callLog.disposition_code_id,
+      ]);
+      if (codeRes.rows[0]) {
+        composed = composeRemark(codeRes.rows[0], (callLog.details ?? {}) as DispositionFields);
+      }
+    }
+    const remark = body.extra_remark ? (composed ? `${composed} — ${body.extra_remark}` : body.extra_remark) : composed;
+
+    const updated = await pool.query(
+      `UPDATE call_logs SET extra_remark = $1, remark = $2, edited_at = now()
+        WHERE id = $3 RETURNING id, remark, extra_remark, edited_at`,
+      [body.extra_remark || null, remark, id],
+    );
+    res.json({ call_log: updated.rows[0] });
   }),
 );
 

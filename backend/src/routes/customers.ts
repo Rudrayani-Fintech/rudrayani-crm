@@ -258,8 +258,8 @@ router.get(
         // otherwise never reached a customer-facing view -- see field_catalog below.
         resolveFieldCatalog(customer.company_id),
         pool.query(
-          `SELECT cl.id, cl.remark, cl.call_duration_seconds, cl.details, cl.created_at,
-                  dc.action_code, dc.result_code, u.full_name AS agent_name
+          `SELECT cl.id, cl.remark, cl.extra_remark, cl.call_duration_seconds, cl.details, cl.created_at, cl.edited_at,
+                  cl.agent_id, dc.action_code, dc.result_code, u.full_name AS agent_name
              FROM call_logs cl
              LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
              LEFT JOIN users u ON u.id = cl.agent_id
@@ -300,7 +300,7 @@ router.get(
           [id],
         ),
         pool.query(
-          `SELECT fv.id, fv.remark, fv.created_at,
+          `SELECT fv.id, fv.remark, fv.created_at, fv.edited_at, fv.agent_id,
                   (fv.photo_url IS NOT NULL) AS has_photo,
                   u.full_name AS agent_name
              FROM field_visits fv

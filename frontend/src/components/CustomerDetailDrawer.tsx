@@ -25,7 +25,9 @@ import type { UploadProps } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { rupees as fmtAmount } from "../utils/money";
+import EditRemarkModal, { canDirectEditRecord } from "./EditRemarkModal";
 import PtpFormModal, { type PtpRecord } from "./PtpFormModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "./ReportCorrectionModal";
 
@@ -63,10 +65,13 @@ interface CustomerDetail {
   trail: {
     id: string;
     remark: string | null;
+    extra_remark: string | null;
     action_code: string | null;
     result_code: string | null;
+    agent_id: string;
     agent_name: string | null;
     created_at: string;
+    edited_at: string | null;
   }[];
   ptps: { id: string; amount: string; promised_date: string; status: string; mode: string | null }[];
   payments: { id: string; amount: string; mode: string | null; paid_at: string; deposited_at: string | null }[];
@@ -108,6 +113,8 @@ export default function CustomerDetailDrawer({
 }) {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
+  const [editRemarkTrailId, setEditRemarkTrailId] = useState<string | null>(null);
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
@@ -298,20 +305,36 @@ export default function CustomerDetailDrawer({
                       </Typography.Text>
                       <div>
                         {orDash(t.remark)}{" "}
-                        <Button
-                          size="small"
-                          type="link"
-                          style={{ padding: 0, height: "auto" }}
-                          onClick={() =>
-                            setCorrectionTarget({
-                              recordType: "call_log",
-                              recordId: t.id,
-                              currentValues: { remark: t.remark },
-                            })
-                          }
-                        >
-                          Report an error
-                        </Button>
+                        {t.edited_at && (
+                          <Tag color="default" style={{ fontSize: 11 }}>
+                            edited {dayjs(t.edited_at).format("DD MMM, HH:mm")}
+                          </Tag>
+                        )}
+                        {canDirectEditRecord(t.created_at, t.agent_id, user?.id) ? (
+                          <Button
+                            size="small"
+                            type="link"
+                            style={{ padding: 0, height: "auto" }}
+                            onClick={() => setEditRemarkTrailId(t.id)}
+                          >
+                            Edit
+                          </Button>
+                        ) : (
+                          <Button
+                            size="small"
+                            type="link"
+                            style={{ padding: 0, height: "auto" }}
+                            onClick={() =>
+                              setCorrectionTarget({
+                                recordType: "call_log",
+                                recordId: t.id,
+                                currentValues: { remark: t.remark },
+                              })
+                            }
+                          >
+                            Report an error
+                          </Button>
+                        )}
                       </div>
                     </>
                   ),
@@ -557,6 +580,19 @@ export default function CustomerDetailDrawer({
           open={correctionTarget !== null}
           onClose={() => setCorrectionTarget(null)}
           onSubmitted={loadDetail}
+        />
+      )}
+      {editRemarkTrailId && (
+        <EditRemarkModal
+          kind="call"
+          recordId={editRemarkTrailId}
+          currentText={detail?.trail.find((t) => t.id === editRemarkTrailId)?.extra_remark ?? ""}
+          open={editRemarkTrailId !== null}
+          onClose={() => setEditRemarkTrailId(null)}
+          onSaved={() => {
+            setEditRemarkTrailId(null);
+            loadDetail();
+          }}
         />
       )}
       {ptpModalTarget !== undefined && detail && (

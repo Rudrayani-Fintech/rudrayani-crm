@@ -205,6 +205,212 @@ router.get(
   }),
 );
 
+/**
+ * Agent Daily Activity export — same filters as GET /agent-activity but streams Excel.
+ * Row-count capped at 25,000 to prevent memory/timeout issues on huge datasets.
+ */
+router.get(
+  "/agent-activity/export",
+  asyncHandler(async (req, res) => {
+    // Helper to normalize repeatable query params into arrays
+    const toArray = (val: unknown): string[] => {
+      if (!val) return [];
+      if (typeof val === "string") return [val];
+      if (Array.isArray(val)) return val.filter(v => typeof v === "string");
+      return [];
+    };
+
+    const query = z
+      .object({
+        agent_id: z.string().uuid().optional(),
+        agent_ids: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        agent_type: z.enum(["telecaller", "field_agent"]).optional(),
+        scope: z.enum(["team"]).optional(),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+        today: z.coerce.boolean().optional(),
+        branch_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        bucket: z.union([z.string(), z.array(z.string())]).optional(),
+        company_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        product: z.union([z.string(), z.array(z.string())]).optional(),
+        disposition_code_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        ptp_status: z.union([z.enum(["pending", "kept", "broken"]), z.array(z.enum(["pending", "kept", "broken"]))]).optional(),
+        action_type: z.union([z.enum(["call", "payment", "ptp", "field_visit"]), z.array(z.enum(["call", "payment", "ptp", "field_visit"]))]).optional(),
+        search: z.string().optional(),
+      })
+      .parse(req.query);
+
+    // Same agent resolution as JSON endpoint
+    let agentIds: string[];
+
+    if (query.scope === "team" || query.agent_ids || query.agent_type) {
+      if (query.scope === "team" && req.user!.designation !== "branch_manager") {
+        throw new HttpError(403, "Only a branch manager can view team activity");
+      }
+
+      const scope = await scopeFilter(req.user!);
+      const clause = scope.param !== null ? scope.clause.replaceAll("$SCOPE", "$2") : "";
+      let params: unknown[] = scope.param !== null ? [req.user!.agency_id, scope.param] : [req.user!.agency_id];
+      let sql = `SELECT u.id FROM users u WHERE u.agency_id = $1 AND u.is_active = true ${clause}`;
+
+      if (query.agent_type) {
+        sql += ` AND u.agent_type = $${params.length + 1}`;
+        params.push(query.agent_type);
+      }
+
+      if (query.agent_ids && toArray(query.agent_ids).length > 0) {
+        const ids = toArray(query.agent_ids);
+        sql += ` AND u.id = ANY($${params.length + 1}::uuid[])`;
+        params.push(ids);
+      }
+
+      const { rows } = await pool.query<{ id: string }>(sql, params);
+      agentIds = rows.map((r) => r.id);
+
+      if (agentIds.length === 0) {
+        return res.json({ total_count: 0, activity: [] });
+      }
+    } else {
+      const targetAgentId = query.agent_id ?? req.user!.id;
+      if (targetAgentId !== req.user!.id) {
+        const scope = await scopeFilter(req.user!);
+        if (scope.param !== null) {
+          const clause = scope.clause.replaceAll("$SCOPE", "$2");
+          const { rows } = await pool.query(
+            `SELECT 1 FROM users u WHERE u.id = $1 AND u.agency_id = $3 ${clause}`,
+            [targetAgentId, scope.param, req.user!.agency_id],
+          );
+          if (rows.length === 0) throw new HttpError(403, "You cannot view this agent's activity");
+        }
+      }
+      agentIds = [targetAgentId];
+    }
+
+    // Check row count before building workbook (cap at 25,000)
+    const ROW_LIMIT = 25000;
+    const countResult = await pool.query<{ count: number }>(
+      `SELECT COUNT(*) as count FROM (
+        SELECT 1 FROM call_logs WHERE agent_id = ANY($1) AND created_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        UNION ALL
+        SELECT 1 FROM payments WHERE collected_by_user_id = ANY($1) AND paid_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        UNION ALL
+        SELECT 1 FROM ptps WHERE agent_id = ANY($1) AND created_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+        UNION ALL
+        SELECT 1 FROM field_visits WHERE agent_id = ANY($1) AND created_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
+      ) sub`,
+      [agentIds, query.date || new Date().toISOString().split("T")[0]],
+    );
+    const rowCount = parseInt(countResult.rows[0]?.count || "0", 10);
+
+    if (rowCount > ROW_LIMIT) {
+      return res.status(400).json({
+        error: `Too many rows (${rowCount.toLocaleString()}) for one export — narrow your filters (date, branch, bucket, or agent) and try again.`,
+        row_count: rowCount,
+        limit: ROW_LIMIT,
+      });
+    }
+
+    // Fetch activity data (no pagination for export)
+    const activity = await agentRecentActivity(req.user!.agency_id, agentIds, 10000, {
+      date: query.date,
+      today: query.today,
+      dispositionCodeIds: toArray(query.disposition_code_id),
+      branchIds: toArray(query.branch_id),
+      buckets: toArray(query.bucket),
+      companyIds: toArray(query.company_id),
+      products: toArray(query.product),
+      ptpStatuses: toArray(query.ptp_status) as ("pending" | "kept" | "broken")[],
+      actionTypes: toArray(query.action_type) as ("call" | "payment" | "ptp" | "field_visit")[],
+      search: query.search,
+    });
+
+    // Build Excel workbook
+    const wb = new ExcelJS.Workbook();
+    const sheet = wb.addWorksheet("Agent Activity");
+    sheet.addRow([
+      "Date",
+      "Time",
+      "Agent Name",
+      "Agent Type",
+      "Action Type",
+      "Customer Name",
+      "Mobile Number",
+      "Loan Number",
+      "Company",
+      "Product",
+      "Branch",
+      "Bucket",
+      "Outstanding (POS)",
+      "EMI",
+      "Due Amount",
+      "Amount",
+      "Disposition Code",
+      "Disposition Description",
+      "PTP Status",
+      "Remark",
+    ]);
+    sheet.getRow(1).font = { bold: true };
+
+    // Mapping for action types and PTP status for display
+    const actionTypeLabel = {
+      call: "Call",
+      payment: "Payment",
+      ptp: "PTP",
+      field_visit: "Field Visit",
+    };
+    const ptpStatusLabel = {
+      pending: "Pending",
+      kept: "Kept",
+      broken: "Broken",
+    };
+
+    for (const row of activity) {
+      const timestamp = new Date(row.at);
+      const date = timestamp.toISOString().split("T")[0];
+      const time = timestamp.toLocaleTimeString("en-IN", { hour12: false });
+
+      sheet.addRow([
+        date,
+        time,
+        row.agent_name,
+        row.agent_type ? (row.agent_type === "telecaller" ? "Telecaller" : "Field Agent") : "",
+        actionTypeLabel[row.kind as keyof typeof actionTypeLabel],
+        row.customer_name,
+        row.customer_mobile || "",
+        row.loan_number,
+        row.customer_company_name,
+        row.customer_product || "",
+        row.customer_branch_name || "",
+        row.customer_bucket || "",
+        row.customer_pos || "",
+        row.customer_emi || "",
+        row.customer_due_amount || "",
+        row.amount || "",
+        row.kind === "call" ? row.detail || "" : "",
+        row.kind === "call" ? "" : "",
+        row.ptp_status ? ptpStatusLabel[row.ptp_status as keyof typeof ptpStatusLabel] : "",
+        row.remark || "",
+      ]);
+    }
+
+    // Set column widths
+    sheet.columns.forEach((col, idx) => {
+      col.width = [10, 10, 18, 12, 15, 20, 15, 15, 20, 15, 15, 15, 15, 12, 15, 12, 18, 20, 12, 25][idx] || 12;
+    });
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=agent-activity-${new Date().toISOString().split("T")[0]}.xlsx`,
+    );
+
+    await wb.xlsx.write(res);
+    if (!res.writableEnded) res.end();
+  }),
+);
+
 router.get(
   "/overview",
   asyncHandler(async (req, res) => {

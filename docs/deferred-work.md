@@ -143,6 +143,28 @@ or a scoped follow-up:**
   sentinel logic looks structurally sound on inspection, but is unverified
   by a test).
 
+## Documentation (2026-07-31)
+
+- **Marathi usage guide deleted, retranslation outstanding.**
+  `docs/USAGE_GUIDE_MR.md` was removed rather than left in place: it documented
+  the **Team Leader** role, which `1788000000000_remove-team-leader.sql` deleted
+  outright, along with a mobile "My Team" tab that no longer exists. A guide that
+  confidently describes a role the system does not have is worse than no guide,
+  so it was deleted rather than allowed to keep misleading Marathi-speaking
+  staff. `docs/USAGE_GUIDE_EN.md` was rewritten in place against the current
+  code at the same time.
+  **Open:** a fresh Marathi translation of the rewritten English guide. This is
+  a real gap for the Sangli/Kolhapur/Latur staff it was written for, and it
+  compounds the localization item below — the app is English-only *and* now the
+  documentation is too. Worth pairing with any i18n work rather than doing
+  twice.
+- **The technical document is now the home for design rationale.**
+  `docs/TECHNICAL_DOCUMENTATION.md` §22 carries a numbered decision register
+  (`DEC-nnn`) mined from the build brief, `DEVLOG.md`, migration headers, and
+  in-code comments. New decisions should be added there rather than left only as
+  a code comment. Its §23 mirrors this file for known gaps — **this file remains
+  the live tracker**; the technical doc's copy is a point-in-time summary.
+
 ## Deferred by decision before the plan started
 
 - **Localization (Marathi / Hindi).** The mobile app has zero i18n

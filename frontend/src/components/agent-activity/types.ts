@@ -36,12 +36,19 @@ export interface AgentActivityResponse {
 
 // Filter state
 export interface FilterState {
+  // Primary filters
   date: string; // YYYY-MM-DD
   search: string;
   branchIds: string[];
   buckets: string[];
   agentIds: string[];
   agentType: "all" | "telecaller" | "field_agent";
+  // Secondary filters
+  companyIds: string[];
+  products: string[];
+  actionTypes: ("call" | "payment" | "ptp" | "field_visit")[];
+  dispositionCodeIds: string[];
+  ptpStatuses: ("pending" | "kept" | "broken")[];
 }
 
 // Lookup options for dropdowns
@@ -49,4 +56,7 @@ export interface LookupOptions {
   branches: Array<{ id: string; name: string }>;
   buckets: string[];
   agents: Array<{ id: string; full_name: string }>;
+  companies: Array<{ id: string; name: string }>;
+  products: string[];
+  dispositionCodes: Array<{ id: string; action_code: string; description?: string }>;
 }

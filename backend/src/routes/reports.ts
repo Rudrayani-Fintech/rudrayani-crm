@@ -299,7 +299,7 @@ router.get(
       ) sub`,
       [agentIds, query.date || new Date().toISOString().split("T")[0]],
     );
-    const rowCount = parseInt(countResult.rows[0]?.count || "0", 10);
+    const rowCount = parseInt(String(countResult.rows[0]?.count || "0"), 10);
 
     if (rowCount > ROW_LIMIT) {
       return res.status(400).json({

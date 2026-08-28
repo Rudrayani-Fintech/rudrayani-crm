@@ -16,6 +16,9 @@ export default function AgentActivityPage() {
     branches: [],
     buckets: [],
     agents: [],
+    companies: [],
+    products: [],
+    dispositionCodes: [],
   });
   const [activity, setActivity] = useState<AgentActivityRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -26,8 +29,13 @@ export default function AgentActivityPage() {
     const buckets = searchParams.getAll("bucket");
     const agentIds = searchParams.getAll("agent_id");
     const agentType = (searchParams.get("agent_type") as FilterState["agentType"]) || "all";
+    const companyIds = searchParams.getAll("company_id");
+    const products = searchParams.getAll("product");
+    const actionTypes = (searchParams.getAll("action_type") as any[]) || ["call", "payment", "ptp", "field_visit"];
+    const dispositionCodeIds = searchParams.getAll("disposition_code_id");
+    const ptpStatuses = (searchParams.getAll("ptp_status") as any[]) || [];
 
-    return { date, search, branchIds, buckets, agentIds, agentType };
+    return { date, search, branchIds, buckets, agentIds, agentType, companyIds, products, actionTypes, dispositionCodeIds, ptpStatuses };
   });
   const [page, setPage] = useState(parseInt(searchParams.get("page") || "1"));
   const pageSize = 50;
@@ -38,18 +46,23 @@ export default function AgentActivityPage() {
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [branchesRes, agentsRes] = await Promise.all([
+        const [branchesRes, agentsRes, companiesRes, dispositionCodesRes] = await Promise.all([
           api.get("/branches"),
           api.get("/employees"),
+          api.get("/companies"),
+          api.get("/disposition-codes"),
         ]);
 
         const branches = branchesRes.data.branches || [];
         const agents = (agentsRes.data.employees || [])
           .filter((e: any) => e.is_active && (e.capabilities.includes("telecaller") || e.capabilities.includes("field_agent")))
           .map((e: any) => ({ id: e.id, full_name: e.full_name }));
+        const companies = companiesRes.data.companies || [];
+        const dispositionCodes = dispositionCodesRes.data.dispositionCodes || [];
         const buckets: string[] = [];
+        const products: string[] = [];
 
-        setOptions({ branches, agents, buckets });
+        setOptions({ branches, agents, buckets, companies, products, dispositionCodes });
       } catch (err) {
         message.error(errorMessage(err));
       }
@@ -74,6 +87,11 @@ export default function AgentActivityPage() {
         filters.buckets.forEach((b) => params.append("bucket", b));
         filters.agentIds.forEach((id) => params.append("agent_id", id));
         if (filters.agentType !== "all") params.append("agent_type", filters.agentType);
+        filters.companyIds.forEach((id) => params.append("company_id", id));
+        filters.products.forEach((p) => params.append("product", p));
+        filters.actionTypes.forEach((a) => params.append("action_type", a));
+        filters.dispositionCodeIds.forEach((id) => params.append("disposition_code_id", id));
+        filters.ptpStatuses.forEach((s) => params.append("ptp_status", s));
 
         const response = await api.get<AgentActivityResponse>("/reports/agent-activity", {
           params,
@@ -113,6 +131,11 @@ export default function AgentActivityPage() {
       filters.buckets.forEach((b) => params.append("bucket", b));
       filters.agentIds.forEach((id) => params.append("agent_id", id));
       if (filters.agentType !== "all") params.append("agent_type", filters.agentType);
+      filters.companyIds.forEach((id) => params.append("company_id", id));
+      filters.products.forEach((p) => params.append("product", p));
+      filters.actionTypes.forEach((a) => params.append("action_type", a));
+      filters.dispositionCodeIds.forEach((id) => params.append("disposition_code_id", id));
+      filters.ptpStatuses.forEach((s) => params.append("ptp_status", s));
 
       // Trigger export download
       const response = await api.get("/reports/agent-activity/export", {

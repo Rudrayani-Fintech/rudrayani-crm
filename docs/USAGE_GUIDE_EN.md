@@ -1,666 +1,1455 @@
-# Rudrayani CRM — Usage Guide
+# Rudrayani CRM — Complete Usage Guide
 
-*A complete guide to using the Rudrayani Fintech collection-agency CRM: the web
-portal (for management) and the mobile app (for field/calling staff).*
+*An end-to-end guide to the Rudrayani Fintech collection-agency CRM: the web
+portal (management) and the Android mobile app (field and calling staff).*
 
-> मराठी आवृत्ती (Marathi version) — see `USAGE_GUIDE_MR.md` in this folder.
+**Document version:** 2.0 · **Applies to:** the system as of the Phase 9
+verification audit · **Audience:** every role, from Agency Admin to Field Agent.
+
+> **What changed in version 2.0.** The **Team Leader** role no longer exists.
+> It was removed from the system entirely and replaced by **Branch Manager** —
+> teams now report directly to their branch's manager, with no intermediary
+> rank. If you have an older copy of this guide that mentions Team Leaders or a
+> mobile "My Team" tab, discard it; neither exists any more. This edition is
+> also reorganised: it now leads with a **journey per role** rather than a tour
+> of screens, so you can read only your own chapter and be productive.
 
 ---
 
 ## Table of Contents
 
-1. [What This App Does](#1-what-this-app-does)
-2. [Key Terms — Glossary](#2-key-terms--glossary)
-3. [Roles and What Each One Can Do](#3-roles-and-what-each-one-can-do)
-4. [Getting Started](#4-getting-started)
-5. [Web Portal — Page by Page](#5-web-portal--page-by-page)
-6. [Mobile App — Screen by Screen](#6-mobile-app--screen-by-screen)
-7. [End-to-End Workflows](#7-end-to-end-workflows)
-8. [Best Practices for Agents](#8-best-practices-for-agents)
-9. [Troubleshooting & FAQ](#9-troubleshooting--faq)
+**Part I — Understanding the system**
+1. [What this system does](#1-what-this-system-does)
+2. [Key terms — glossary](#2-key-terms--glossary)
+3. [The five roles at a glance](#3-the-five-roles-at-a-glance)
+4. [Who can see what — the three visibility tiers](#4-who-can-see-what--the-three-visibility-tiers)
+
+**Part II — Your journey, by role**
+5. [Agency Admin](#5-agency-admin)
+6. [Operations Manager](#6-operations-manager)
+7. [Branch Manager](#7-branch-manager)
+8. [Telecaller](#8-telecaller)
+9. [Field Agent](#9-field-agent)
+10. [People who hold more than one role](#10-people-who-hold-more-than-one-role)
+
+**Part III — Work that crosses roles**
+11. [Cross-role workflows](#11-cross-role-workflows)
+
+**Part IV — Reference**
+12. [Web portal — page by page](#12-web-portal--page-by-page)
+13. [Mobile app — screen by screen](#13-mobile-app--screen-by-screen)
+14. [Best practices for agents](#14-best-practices-for-agents)
+15. [Troubleshooting & FAQ](#15-troubleshooting--faq)
+16. [Appendices](#16-appendices)
+
+---
+---
+
+# Part I — Understanding the system
+
+## 1. What this system does
+
+Rudrayani CRM helps a **collection agency** recover overdue loan payments on
+behalf of **finance companies** (lenders such as Hero FinCorp, Bajaj, TVS
+Credit, HDB Financial, Tata Capital).
+
+The shape of the business it models:
+
+```mermaid
+flowchart LR
+    L["Finance company<br/>(the lender)"] -->|"sends a monthly<br/>Excel loan book"| A
+    subgraph A["Rudrayani Fintech — the agency"]
+        direction TB
+        A1["Import the file"] --> A2["Allocate accounts<br/>to staff"]
+        A2 --> A3["Call · visit · collect"]
+        A3 --> A4["Record outcomes,<br/>promises, payments"]
+    end
+    A -->|"collections, receipts,<br/>reports"| L
+    A3 -->|"phone calls,<br/>doorstep visits"| B["Borrower<br/>(the customer)"]
+    B -->|"payments"| A4
+```
+
+The agency imports a lender's loan book, assigns each overdue account to a
+telecaller or field agent, and tracks every call, visit, promise-to-pay, and
+rupee collected against it — from first contact until the account is either
+**closed** (fully resolved) or **recalled** (pulled back by the lender).
+
+### Two applications
+
+| | Who uses it | What it's for |
+|---|---|---|
+| **Web portal** | Agency Admin, Operations Manager, Branch Manager | Import data, allocate work, approve queues, monitor staff, run reports |
+| **Mobile app** (Android) | Telecaller, Field Agent — and any manager who also works accounts | Daily worklist, calling, visits, payments, attendance, personal performance |
+
+Managers are not locked out of the mobile app, and agents are not locked out of
+the web portal. Both apps assemble themselves from **what you are permitted to
+do**, so you see your own pages and nothing else.
+
+### One principle worth understanding early
+
+**Nothing important happens automatically.** Repeat imports never silently
+change your book — every discrepancy waits for a human decision. Agents cannot
+edit a saved payment or call remark — they raise a correction request that a
+manager approves. Reallocations require a logged reason. This is deliberate:
+the system is designed to be auditable, because collections work is audited.
 
 ---
 
-## 1. What This App Does
-
-Rudrayani CRM helps a collection agency manage the work of recovering
-overdue loan payments on behalf of finance companies (lenders like Hero
-FinCorp, Bajaj, TVS Credit, etc.). The agency imports a lender's loan book,
-assigns each account to a telecaller or field agent, and tracks every call,
-visit, promise-to-pay, and payment made against it — from first contact all
-the way to the account being closed or recalled by the lender.
-
-There are two apps:
-
-- **Web portal** — used by the Agency Admin, Operations Managers, and Team
-  Leaders to import data, allocate work, monitor the team, and see reports.
-- **Mobile app (Android)** — used by Telecallers and Field Agents to see
-  their daily worklist, call/visit customers, record outcomes and payments,
-  and (for Team Leaders) keep an eye on their team.
-
-One person can hold more than one capability at once (e.g. someone can be
-both a Telecaller *and* a Team Leader) — the apps automatically show or hide
-screens/menu items based on what a person is allowed to do.
-
----
-
-## 2. Key Terms — Glossary
+## 2. Key terms — glossary
 
 | Term | Meaning |
 |---|---|
 | **Agency** | Your collection agency (Rudrayani Fintech). Everything in the system belongs to one agency. |
-| **Company** | A finance company / lender whose loan book you're collecting for (e.g. Hero FinCorp). Not part of your staff org chart — just the source of the customer data. |
-| **Branch** | A physical office/location of your agency (e.g. Sangli, Pune). |
-| **Team** | A group of staff within a branch, led by a Team Leader. |
-| **Capability** | What a staff member is allowed to do: Agency Admin, Operations Manager, Team Leader, Telecaller, Field Agent. One person can have several. |
-| **Customer / Loan Account** | One borrower's overdue loan, imported from a company's file. Has a status: **Active**, **Closed**, or **Recalled**. |
-| **Bucket** | The lender's own label for how overdue a loan is (e.g. "30 DPD", "NPA 1"). Buckets are configured per company (see Buckets page) and mapped to a standard 0–20 "canonical" delinquency scale so different lenders' labels can be compared fairly. |
+| **Company** | A finance company / lender whose loan book you collect for. A *data source*, not part of your staff org chart. |
+| **Branch** | A physical office of your agency (Sangli, Pune, Kolhapur, Latur, Solapur). Each branch has at most one **Branch Manager**. |
+| **Team** | A group of staff inside a branch. Teams report directly to the branch's manager. |
+| **Designation** | Your rank in the system: Agency Admin, Operations Manager, Branch Manager, Telecaller, or Field Agent. This is the single source of truth for what you can do. |
+| **Agent type** | Separate from designation. Marks a person as doing frontline collections work (telecalling or field work). A Branch Manager with an agent type manages a branch *and* works their own book. |
+| **Capability / Permission** | The individual things a designation unlocks — e.g. `customers.allocate`, `imports.review`. Stored as configuration, not code. |
+| **Customer / Loan Account** | One borrower's overdue loan, imported from a company's file. Status: **Active**, **Closed**, or **Recalled**. |
+| **Bucket** | The lender's own label for how overdue a loan is ("30 DPD", "NPA 1"). Configured per company and mapped to a standard 0–20 "canonical" scale so different lenders can be compared. |
 | **DPD** | Days Past Due — how many days overdue a loan's EMI is. |
-| **Product** | The loan type (e.g. "Personal Loan", "Home Loan"), read automatically from the imported file. |
-| **Allocation** | Assigning a loan account to a specific Telecaller or Field Agent so they're responsible for working it. |
-| **Unallocated Queue** | Loan accounts that have been imported but not yet assigned to anyone. |
-| **Reallocation** | Moving an already-assigned account to a different agent, with a required reason (logged for audit). |
-| **Reallocation Request** | A request an agent raises (from the mobile app) asking their Team Leader to move a customer away from them (e.g. wrong area, language mismatch, dispute). The Team Leader approves (optionally picking a new agent) or rejects it. |
-| **Disposition / Disposition Code** | The recorded outcome of a call or visit — e.g. "PTP" (Promise to Pay), "RNR" (Ringing, No Response), "RTP" (Refuse to Pay). Each code is configured with which extra details it requires (amount, date, mode, reason, etc.). |
-| **Trail / Trail History** | The full history of every call/visit logged against a customer, in order. |
-| **PTP (Promise to Pay)** | A commitment the customer made to pay a specific amount by a specific date. Created automatically when an agent logs a promise-type disposition. Status: **pending**, **kept**, or **broken**. |
-| **Reminder** | A personal follow-up note an agent sets for themselves (with or without a customer attached), separate from a PTP. Triggers a phone notification at the chosen time. |
-| **Field Visit** | A record of an in-person visit to a customer's address — requires a photo and captures GPS location automatically. |
-| **Payment** | Money collected from a customer, with amount, mode, date, and (usually) a photo proof. |
-| **Deposit / Deposited** | Once a collected payment is physically banked, an admin/ops user marks it "Deposited" on the Deposits page — until then it shows as "Pending". |
-| **Closed** (customer status) | The account is fully resolved (paid off) and marked closed from the mobile Payment screen — it leaves active worklists. |
-| **Recalled** (customer status) | The lender told the agency (via a new import file) that this account should no longer be worked — different from Closed; it means the *lender* pulled it back, not that it was resolved. |
-| **Normalized (this month, pending lender confirmation)** | A blue badge shown when a payment has brought an account's bucket back to current *before* the lender's own file confirms it — the lender's bucket label stays authoritative everywhere else until they confirm. |
-| **Bucket Movement** | A detected change in a customer's delinquency bucket — either "Payment (in-month)" (detected immediately from a payment) or "Allocation (confirmed)" (confirmed later by the lender's next monthly file). |
-| **Import Template** | A saved mapping (Excel column → system field) for a specific company's file layout, so future uploads for that company don't need re-mapping. |
-| **Import Review Queue** | Where an Agency Admin/Ops Manager decides what to do with discrepancies found in a repeat monthly import: new loans (**additions**), loans missing from the new file (**removals** → recalled), and previously-recalled loans reappearing (**reactivations**). Nothing changes automatically — every discrepancy waits here for a decision. |
-| **Target** | A monthly goal (₹ or count) set per agent / team / branch / whole agency, for each of five metrics: Collection, Resolution, Roll Back, Normalization, Recovery. Dashboards measure actual performance against these. |
-| **Attendance / Punch In / Punch Out** | An agent starting/ending their work shift for the day in the mobile app. Punching in starts location tracking; punching out stops it. |
-| **Day Plan** | A web page for managers showing, for any day, every agent's attendance, PTPs due, reminders due, and activity so far. |
-| **Attachment / Document** | A supporting file (photo or PDF) uploaded against a customer — e.g. a KYC document or agreement copy — separate from payment/visit proof photos. |
-| **Custom Field / Detail Field** | Any column from the original import file that didn't map to a standard system field is kept as a "custom field" so no data is lost; some can be flagged to also show on the Customer Detail view as a "detail field". |
-| **POS (Principal Outstanding)** | The remaining loan principal a customer still owes — distinct from **Due Amount**, which is the current *overdue arrears* (what's actually late). Portfolio-size figures (e.g. the Dashboard's "Portfolio (POS)" tile, Management Dashboard's "Total Portfolio") are measured in POS; the Resolution/Roll Back/Normalization/Recovery metrics are also POS-denominated, while Due Amount stays purely a "how much is currently overdue" figure. |
-| **Correction Request** | A request an agent raises to fix a mistake in one of their own already-saved records (a payment amount, call remark, or PTP detail) — there's no direct edit button once saved. An Admin/Ops Manager approves (applying the change) or rejects it. Only a narrow, safe list of fields can ever be corrected this way — never the customer, the collecting agent, or any timestamp. |
-| **Manager / Org Chart** | Every employee can optionally have a **Manager** (any other employee) purely for reporting-line visibility — separate from Team/Branch structure and from the Team Leader capability. Shown as a tree on the **Org Chart** page. |
-| **Field Definition** | An admin-configurable catalog entry describing an import column (its label, type, and whether it's a core field every company must have or an optional custom one) — configured per-company on the **Field Config** page, and what the Import wizard's column-mapping step offers. |
+| **POS (Principal Outstanding)** | The remaining loan principal still owed. Distinct from **Due Amount**, which is only the *current overdue arrears*. Portfolio-size figures use POS. |
+| **Product** | The loan type ("Personal Loan", "Home Loan"), read automatically from the imported file. |
+| **Allocation** | Assigning a loan account to a specific Telecaller or Field Agent. |
+| **Unallocated Queue** | Imported accounts not yet assigned to anyone. |
+| **Reallocation** | Moving an already-assigned account to a different agent. A reason is mandatory and is logged. |
+| **Reallocation Request** | An agent asking (from the mobile app) to have a customer moved off them — wrong area, language mismatch, dispute. A manager approves or rejects. |
+| **Correction Request** | An agent proposing a fix to one of their own already-saved records (payment amount, call remark, PTP detail). There is no direct edit button once saved. A manager approves or rejects. Only a narrow, safe set of fields is ever correctable — never the customer, the collecting agent, or any timestamp. |
+| **Disposition / Disposition Code** | The recorded outcome of a call or visit — "PTP" (Promise to Pay), "RNR" (Ringing, No Response), "RTP" (Refuse to Pay). Each code declares which extra details it needs. |
+| **Trail / Trail History** | The full ordered history of every call and visit logged against a customer. |
+| **PTP (Promise to Pay)** | A commitment to pay a specific amount by a specific date. Status: **pending**, **kept**, or **broken**. |
+| **Next Action Date** | The date a customer next needs attention. Drives the order of your worklist so the most urgent work rises to the top. |
+| **Reminder** | A personal follow-up alert an agent sets for themselves, with or without a customer attached. Fires a phone notification at the chosen time. |
+| **Field Visit** | A record of an in-person visit — requires a photo, captures GPS automatically. |
+| **Payment** | Money collected, with amount, mode, date, and usually a photo proof. |
+| **Receipt Number** | A sequential receipt identifier generated per branch per financial year when a payment is recorded. |
+| **Deposit / Deposited** | Once collected cash is physically banked, an admin or ops user marks the payment "Deposited". Until then it shows as "Pending". |
+| **Closed** | The account was fully resolved (paid off) and marked closed from the mobile Payment screen. |
+| **Recalled** | The *lender* pulled the account back, told to the agency via a monthly import file. Not the same as Closed — it does not mean the debt was resolved. |
+| **Normalized (pending lender confirmation)** | A blue badge shown when a payment has brought an account back to current *before* the lender's own file confirms it. The lender's label stays authoritative everywhere else. |
+| **Bucket Movement** | A detected change in a customer's delinquency bucket — either "Payment (in-month)" (detected immediately) or "Allocation (confirmed)" (confirmed by the lender's next file). |
+| **Import Template** | A saved mapping (Excel column → system field) for a company's file layout, so future uploads auto-map. |
+| **Import Review Queue** | Where a manager decides what to do with discrepancies in a repeat monthly import: **additions**, **removals** (→ recalled), and **reactivations**. |
+| **Custom Field / Detail Field** | Any import column that didn't map to a standard field is kept as a custom field so no data is lost. Some can be flagged to show on the Customer view. |
+| **Field Definition** | An admin-configurable catalog entry describing an import column — what the Import wizard's mapping step offers. |
+| **Target** | A monthly goal (₹ or count) per agent / team / branch / agency, for five metrics: Collection, Resolution, Roll Back, Normalization, Recovery. |
+| **Punch In / Punch Out** | Starting and ending your work shift in the mobile app. Punching in starts location tracking. **You cannot use the mobile app at all until you punch in.** |
+| **Day Plan** | A web page showing, for any day, every agent's attendance, PTPs due, reminders due, and activity. |
+| **Setup Checklist** | A six-step guide shown on a new agency's dashboard: add a company, add branches, add employees, import a file, allocate, set targets. |
+| **Sync queue / Dead letter** | Work you did offline waiting to reach the server. An item that repeatedly fails becomes a "dead letter" — still visible, never silently deleted, but no longer retried automatically. |
+| **Org Chart** | A reporting-line tree. Every employee can optionally have a **Manager** (any other employee) purely for "who reports to whom" — separate from Branch and Team structure. |
 
 ---
 
-## 3. Roles and What Each One Can Do
+## 3. The five roles at a glance
 
-Roles are called **capabilities** in this system, and they stack — someone
-can hold more than one at a time.
+Your **designation** determines everything. There are exactly five.
 
-| Capability | Can do |
+```mermaid
+flowchart TD
+    AA["<b>Agency Admin</b><br/>exactly one per agency<br/><i>everything, including billing</i>"]
+    OM["<b>Operations Manager</b><br/><i>everything except adding another<br/>Ops Manager and billing</i>"]
+    BM["<b>Branch Manager</b><br/>one per branch<br/><i>their whole branch</i>"]
+    TC["<b>Telecaller</b><br/><i>their own accounts, by phone</i>"]
+    FA["<b>Field Agent</b><br/><i>their own accounts, in person</i>"]
+
+    AA --> OM
+    OM --> BM
+    BM --> TC
+    BM --> FA
+
+    style AA fill:#1f4e79,color:#fff
+    style OM fill:#2e75b6,color:#fff
+    style BM fill:#5b9bd5,color:#fff
+    style TC fill:#9dc3e6,color:#000
+    style FA fill:#9dc3e6,color:#000
+```
+
+### What each role can do
+
+A ✓ means the role holds that permission. This table is the authoritative
+answer to "why can't I see that page?"
+
+| What you want to do | Permission | Agency Admin | Ops Manager | Branch Manager | Telecaller | Field Agent |
+|---|---|:---:|:---:|:---:|:---:|:---:|
+| View employees | `employees.view` | ✓ | ✓ | ✓ | — | — |
+| Add employees | `employees.create` | ✓ | ✓ | ✓ | — | — |
+| Edit employees | `employees.update` | ✓ | ✓ | — | — | — |
+| Deactivate employees | `employees.deactivate` | ✓ | ✓ | — | — | — |
+| Add another Operations Manager | `ops_managers.create` | ✓ | — | — | — | — |
+| Access billing | `billing.view` | ✓ | — | — | — | — |
+| Create / rename branches | `branches.manage` | ✓ | ✓ | ✓ | — | — |
+| Create / rename teams | `teams.manage` | ✓ | ✓ | ✓ | — | — |
+| Manage companies & buckets | `companies.manage` | ✓ | ✓ | — | — | — |
+| Run imports | `imports.manage` | ✓ | ✓ | — | — | — |
+| Decide import discrepancies | `imports.review` | ✓ | ✓ | — | — | — |
+| Maintain disposition codes | `dispositions.manage` | ✓ | ✓ | — | — | — |
+| View customers | `customers.view` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Allocate / reallocate customers | `customers.allocate` | ✓ | ✓ | ✓ | — | — |
+| View team & agency reports | `reports.view` | ✓ | ✓ | ✓ | — | — |
+| View own performance | `reports.view_self` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Set targets | `targets.manage` | ✓ | ✓ | — | — | — |
+| Mark payments deposited | `payments.deposit` | ✓ | ✓ | — | — | — |
+| Log calls | `calls.log` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Record payments | `payments.record` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Punch in / out | `attendance.punch` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Set reminders | `reminders.manage` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| See tracking / attendance | `tracking.view` | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Two rows in that table are easy to misread:
+
+- **`tracking.view` is held by everyone**, but it does not mean an agent can
+  watch their colleagues. Permission decides *whether the page opens*; the
+  visibility tier (next section) decides *what appears on it*. An agent opening
+  a tracking view sees only their own attendance and route.
+- **`employees.create` without `employees.update`** is the Branch Manager's
+  position exactly: they can bring new staff into their branch, but cannot edit
+  or deactivate anyone afterwards. That is an intentional escalation boundary —
+  changing someone's designation or switching off their account is an
+  Ops-and-above action.
+
+---
+
+## 4. Who can see what — the three visibility tiers
+
+Permissions decide which pages open. **Scope** decides how much data appears on
+them. There are exactly three tiers.
+
+```mermaid
+flowchart TD
+    Q{"What is your<br/>designation?"}
+    Q -->|"Agency Admin<br/>Operations Manager"| T1["<b>Agency-wide</b><br/>Every branch, every team,<br/>every customer, every agent"]
+    Q -->|"Branch Manager"| T2["<b>Branch-scoped</b><br/>Everyone and everything in<br/>the branch you manage"]
+    Q -->|"Telecaller<br/>Field Agent"| T3["<b>Self only</b><br/>Your own assigned customers<br/>and your own numbers"]
+
+    T2 --> T2a["Plus: telecallers assigned to<br/>your branch as an extra branch,<br/>even if their home branch differs"]
+    T2 --> T2b["<b>If no branch is assigned<br/>to you yet: you see nothing.</b><br/>This is a safety default,<br/>not a bug."]
+
+    style T1 fill:#1f4e79,color:#fff
+    style T2 fill:#5b9bd5,color:#fff
+    style T3 fill:#9dc3e6,color:#000
+    style T2b fill:#ffd966,color:#000
+```
+
+### A worked example
+
+Priya manages the **Sangli** branch. Rahul is an Operations Manager. Sunil is a
+telecaller in Sangli. Meena is a telecaller in Pune.
+
+- **Rahul** opens the Customers page and sees every account in the agency —
+  Sangli, Pune, everywhere.
+- **Priya** opens the same page and sees only Sangli accounts. If she filters
+  for Pune, she gets zero rows. This is correct, not broken.
+- **Sunil** opens his worklist and sees only the accounts allocated to him —
+  not every Sangli account, just his own.
+- If Sunil is *also* assigned to Pune as a second branch, then the **Pune**
+  branch manager can see him too, even though his home branch is Sangli.
+- **Meena's** accounts never appear anywhere in Priya's portal.
+
+### Two behaviours worth knowing
+
+**A Branch Manager with no branch assigned sees nothing at all.** If you have
+been given the Branch Manager designation but nobody has yet set you as the
+manager of an actual branch, every list will be empty. The system deliberately
+fails to "nothing" rather than "everything". Ask an Ops Manager to assign you to
+a branch — on the mobile Branch Dashboard you will see the message *"Ask an
+admin to assign this branch"*.
+
+**Branch scoping tolerates messy lender data.** Not every lender's file includes
+a branch column. When it doesn't, the system falls back to matching the branch
+*name* recorded against the customer, so a Branch Manager still sees their book
+instead of an empty screen.
+
+---
+---
+
+# Part II — Your journey, by role
+
+Each of the next five chapters follows the same shape: who you are, your first
+day, a typical day, everything you can do, and what you can't do and why. Read
+your own chapter; skim the others only if you manage those people.
+
+---
+
+## 5. Agency Admin
+
+> **Where you work:** primarily the web portal. The mobile app is available to
+> you and shows the branch-manager-style dashboard.
+> **How many of you there are:** exactly one per agency.
+
+### 5.1 Who you are
+
+You are the owner of the agency's account. You can do everything anyone else can
+do, plus two things nobody else can: **add Operations Managers** and **access
+billing**. Your own account cannot be edited or deactivated from the Employees
+page — it is managed separately, on purpose, so nobody can lock the agency out
+of its own system.
+
+### 5.2 Day one — standing the agency up
+
+There is no self-registration. Your account is created during the agency's
+technical setup. When you log in for the first time, the dashboard will be full
+of zeros — that is expected, and a **Setup Checklist** appears at the top with
+six steps. Work down it in order; each step links straight to the page you need.
+
+```mermaid
+flowchart TD
+    S1["<b>1 · Add your first company</b><br/><i>the lender whose book you'll collect</i>"]
+    S2["<b>2 · Add branches</b><br/><i>your physical offices</i>"]
+    S3["<b>3 · Add employees</b><br/><i>and place them in branches and teams</i>"]
+    S4["<b>4 · Import your first customer file</b><br/><i>the lender's Excel loan book</i>"]
+    S5["<b>5 · Allocate customers to agents</b>"]
+    S6["<b>6 · Set collection targets</b>"]
+    D["Dashboard now shows real numbers"]
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> D
+
+    style S1 fill:#e7f0f9
+    style S2 fill:#e7f0f9
+    style S3 fill:#e7f0f9
+    style S4 fill:#e7f0f9
+    style S5 fill:#e7f0f9
+    style S6 fill:#e7f0f9
+    style D fill:#c6e0b4
+```
+
+Each step's tick comes from a real check against your data, not a box you can
+tick yourself — so the checklist cannot get out of sync, and won't keep nagging
+about something you've already done. You can dismiss it once you're set up.
+
+**The order matters.** Branches must exist before you can place employees in
+them. A company must exist before you can import its file. Customers must be
+imported before there is anything to allocate.
+
+### 5.3 A typical day
+
+Most days you are not doing setup — you're checking that the operation is
+healthy.
+
+1. **Open the Dashboard.** Check Collection MTD against target, and the
+   "days left in month" indicator. If there are pending approvals anywhere, an
+   alert strip at the top tells you before you go looking.
+2. **Clear the queues.** Import Review, Reallocation Requests, Correction
+   Requests. Nothing in these moves until a human decides, so they are the first
+   place work gets stuck.
+3. **Check the Management Dashboard** for the leadership view — total portfolio,
+   collection %, top and bottom performers.
+4. **Check Deposits.** Cash collected in the field is only reconciled once
+   somebody marks it deposited. Left undone, your reporting understates what
+   actually reached the bank.
+5. **Spot-check Tracking or Day Plan** if a branch's numbers look wrong.
+
+### 5.4 Everything you can do
+
+| Area | Pages | Notes |
+|---|---|---|
+| **Organisation** | Companies, Branches, Teams, Employees, Org Chart | Only you can grant the Operations Manager designation |
+| **Master data** | Buckets, Field Config, Dispositions | Agency-wide configuration |
+| **Data intake** | Import, Import Review | The 4-step import wizard and the discrepancy queue |
+| **Work management** | Customers, Allocation, Reallocation Requests, Correction Requests | |
+| **Reporting** | Dashboard, Management Dashboard, Reports, Targets | Export to Excel from all of them |
+| **Oversight** | Tracking, Day Plan, Attendance, Deposits | |
+| **Your own book** | My Worklist | Only if you also carry an agent type |
+
+### 5.5 What you cannot do
+
+Almost nothing — but two limits are worth knowing:
+
+- **You cannot edit a bucket label.** Bucket labels arrive from the lender's
+  file and are authoritative. You configure how buckets *behave* (order,
+  category, canonical mapping) on the Buckets page, but you never type a label.
+- **You cannot make a repeat import apply itself.** Every discrepancy goes to
+  Import Review, every time, by design.
+
+---
+
+## 6. Operations Manager
+
+> **Where you work:** primarily the web portal; the mobile app is available and
+> shows the branch-manager-style dashboard.
+
+### 6.1 Who you are
+
+You run the agency day to day. You can do everything the Agency Admin can,
+**except** adding another Operations Manager and accessing billing. In practice
+this means you are the person who actually operates the system: you import the
+books, decide the discrepancies, set the targets, and keep the branches honest.
+
+### 6.2 Day one
+
+Your account is created for you by the Agency Admin on the Employees page. Log
+in with your phone number and the initial password you were given. You land on
+the Dashboard with full agency-wide visibility from the first minute.
+
+If the agency is brand new, you will see the same Setup Checklist described in
+§5.2 — and in most agencies it is the Ops Manager, not the Admin, who actually
+works through it.
+
+### 6.3 A typical day
+
+```mermaid
+flowchart TD
+    A["Morning:<br/>open Dashboard"] --> B{"Pending approvals<br/>alert showing?"}
+    B -->|Yes| C["Clear Import Review,<br/>Reallocation & Correction<br/>Requests"]
+    B -->|No| D["Check Day Plan:<br/>who is on duty,<br/>what is due today"]
+    C --> D
+    D --> E["Mid-day: check<br/>Tracking live map"]
+    E --> F{"New lender file<br/>arrived?"}
+    F -->|Yes| G["Import wizard →<br/>map → preview → commit"]
+    G --> H["Import Review:<br/>decide each discrepancy"]
+    H --> I["Allocation:<br/>assign new accounts"]
+    F -->|No| I
+    I --> J["Evening: Deposits —<br/>reconcile collected cash"]
+    J --> K["Reports / Management<br/>Dashboard: check the day"]
+```
+
+### 6.4 Your core responsibilities in detail
+
+**Bringing in a lender's book.** The Import wizard is four steps: Select &
+Upload → Map Columns → Preview & Validate → Done. Save your column mapping as a
+**Template** the first time; every future file from that company then auto-maps.
+Any column you don't map is kept as a custom field — no data is ever lost.
+Maximum file size is 15 MB.
+
+**Deciding discrepancies.** A repeat import for a month you've already loaded
+never applies changes on its own. It produces three kinds of item in Import
+Review, each of which you approve or reject:
+
+| Type | Tag | What approving does |
+|---|---|---|
+| **Addition** | blue | Inserts the new customer |
+| **Removal** | red | Marks the customer **Recalled** and clears their agent assignment |
+| **Reactivation** | orange | Restores a previously recalled customer to Active |
+
+Expand any row before deciding — you'll see the customer's last remark, pending
+PTP, and amount paid this month.
+
+**Allocating work.** The Allocation page has two tabs: the **Unallocated Queue**
+(filter, multi-select, pick an agent, Assign) and **Allocated** (multi-select,
+Reallocate with a mandatory reason, or view the full reassignment History for
+any row).
+
+**Setting targets.** Targets can be set per agent, per team, per branch, or for
+the whole agency, across five metrics. If nobody has set a Collection target at
+any level, the dashboard falls back to the book's own EMI schedule as a computed
+default — so there is always a sensible benchmark. That fallback applies only to
+Collection; the other four show no target until you set one.
+
+**Reconciling cash.** On the Deposits page, filter to Pending, multi-select, and
+Mark deposited. Already-deposited rows cannot be unchecked. This feeds the
+dashboard's Deposited Metrics directly.
+
+### 6.5 What you cannot do, and why
+
+- **Add another Operations Manager.** That is the Agency Admin's call alone — it
+  is the one action that widens the circle of people with near-total access.
+- **Access billing.** Same reasoning.
+- **Edit the Agency Admin's account** from the Employees page.
+
+---
+
+## 7. Branch Manager
+
+> **Where you work:** both. The web portal for allocation, approvals and
+> reports; the mobile app for a live branch view and approvals on the move.
+> **How many of you there are:** at most one per branch.
+
+### 7.1 Who you are
+
+You are responsible for one branch — every team in it, every agent, every
+customer. There is no rank between you and your agents; teams report directly to
+you.
+
+You may *also* carry an **agent type**, meaning you work your own book of
+accounts alongside managing the branch. If so, you get a personal worklist in
+addition to everything below — see §10.
+
+### 7.2 Day one
+
+An Ops Manager creates your account **and** assigns you as the manager of an
+actual branch. Those are two separate things, and both must happen.
+
+> **If your screens are empty, this is why.** Until somebody sets you as the
+> manager of a branch, you will see zero customers, zero employees, zero
+> everything — the mobile Branch Dashboard will say *"Ask an admin to assign
+> this branch"*. The system defaults to showing nothing rather than risking
+> showing you another branch's data. Ask an Ops Manager to complete the
+> assignment.
+
+### 7.3 A typical day
+
+```mermaid
+flowchart TD
+    A["Open the mobile app<br/>→ Punch In"] --> B["Branch Dashboard:<br/>who is on duty right now"]
+    B --> C{"Anyone off duty<br/>who should be on?"}
+    C -->|Yes| D["Call them"]
+    C -->|No| E["Review reallocation<br/>requests from your team"]
+    D --> E
+    E --> F["Approve → optionally pick<br/>a new agent, or return<br/>to the unallocated pool"]
+    F --> G["Switch to web portal"]
+    G --> H["Allocation: assign<br/>new accounts to your agents"]
+    H --> I["Day Plan: PTPs and<br/>reminders due across the branch"]
+    I --> J["Tracking: live map<br/>of your field agents"]
+    J --> K["Reports: how the branch<br/>is tracking vs target"]
+```
+
+### 7.4 Everything you can do
+
+**On the web portal**
+
+| Page | What you do there |
 |---|---|
-| **Agency Admin** (exactly one per agency) | Everything — including adding/removing Operations Managers and billing access. Cannot be edited or deactivated from the Employees screen (managed separately). |
-| **Operations Manager** | Everything the Agency Admin can do **except** adding another Operations Manager or billing. |
-| **Team Leader** | A *designation*, not a fixed rung — assigned to any employee by an Ops Manager. Can allocate/reallocate customers, view employees, view reports (for their team), view tracking (for their team), and — on mobile — sees an extra "My Team" tab. |
-| **Telecaller** | Works an assigned worklist by phone: logs calls, records payments, sets reminders, requests reallocation. Sees only their own customers and their own performance. |
-| **Field Agent** | Same as Telecaller, plus records field visits (in-person, with photo + GPS). |
+| **Dashboard** | Full performance dashboard, scoped to your branch |
+| **Management Dashboard** | KPI view of your branch |
+| **Reports** | Breakdown by product, bucket, team, agent — exportable |
+| **Allocation** | Assign unallocated accounts; reallocate with a reason |
+| **Reallocation Requests** | Approve or reject requests from your agents |
+| **Correction Requests** | Approve or reject record corrections from your agents |
+| **Customers** | Browse your branch's book; open the full Customer 360 view |
+| **Employees** | View your branch's staff; add new ones |
+| **Branches / Teams** | Create and rename teams within your branch |
+| **Org Chart** | Reporting-line tree |
+| **Tracking** | Live map and route replay for your agents |
+| **Day Plan / Attendance** | Daily summary and the full attendance log |
+| **My Worklist** | Your own accounts, if you carry an agent type |
 
-A person with **Team Leader + Telecaller** capabilities, for example, gets
-both the normal worklist screens *and* the "My Team" tab on mobile, plus
-extra web-portal access — the apps combine whatever capabilities a person
-has rather than forcing a single role.
+**On the mobile app** — your bottom tabs are **My Worklist**, **Branch
+Dashboard**, **My Performance**, and **Account**. The Branch Dashboard gives you:
 
-**Visibility scoping**, used throughout the app:
-- **Agency Admin / Operations Manager** → see everything, agency-wide.
-- **Team Leader** → see only their own team (customers, reports, tracking,
-  employees).
-- **Telecaller / Field Agent** → see only their own assigned customers and
-  their own performance (self-scoped).
+- **Collections Today** split by Cash and Online
+- **Attendance / GPS (Branch-wide)** — who is punched in, who is on duty
+- **Teams in this Branch** — activity per team this month
+- **Reallocation approvals** — Approve (optionally naming a new agent, or
+  returning the customer to the unallocated pool) or Reject, right from the phone
 
----
+Your **Account** tab also gains a Management section: All Customers, Employees,
+Teams, Branches, Companies, and Catalog (products, buckets, dispositions) — all
+read-only lookups, all branch-scoped.
 
-## 4. Getting Started
+### 7.5 What you cannot do, and why
 
-### Web portal
-1. Go to the web portal URL your admin gives you.
-2. Enter your **Phone** (used as the login ID) and **Password**.
-3. Click **Log in**. The menu on the left automatically shows only the
-   pages you have permission for.
-4. Forgot your password? Click **Forgot password?** — enter your phone
-   number, you'll receive a 6-digit OTP by SMS, then set a new password.
+You sit deliberately below the Operations Manager on three things:
 
-### Mobile app
-1. Install the app (APK provided by your admin, or via the Play Store
-   internal testing track if set up).
-2. Enter your **Phone Number** (10 digits) and **Password**, then **Sign
-   In**.
-3. If you get "Cannot reach server," check your internet connection first.
-   If it persists, contact your admin — the app may need to be pointed at
-   the correct server address (a technical setting behind the gear icon
-   top-right of the login screen; normal users shouldn't need to touch
-   this).
-4. First login lands you on **My Worklist**. If you also have Team Leader
-   capability, you'll see an extra **My Team** tab.
+- **You cannot edit or deactivate employees.** You can *add* staff to your
+  branch, but changing someone's designation, or switching their account off, is
+  an Ops-and-above action. Changing a designation changes what someone can see
+  across the whole agency, so it sits above branch level.
+- **You cannot manage agency-wide master data** — companies, buckets, field
+  config, disposition codes, or imports. These are shared by every branch, so
+  they are not a branch-level concern.
+- **You cannot set targets, review imports, or mark deposits.** These are
+  agency-wide operational controls.
 
-### Account setup (done by an Admin/Ops Manager, not by you)
-- The very first Agency Admin account is created by the agency's technical
-  setup process — there is no self-registration.
-- All other staff are added via the web portal's **Employees** page, where
-  their phone number, initial password, branch/team, and capabilities are
-  set.
+If you need any of the above, ask an Operations Manager.
 
 ---
 
-## 5. Web Portal — Page by Page
+## 8. Telecaller
 
-The left-hand menu only shows pages you have permission to open. Every page
-below lists which permission unlocks it.
+> **Where you work:** the mobile app, all day. The web portal is available and
+> shows you a personal performance view and your own worklist.
 
-Every web page also has a **sun/moon icon** in the top-right header — toggles
-between light and dark mode. Your choice is remembered on this device, and
-defaults to your operating system's own light/dark setting the first time
-you open the app.
+### 8.1 Who you are
 
-### Dashboard *(everyone — no special permission)*
-Your home page after login. What you see depends on your role:
-- **Agency Admin / Ops Manager / Team Leader** (anyone with `reports.view`):
-  a full **Performance Dashboard** — product tabs, a month picker, filters
-  (Company/Branch/Team/Agent/Bucket/Status depending on your scope), an
-  Amount/Count toggle, and:
-  - Collection MTD vs. target strip, with a "days left in month" indicator.
-  - A circular gauge and metric cards for **Resolution**, **Roll Back**,
-    **Normalization**, and **Recovery**.
-  - Deposited Metrics (collected vs. deposited vs. pending).
-  - Trail Uploaded Metrics (how much of the book has been worked).
-  - **Recalled This Month** tile (click to see which customers, and why).
-  - **Bucket Movements This Month** — payment-detected vs. lender-confirmed.
-  - **Bucket Mismatches (DPD Cross-Check)** — a "worth a second look" list
-    where the EMI due date suggests a different bucket than the lender's
-    own label; informational only, never overrides the lender's data.
-  - A **Breakdown** table sliceable by Company/Product/Bucket/Branch/Team/Agent.
-  - **Trail Analytics** — call outcomes over a date range, PTP conversion %.
-  - An **Export** button downloading everything as an Excel file.
-- **Telecaller / Field Agent** (no `reports.view`): a simpler
-  **"My Performance — &lt;your name&gt;"** view — just your own numbers, no
-  filters. (The same view is also available on the mobile app.)
+You work a book of overdue accounts by phone. You see only your own accounts and
+only your own numbers.
 
-For exactly how every number on this page is calculated, see
-`docs/metrics-formulas.md`.
+### 8.2 Day one
+
+1. Install the app (your admin gives you the APK, or adds you to the Play Store
+   internal testing track).
+2. Enter your **10-digit phone number** and the password your manager gave you,
+   then **Sign In**.
+3. **You will land on a "Punch In Required" screen.** This is not optional and
+   not a bug — see below.
+
+> ### The punch-in gate
+>
+> **You cannot reach any part of the mobile app until you punch in.** Not the
+> worklist, not a customer, not your performance. Punching in starts your shift
+> and starts location tracking, and the app treats that as the precondition for
+> doing any work at all.
+>
+> Punching in needs a live connection *if the app has never seen your punch
+> state before*. If you're offline, the app will queue the punch-in and open
+> your shift locally, then reconcile with the server when you're back in range.
+>
+> While on duty you will see a **persistent notification** the entire time. That
+> is required for location tracking to work reliably on Android — it is expected,
+> and dismissing it is not possible while your shift is open.
+
+The gear icon on the login screen is a technical "server address" setting. Leave
+it alone unless your admin explicitly tells you otherwise.
+
+### 8.3 A typical day
+
+```mermaid
+flowchart TD
+    A["Punch In"] --> B["My Worklist opens"]
+    B --> C["Check the Due Today strip:<br/>reminders due · PTPs due/overdue"]
+    C --> D["Open a customer card"]
+    D --> E["Tap <b>Call</b> — your phone's<br/>dialer opens with the number"]
+    E --> F["After the call:<br/>tap <b>Log Call</b>"]
+    F --> G["Pick a disposition code"]
+    G --> H{"Did they promise<br/>to pay?"}
+    H -->|Yes| I["A <b>PTP</b> is created<br/>automatically"]
+    H -->|No| J["Outcome is recorded<br/>in the trail"]
+    I --> K{"Did money<br/>change hands?"}
+    J --> K
+    K -->|Yes| L["<b>Record Payment</b><br/>amount · mode · photo"]
+    K -->|No| M["<b>Set Reminder</b> if you need<br/>to follow up personally"]
+    L --> M
+    M --> N["Next customer"]
+    N --> D
+    N --> O["End of day:<br/>Account tab → <b>Punch Out</b>"]
+```
+
+### 8.4 The screens you live in
+
+**My Worklist** — your home base.
+- A **duty banner** at the top showing you're on shift.
+- A **sync banner**, which appears only when something you did offline is still
+  waiting to reach the server. Tap **Sync now** to retry immediately.
+- A **Due Today** strip: reminders due today (tap the checkmark to mark done) and
+  PTPs due or overdue. Collapsible.
+- **Search** by name, loan number, or mobile.
+- **Customer cards** showing name, loan number, company, due amount, last call
+  outcome, active PTP, and a "Normalized, pending lender confirmation" note where
+  relevant.
+
+Your worklist is ordered by **next action date**, so the most urgent work is at
+the top. You do not need to hunt for it.
+
+**Customer Detail** — everything about one account, with these actions:
+
+| Action | What it does |
+|---|---|
+| **Call** | Opens your phone's dialer with the number filled in |
+| **Log Call** | Records the outcome (see below) |
+| **Record Payment** | Amount, mode, date, optional photo, and a "Mark customer as Closed" toggle |
+| **View PTPs** | This customer's promises — and where you create, reschedule, or resolve them |
+| **Field Visit** | Records an in-person visit (photo required) |
+| **Navigate** | Opens your maps app to the customer's address, if one is on file |
+| **Set Reminder** | A personal follow-up alert |
+| **Send Reminder** | Sends the customer a reminder via **SMS** or **WhatsApp** |
+| **⋮ → Request Reallocation** | Asks your manager to move this customer off you, with a required reason |
+
+Below the buttons: Loan Details, Last Disposition, Active PTP, Additional Fields
+(extra data from the original import), Documents, and a **History** timeline
+merging every call, payment, visit, PTP, and document into one feed.
+
+**Log Call** — pick a **disposition code**, and the screen reveals exactly the
+fields that code requires (Amount, Date, Time, Mode, Reason, Name/Relation) and
+nothing more. A live preview shows the exact remark that will be saved. Works
+offline.
+
+**PTPs** — you can **Create PTP**, **Reschedule / Update** an existing one, and
+mark one **Kept** or **Broken**. After saving, you can **Confirm via SMS** or
+**Confirm on WhatsApp** to send the customer their commitment in writing.
+
+**My Performance** — your own scorecard: collection vs target with a progress
+bar and "amount needed per day to hit target", calls made today with a connected
+rate, PTPs created / kept / broken this month, and per-metric breakdowns.
+
+**Your Dashboard tab** shows Daily Target vs Achievement, Total Calls,
+RPC/Connected rate, PTP Created / Kept / Broken, pending PTP value, and
+escalation cases.
+
+### 8.5 Working offline
+
+Almost everything you do works without a signal:
+
+| Action | Works offline? |
+|---|---|
+| Log a call | ✓ Queued and synced |
+| Record a payment (incl. photo) | ✓ Queued and synced |
+| Record a field visit | ✓ Queued and synced |
+| Punch in | ✓ Queued (opens your shift locally) |
+| Upload a photo document | ✓ Queued |
+| Create a reminder | ✓ Fires on time regardless |
+| Location pings during your shift | ✓ Batched and sent when you're back in range |
+| Punch out | ✗ Needs a connection |
+| Mark a reminder done | ✗ Needs a connection |
+| Upload a **PDF** document | ✗ Needs a connection |
+
+Queued work is stored on your phone, survives closing the app, and is never
+duplicated on the server even if a sync is interrupted halfway. If an item fails
+repeatedly it becomes a **dead letter** — it stops retrying automatically but
+stays visible so you (or your manager) can deal with it. Nothing is ever
+silently discarded.
+
+### 8.6 What you cannot do, and why
+
+- **You cannot edit a saved payment, call log, or PTP detail.** Raise a
+  **Correction Request** instead — your manager approves it. This keeps the trail
+  honest.
+- **You cannot reallocate a customer yourself.** Raise a **Reallocation
+  Request**; a manager decides.
+- **You cannot change a bucket.** Buckets come from the lender's file and are
+  authoritative. If one looks wrong, note it in a call remark and tell your
+  manager.
+- **You cannot see other agents' customers or numbers.**
+
+---
+
+## 9. Field Agent
+
+> **Where you work:** the mobile app, in the field.
+
+Everything in the Telecaller chapter (§8) applies to you — the punch-in gate,
+the worklist, logging calls, recording payments, PTPs, reminders, offline
+behaviour, correction and reallocation requests. This chapter covers only what
+is *different*.
+
+### 9.1 What's different
+
+**Field visits are your primary activity.** From Customer Detail → **Field
+Visit**: a **photo is required** (camera or gallery), a remark is optional, and
+your GPS location is captured automatically in the background when you save —
+there is no separate location button. Works offline.
+
+**Navigation.** The **Navigate** button opens your maps app pointed at the
+customer's address, when one is on file.
+
+**Your dashboard is visit-shaped, not call-shaped.** Where a telecaller's
+dashboard leads with call counts, yours shows:
+
+- **Daily Target vs Achievement** and Collected MTD
+- **Attendance / GPS** — your on-duty status, punch-in time, and GPS ping count
+- **Visits Planned**, and visits recorded With Photo
+- **Receipts Generated** — receipts and documents captured
+- **PTP Created / Kept / Broken** this month
+- **Customer Location**
+
+**Location tracking matters more for you.** While you're punched in, your
+location is sent automatically every couple of minutes. If signal drops, pings
+are saved on your phone and sent in a batch once you're back in range — nothing
+is lost. Your manager can see your live position on the Tracking map and replay
+your day's route afterwards.
+
+### 9.2 A typical field day
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant FA as Field Agent
+    participant App as Mobile app
+    participant Srv as Server
+
+    FA->>App: Punch In
+    App->>Srv: Open shift + start GPS tracking
+    Note over App: Persistent "on duty" notification appears
+    FA->>App: Open worklist, pick a customer
+    FA->>App: Tap Navigate → maps app opens
+    Note over FA: Travels to the address
+    FA->>App: Field Visit — take photo, add remark
+    App->>App: GPS captured automatically
+    alt Online
+        App->>Srv: Visit saved immediately
+    else Offline
+        App->>App: Queued on device
+        Note over App: Sync banner appears on worklist
+    end
+    FA->>App: Customer pays — Record Payment + photo
+    App->>Srv: Payment saved, receipt number generated
+    FA->>App: Account tab → Punch Out
+    App->>Srv: Close shift, stop tracking
+    Note over App: Notification disappears
+```
+
+### 9.3 A note on battery
+
+Continuous GPS is demanding. Two honest points:
+
+- Keep the persistent notification — killing it stops tracking, and your route
+  and attendance will be incomplete.
+- **Punch out at the end of your shift.** There is currently no automatic
+  punch-out and no reminder to do it. Leaving a shift open overnight keeps GPS
+  running and will drain your battery badly.
+
+---
+
+## 10. People who hold more than one role
+
+The apps do not force you into a single role. They assemble what you see from
+**everything you're allowed to do**.
+
+The common case is a **Branch Manager who also works accounts** — they have the
+Branch Manager designation *and* an agent type (telecaller or field agent).
+
+| | What they get |
+|---|---|
+| **Web portal** | The full manager nav (Allocation, approvals, Reports, Tracking…) **plus** a **My Worklist** page with their own properly-scoped book |
+| **Mobile app** | Tabs: My Worklist · Branch Dashboard · My Performance · Account |
+
+A few details that follow from this:
+
+- **My Worklist appears for anyone who logs calls**, not just individual
+  contributors. A manager with an agent type gets their own book rather than
+  being stuck on the org-wide Customers list.
+- **The Customers page is hidden from plain telecallers and field agents** —
+  for them it is a strictly less useful version of My Worklist (no last-call or
+  PTP context). Managers still see it, because for them it is the agency- or
+  branch-wide view.
+- **A single "My work only" switch** in the portal header controls every
+  my-work-versus-team view at once, so you don't have to reconcile separate
+  toggles on different pages.
+- On mobile, exactly **one** management-tier dashboard tab appears. If you
+  somehow hold several capabilities, the widest one wins: Branch Manager, then
+  Telecaller, then Field Agent. Agency Admins and Operations Managers see the
+  Branch Dashboard tab, scoped agency-wide.
+
+---
+---
+
+# Part III — Work that crosses roles
+
+## 11. Cross-role workflows
+
+These are the flows where work passes between people. Each diagram shows who
+acts at each step.
+
+### 11.1 Bringing in a new loan book
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant OM as Ops Manager
+    participant Sys as System
+    participant BM as Branch Manager
+    participant AG as Agent
+
+    OM->>Sys: Companies → add the lender
+    OM->>Sys: Import → upload as "New customers"
+    OM->>Sys: Map Excel columns → save as Template
+    Sys-->>OM: Preview: valid rows, errors, duplicates
+    OM->>Sys: Commit
+    Sys->>Sys: Products & bucket labels read from the data
+    Sys-->>OM: New accounts land in the Unallocated Queue
+    OM->>Sys: Buckets page → set order, category, canonical mapping
+    BM->>Sys: Allocation → select accounts → assign to agents
+    Sys-->>AG: Accounts appear in My Worklist on mobile
+```
+
+### 11.2 The monthly refresh and the review queue
+
+This is the flow people most often expect to be automatic. It isn't, deliberately.
+
+```mermaid
+flowchart TD
+    A["Ops Manager uploads the<br/>month's file as<br/><b>Monthly allocation</b>"] --> B["System compares it against<br/>the book already on record"]
+    B --> C{"What changed?"}
+    C -->|"Loan in the file<br/>but not in the book"| D["<b>Addition</b> — queued"]
+    C -->|"Loan in the book<br/>but not in the file"| E["<b>Removal</b> — queued"]
+    C -->|"Previously recalled loan<br/>reappears in the file"| F["<b>Reactivation</b> — queued"]
+    D --> G["Import Review queue"]
+    E --> G
+    F --> G
+    G --> H["Ops Manager or Admin<br/>decides each item"]
+    H -->|Approve addition| I["Customer inserted"]
+    H -->|Approve removal| J["Customer marked <b>Recalled</b><br/>+ agent assignment cleared"]
+    H -->|Approve reactivation| K["Customer restored to <b>Active</b>"]
+    H -->|Reject| L["Nothing changes"]
+    I --> M["Every loan also gets a<br/><b>Month Snapshot</b> either way,<br/>feeding historical reporting"]
+    J --> M
+    K --> M
+    L --> M
+
+    style G fill:#ffd966,color:#000
+    style H fill:#ffd966,color:#000
+```
+
+### 11.3 From allocation to banked cash
+
+The full money path, and every role that touches it.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant BM as Branch Manager
+    participant AG as Agent (mobile)
+    participant Cust as Customer
+    participant Sys as System
+    participant OM as Ops Manager
+
+    BM->>Sys: Allocate account to agent
+    Sys-->>AG: Appears in My Worklist
+    AG->>Cust: Call or visit
+    Cust-->>AG: "I'll pay ₹5,000 on the 14th"
+    AG->>Sys: Log Call with a promise-type disposition
+    Sys->>Sys: PTP created automatically (status: pending)
+    AG->>Cust: Confirm via SMS / WhatsApp
+    Note over Cust: 14th arrives
+    Cust->>AG: Pays ₹5,000
+    AG->>Sys: Record Payment + photo proof
+    Sys->>Sys: Receipt number generated (per branch, per FY)
+    Sys->>Sys: Oldest matching pending PTP marked <b>kept</b>
+    Sys->>Sys: Bucket movement detected if the account normalises
+    Note over AG: Cash is physically banked
+    OM->>Sys: Deposits page → Mark deposited
+    Sys-->>OM: Dashboard's Deposited Metrics updates
+```
+
+### 11.4 The PTP lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: Agent logs a promise-type<br/>disposition, or creates a<br/>PTP directly
+    Pending --> Kept: A payment arrives and<br/>matches the promise
+    Pending --> Kept: Agent marks it Kept
+    Pending --> Broken: Agent marks it Broken
+    Pending --> Broken: Promised date passes with<br/>no payment — the nightly<br/>sweep flips it
+    Pending --> Pending: Agent reschedules /<br/>updates the promise
+    Kept --> [*]
+    Broken --> [*]
+```
+
+A PTP that is never matched by a payment does not sit at "pending" forever — a
+job runs every night and marks overdue promises **broken**, so your kept/broken
+ratio stays honest without anyone having to tidy up manually.
+
+### 11.5 Reallocation request
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant AG as Agent (mobile)
+    participant Sys as System
+    participant MG as Branch Manager / Ops
+
+    AG->>Sys: Customer Detail → ⋮ → Request Reallocation
+    Note over AG: A reason is mandatory —<br/>a few words won't be accepted
+    Sys-->>AG: "A request is already pending" if one exists
+    Sys->>MG: Appears on mobile Branch Dashboard<br/>AND the web Reallocation Requests page
+    alt Approve with a new agent
+        MG->>Sys: Approve → pick the new agent
+        Sys->>Sys: Customer reassigned, reason logged
+    else Approve without an agent
+        MG->>Sys: Approve → leave agent blank
+        Sys->>Sys: Customer returns to the unallocated pool
+    else Reject
+        MG->>Sys: Reject
+        Sys->>Sys: Customer stays with the original agent
+    end
+    Sys-->>AG: Outcome visible on the web "My Requests" page
+    Note over Sys: Nothing changes for the customer<br/>until the decision is made
+```
+
+### 11.6 Correction request
+
+Agents cannot edit their own saved records. This is how a genuine mistake gets fixed.
+
+```mermaid
+flowchart LR
+    A["Agent notices a mistake<br/>in a saved payment,<br/>call remark, or PTP"] --> B["Mobile: raise a<br/><b>Correction Request</b><br/>with the proposed value<br/>and a reason"]
+    B --> C["Web: <b>Correction Requests</b><br/>page (manager)"]
+    C -->|Approve| D["The proposed change<br/>is applied to the record"]
+    C -->|Reject| E["The record is left<br/>untouched"]
+
+    style B fill:#e7f0f9
+    style C fill:#ffd966,color:#000
+```
+
+Only a narrow, safe list of fields can ever be corrected this way. **Never**
+correctable: the customer the record belongs to, the collecting agent, or any
+timestamp. Those are the fields an audit depends on.
+
+### 11.7 A day with no signal
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant AG as Field Agent
+    participant Ph as Phone (local queue)
+    participant Srv as Server
+
+    Note over AG,Srv: Signal lost
+    AG->>Ph: Punch In
+    Ph->>Ph: Shift opened locally, queued
+    AG->>Ph: Log call · record payment · field visit + photos
+    Ph->>Ph: Each action stored durably with a unique key
+    Note over Ph: Sync banner shows on My Worklist
+    Note over AG,Srv: Signal returns
+    Ph->>Srv: Flush queue in order
+    Srv-->>Ph: Duplicate? Returns the record already created
+    Note over Srv: Re-sending is always safe —<br/>nothing is ever double-recorded
+    alt An item is rejected (e.g. customer now closed)
+        Srv-->>Ph: Rejected — reason shown, item removed
+    else The server has a hiccup
+        Ph->>Ph: Retried on the next sync
+        Note over Ph: After repeated failures it becomes<br/>a <b>dead letter</b> — still visible,<br/>never silently deleted
+    end
+```
+
+---
+---
+
+# Part IV — Reference
+
+## 12. Web portal — page by page
+
+The left-hand menu shows only pages you have permission to open. Each entry
+below names the permission that unlocks it.
+
+Every page has a **sun/moon icon** in the header for light/dark mode. Your choice
+is remembered on that device and follows your operating system's setting the
+first time. On a narrow screen, use the header button to open and close the
+navigation menu.
+
+### Dashboard *(everyone)*
+Your home page. What you see depends on whether you hold `reports.view`:
+
+**With `reports.view`** (Admin, Ops Manager, Branch Manager) — a full Performance
+Dashboard:
+- Product tabs, a month picker, filters (Company / Branch / Team / Agent /
+  Bucket / Status, according to your scope), and an Amount/Count toggle
+- Collection MTD vs target, with a "days left in month" indicator
+- A circular gauge and metric cards for **Resolution**, **Roll Back**,
+  **Normalization**, and **Recovery**
+- Deposited Metrics (collected vs deposited vs pending)
+- Trail Uploaded Metrics — how much of the book has actually been worked
+- **Recalled This Month** tile, clickable for the list and reasons
+- **Bucket Movements This Month** — payment-detected vs lender-confirmed
+- **Bucket Mismatches (DPD Cross-Check)** — a "worth a second look" list where
+  the EMI due date suggests a different bucket than the lender's label.
+  Informational only; it never overrides the lender's data
+- **Exception Payments** and **PTP kept/broken** counts
+- A **Breakdown** table sliceable by Company / Product / Bucket / Branch / Team / Agent
+- **Trail Analytics** — call outcomes over a date range, PTP conversion %
+- A **Setup Checklist** on a new agency, and a **Pending Approvals** alert when
+  any queue needs you
+- An **Export** button producing an Excel workbook
+- A **Customize** control to choose which widgets appear
+
+**Without `reports.view`** (Telecaller, Field Agent) — a simpler *"My
+Performance"* view: your own numbers, no filters.
+
+> For exactly how every number is calculated, see `docs/metrics-formulas.md`.
 
 ### Management Dashboard *(`reports.view`)*
-A second, KPI-focused view of the same underlying data as the Dashboard,
-aimed at leadership rather than day-to-day monitoring — one screen with
-every headline number instead of drilling through cards. Includes: Total
-Portfolio (POS), Collected Today vs. MTD, Collection %, pending PTP value,
-broken PTP count, Outstanding Balance, Active Agents/Cases, EMI vs.
-Settlement collections, Field vs. Telecalling collections, a daily Recovery
-Trend chart, the same product/company/branch/team/agent Breakdown table as
-the main Dashboard, and Top 10 / Bottom 10 agent leaderboards by amount
-collected. A "Coming Soon" strip lists KPIs not yet built (Revenue & Agency
-Commission, Compliance Alerts, Legal Cases Status, Incentive Calculator).
+A leadership-oriented KPI view of the same data: Total Portfolio (POS), Collected
+Today vs MTD, Collection %, pending PTP value, broken PTP count, Outstanding
+Balance, Active Agents/Cases, EMI vs Settlement collections, Field vs Telecalling
+collections, a daily Recovery Trend chart, the same Breakdown table, and Top 10 /
+Bottom 10 agent leaderboards. A "Coming Soon" strip lists KPIs not yet built
+(Revenue & Agency Commission, Compliance Alerts, Legal Cases Status, Incentive
+Calculator).
 
-### Org Chart *(`employees.view`)*
-A reporting-line tree, separate from Team/Branch structure: each employee
-can optionally have a **Manager** (any other employee) purely for "who
-reports to whom" visibility. Shown as an expandable tree; anyone whose
-manager isn't visible in the current view is shown as a root with a "reports
-to X" note.
+### Reports *(`reports.view`)*
+A dedicated home for the reporting engine: a free dimension selector, an
+exportable breakdown table, trail analytics, exception payments, and
+**URL-synced filters** — so a report can be bookmarked or pasted to a colleague
+and they see exactly what you see. Export to CSV, or print.
 
-### Field Config *(`companies.manage`)*
-Admin control over what columns the Import wizard can map to. Lists every
-**Field Definition** — the core fields every company must have (Loan
-Number, Customer Name, Due Amount, etc. — these can never be deleted, only
-disabled per company) plus any custom fields your agency has added, which
-become mappable in the Import wizard the moment they're enabled for a
-company.
+*Not included here by design:* saved report definitions (a separate feature) and
+Deposits (which has its own page).
 
-### Employees *(`employees.view`)*
-Your staff directory. Search by name/phone. Add a new employee (name,
-phone, email, initial password, branch, team, and capability checkboxes),
-edit an existing one, deactivate them, or reset their password. Only
-someone with permission to add Operations Managers can grant that specific
-capability. The Agency Admin account itself can't be edited here.
+### My Worklist *(`calls.log`)*
+Your own book of accounts in the browser — the web counterpart of the mobile
+worklist, for anyone who personally works accounts, managers included. Shows
+reminders and PTPs due, bucket severity colouring, and lets you log a call,
+record a payment, or raise a correction without leaving the page.
 
-### Branches *(`branches.manage`)*
-Create or rename your agency's physical office locations. No delete —
-branches can only be added or renamed.
+### My Requests *(individual contributors)*
+"What happened to the reallocation requests I submitted?" — filter by
+Pending / Approved / Rejected. Self-scoped to your own submissions.
 
-### Teams *(`teams.manage`)*
-Create or rename teams; each team belongs to exactly one branch.
+### Organization *(submenu — appears if you hold any of its children)*
 
-### Companies *(`companies.manage`)*
-Create or rename the finance companies/lenders whose loan books you
-collect for. These are data sources, not part of your org chart.
+- **Companies** *(`companies.manage`)* — create or rename the lenders whose books
+  you collect. Data sources, not org structure.
+- **Branches** *(`branches.manage`)* — create or rename your offices. No delete.
+- **Teams** *(`teams.manage`)* — create or rename teams; each belongs to one branch.
+- **Employees** *(`employees.view`)* — your staff directory. Search by name or
+  phone; add an employee (name, phone, email, initial password, branch, team,
+  designation, agent type); edit, deactivate, or reset a password *if you hold
+  `employees.update`*. Only the Agency Admin can grant the Operations Manager
+  designation. The Agency Admin's own account cannot be edited here.
+- **Org Chart** *(`employees.view`)* — a reporting-line tree. Each employee can
+  optionally have a **Manager** (any other employee), purely for "who reports to
+  whom" visibility — separate from Branch and Team structure. Anyone whose
+  manager isn't visible in your scope appears as a root with a "reports to X" note.
 
 ### Buckets *(`companies.manage`)*
-Pick a company, then configure that company's delinquency buckets:
-reorder them (least to most overdue), mark one as "Current" (fully
-regular — needed for the Normalization metric to work), categorize each
-as Normal or NPA (drives the Recovery metric), and map each to a
-canonical 0–20 DPD number so different lenders can be compared on one
-scale. Bucket *labels* themselves arrive automatically from imports — you
-don't type them here, only configure how they behave.
+Pick a company, then configure its delinquency buckets: reorder them (least to
+most overdue), mark one as "Current" (needed for the Normalization metric),
+categorise each as Normal or NPA (drives Recovery), and map each to a canonical
+0–20 DPD number so different lenders compare on one scale. **Bucket labels
+themselves arrive from imports** — you configure behaviour, you never type a label.
+
+### Field Config *(`companies.manage`)*
+Controls what columns the Import wizard can map to. Lists every **Field
+Definition**: core fields every company must have (Loan Number, Customer Name,
+Due Amount…) which can be disabled per company but never deleted, plus custom
+fields your agency has added, which become mappable the moment they're enabled
+for a company.
 
 ### Import *(`imports.manage`)*
-Bring a lender's Excel file into the system. A 4-step wizard:
-1. **Select & Upload** — pick the Company, choose **New customers** (first
-   time importing this book) or **Monthly allocation** (refreshing amounts/
-   buckets for existing loans — pick the month), upload the `.xlsx` file
-   (max 15 MB).
-2. **Map Columns** — match each Excel column to a system field (Loan
-   Number, Customer Name, Mobile, Product, Bucket, Due Amount, EMI, EMI Due
-   Date, Agent Phone). Save the mapping as a reusable **Template** so future
-   files from this company auto-map. Any unmapped column becomes a
-   **custom field** automatically — no data is lost.
-3. **Preview & Validate** — see counts (valid rows, errors, duplicates, new
-   vs. existing loans), a row-level error list, and — for repeat monthly
-   imports — a warning if any reactivations were detected.
-4. **Done** — inserted/updated/skipped counts, and a link to the **Import
-   Review** page if anything needs a decision.
+A four-step wizard:
+1. **Select & Upload** — pick the Company, choose **New customers** or **Monthly
+   allocation** (and the month), upload the `.xlsx` (max 15 MB).
+2. **Map Columns** — match each Excel column to a system field (Loan Number,
+   Customer Name, Mobile, Product, Bucket, Due Amount, POS, EMI, EMI Due Date,
+   Agent Phone). Save as a **Template** for reuse. Unmapped columns become custom
+   fields automatically.
+3. **Preview & Validate** — counts (valid rows, errors, duplicates, new vs
+   existing), a row-level error list, and a warning if reactivations were detected.
+4. **Done** — inserted / updated / skipped counts, and a link to Import Review if
+   anything needs a decision.
 
-There's also an **Import History** tab per company. Important: a
-**repeat** import for a month already loaded does **not** apply changes
-automatically — new loans, disappeared loans, and reactivations all go to
-Import Review for a human decision, every time.
+There is also an **Import History** tab per company, with rollback for a run.
 
 ### Import Review *(`imports.review`)*
-The approval queue for import discrepancies. Filter by Company/Status/Type,
-select rows individually or in bulk, and **Approve** or **Reject** each:
-- **Addition** (blue tag) → approving inserts the new customer.
-- **Removal** (red tag) → approving marks the customer **Recalled**.
-- **Reactivation** (orange tag) → approving restores a recalled customer to
-  Active.
-Expand any row to see the customer's last remark, pending PTP, and amount
-paid this month before deciding.
+The discrepancy queue. Filter by Company / Status / Type, select rows singly or
+in bulk, then Approve or Reject. See §11.2 for what each type does. Expand a row
+to see the customer's last remark, pending PTP, and amount paid this month before
+deciding.
 
-### Customers *(`customers.view`)*
-Browse and search the whole loan book (filter by Company/Product/Bucket/
-Status, or search by name/loan number/mobile). Click any row to open the
-full **Customer 360 view** (a side panel) showing:
-- Identity, due amount, EMI, DPD.
-- Any extra "detail fields" captured at import.
-- **Trail History** — every call logged, oldest to newest.
-- **Promises to Pay** — status of each.
-- **Payments** — amount, mode, date, deposited status.
-- **Bucket Movements** — history of delinquency-bucket changes.
-- **Allocation History** — every reassignment, with reason.
-- **Documents** — upload/download supporting files (photo or PDF, max
-  10MB).
-- **Month Snapshots** — the customer's state at each monthly import.
+### Customers *(`customers.view` — hidden from plain agents)*
+Browse and search the whole book (filter by Company / Product / Bucket / Status,
+or search by name, loan number, or mobile), with **URL-synced filters** and CSV
+export. Click any row for the **Customer 360** side panel:
+- Identity, due amount, POS, EMI, DPD, due date
+- Extra "detail fields" captured at import
+- **Trail History** — every call, oldest to newest
+- **Promises to Pay** — with status
+- **Payments** — amount, mode, date, receipt number, deposited status
+- **Bucket Movements** — the history of delinquency changes
+- **Allocation History** — every reassignment, with reason
+- **Documents** — upload and download supporting files (photo or PDF, max 10 MB)
+- **Month Snapshots** — the customer's state at each monthly import
 
 ### Allocation *(`customers.allocate`)*
-Two tabs:
-- **Unallocated Queue** — filter, multi-select loans, pick an agent, click
-  **Assign**.
-- **Allocated** — see who's assigned what; multi-select and
-  **Reallocate…** (a reason is mandatory and gets logged); click
-  **History** on any row for a full reassignment timeline.
+- **Unallocated Queue** — filter, multi-select, pick an agent, **Assign**.
+- **Allocated** — see who has what; multi-select and **Reallocate…** (reason
+  mandatory, logged); **History** on any row for the full timeline.
 
 ### Reallocation Requests *(`customers.allocate`)*
-Approve or reject requests agents raise from the mobile app asking to be
-taken off a customer. **Approve** optionally picks a new agent (leave
-blank to return the customer to the unallocated pool); **Reject** leaves
-the customer with their current agent. Nothing happens automatically until
-you decide.
+Approve or reject agents' requests to be taken off a customer. Approving
+optionally names a new agent; leaving it blank returns the customer to the
+unallocated pool. Rejecting leaves things as they are.
 
-### Correction Requests *(`imports.review`)*
-Agents can't directly edit a payment, call log, or PTP once saved — instead
-they raise a Correction Request (from the mobile app) proposing a fix (e.g.
-a wrong amount, a garbled remark) with a reason. This page lists pending/
-approved/rejected requests; **Approve** applies the proposed change to the
-record, **Reject** leaves it untouched. Only a narrow, safe set of fields
-can ever be proposed per record type — never the customer, the collecting
-agent, or any timestamp.
+### Correction Requests *(`customers.allocate`)*
+Approve or reject agents' proposed fixes to their own saved records. See §11.6.
 
 ### Dispositions *(`dispositions.manage`)*
-The master list of call-outcome codes agents choose from when logging a
-call. Add/edit a code: Action Code, Result Code, Category, Description, a
-**Remark template** (auto-composes the saved remark from whatever the
-agent enters), and checkboxes for which fields it requires (Amount, Date,
-Time, Mode, Reason, Name/Relation). Codes are never deleted, only
-**Retired** (and can be restored).
+The master list of call-outcome codes. Add or edit a code: Action Code, Result
+Code, Category, Description, a **Remark template** (which auto-composes the saved
+remark), and checkboxes for which fields it requires (Amount, Date, Time, Mode,
+Reason, Name/Relation). Codes are never deleted — only **Retired**, and they can
+be restored.
 
 ### Tracking *(`tracking.view`)*
-Two tabs:
-- **Live Map** — every on-duty agent as a colored dot on a map (green
-  Moving, red Stationary, orange No Signal, grey Awaiting First Ping), with
-  an alert banner if anyone's flagged; auto-refreshes every 30 seconds.
-- **Route Replay** — pick an employee and a date (up to 60 days back — that's
-  the location-data retention window) to see their full day's path on the
-  map, with total distance.
+- **Live Map** — every on-duty agent in your scope as a coloured dot: green
+  Moving, red Stationary, orange No Signal, grey Awaiting First Ping. Auto-refreshes
+  every 30 seconds, with an alert banner if anyone is flagged.
+- **Route Replay** — pick an employee and a date (up to 60 days back — the
+  location retention window) to see the full day's path and total distance.
 
-A bell icon in the header (visible with this same permission) polls the
-same live data from anywhere in the app and pops a toast if someone goes
-stationary or loses signal.
+A bell icon in the header polls the same live data from anywhere in the app and
+pops a toast if someone goes stationary or loses signal.
 
 ### Day Plan *(`tracking.view`)*
-For any date, one row per agent: attendance status, PTPs due (count + ₹),
-reminders due (count), calls made, payments collected. Expand a row to see
-the actual customer list behind those counts.
+For any date, one row per agent: attendance status, PTPs due (count and ₹),
+reminders due, calls made, payments collected. Expand a row for the actual
+customer list behind those counts.
 
 ### Attendance *(`tracking.view`)*
-The detailed, filterable, exportable attendance log — every punch-in/punch-
-out record with duration, filterable by date range, branch, team, agent, or
-"on-duty only," with an Export button. Where **Day Plan** is the daily
-at-a-glance summary, Attendance is the full audit-trail record behind it.
+The full, filterable, exportable attendance log — every punch-in/punch-out with
+duration, filterable by date range, branch, team, agent, or "on-duty only". Where
+Day Plan is the at-a-glance summary, this is the audit record behind it.
 
 ### Targets *(`targets.manage`)*
-Set monthly targets. Choose the scope level (Per agent / Per team / Per
-branch / Whole agency), edit numbers directly in the table (Collection,
-Resolution, Roll Back, Normalization, Recovery — in ₹ or count), or bulk-
-import from Excel. **Save changes** only enables once you've edited
-something; clearing a cell removes that target entirely.
+Set monthly targets. Choose the scope (Per agent / Per team / Per branch / Whole
+agency), edit numbers directly in the table across the five metrics, or bulk-import
+from Excel. **Save changes** enables only once you've edited something; clearing a
+cell removes that target.
 
-If nobody has set a manual **Collection** target at any scope level, the
-Dashboard doesn't just show "no target" — it falls back to the book's own
-EMI schedule (the sum of each customer's EMI) as a computed default, so
-every scope always has a sensible collection benchmark even before anyone
-sets one manually. This fallback applies only to Collection; the other four
-metrics show no target until one is explicitly set.
+If no manual Collection target exists at any level, the dashboard falls back to
+the book's own EMI schedule as a computed default. This applies only to
+Collection.
 
 ### Deposits *(`payments.deposit`)*
-Reconcile field-collected cash. Filter by month/status/company, multi-
-select **Pending** payments, click **Mark deposited**. Already-deposited
-rows can't be unchecked here. This directly feeds the Dashboard's
-Deposited Metrics — timely reconciliation matters for accurate reporting.
+Reconcile field-collected cash. Filter by month / status / company, multi-select
+**Pending** payments, **Mark deposited**. Already-deposited rows cannot be
+unchecked here.
 
 ---
 
-## 6. Mobile App — Screen by Screen
+## 13. Mobile app — screen by screen
 
-### Login Screen
-Phone (10 digits) + Password, then **Sign In**. Clear error messages
-distinguish wrong credentials, a locked account, and a server-connection
-problem. The gear icon (top-right) is a technical "server address" setting
-— leave it alone unless your admin tells you to change it.
+### Login
+Phone (10 digits) + password, then **Sign In**. Error messages distinguish wrong
+credentials, a locked account, and a server-connection problem. The gear icon is
+a technical server-address setting — leave it alone.
 
-### Home — Bottom Tabs
-- **My Worklist** — everyone.
-- **My Team** — only if you have Team Leader capability.
-- **My Performance** — everyone.
+### Punch In Required — the gate
+Shown immediately after login if your shift isn't open. **No other screen is
+reachable until you punch in.** Punching in requests location and notification
+permissions, takes a GPS fix, opens your shift, and starts the background
+tracking service with its persistent notification.
+
+### Bottom tabs
+
+Everyone gets **My Worklist**, **My Performance**, and **Account**. Between the
+first two, exactly one role-specific dashboard appears:
+
+| Your role | Middle tab |
+|---|---|
+| Agency Admin / Operations Manager | **Branch Dashboard** (agency-wide) |
+| Branch Manager | **Branch Dashboard** (your branch) |
+| Telecaller | **Dashboard** (call-shaped) |
+| Field Agent | **Dashboard** (visit-shaped) |
 
 ### My Worklist
-Your daily home base:
-- **Duty banner** at the top — **Punch In** (starts your shift and
-  location tracking) / **Punch Out** (ends it). Must punch in to be
-  tracked; must be online to punch in/out.
-- **Sync banner** — appears only if something you did offline is still
-  waiting to reach the server; **Sync now** retries immediately.
-- **Due Today strip** — your reminders due today (tap the checkmark to
-  mark done) and any PTPs due/overdue (view-only — resolve by logging a
-  new call). Collapsible.
-- **Search** — filter by name, loan number, or mobile.
-- **Customer cards** — name, loan number, company, due amount, last call
-  outcome, active PTP if any, and a "Normalized, pending lender
-  confirmation" note if relevant. Tap a card to open the customer.
+Duty banner, sync banner (only when something is queued), a collapsible **Due
+Today** strip (reminders due — tap the checkmark to mark done; PTPs due or
+overdue), search by name / loan number / mobile, and customer cards. Ordered by
+next action date.
 
 ### Customer Detail
-Everything about one account:
-- **Call** — dials the customer directly.
-- **Log Call** — record a call outcome (see Call Log Screen below).
-- **Record Payment** — record money collected.
-- **View PTPs** — this customer's promise-to-pay history (read-only).
-- **Field Visit** — record an in-person visit (photo + GPS required).
-- **Navigate** — opens your maps app to the customer's address, if one is
-  on file.
-- **Set Reminder** — set a personal follow-up alert for this customer.
-- **⋮ menu → Request Reallocation** — ask your Team Leader to move this
-  customer off you, with a required reason.
-- Cards below the buttons: **Loan Details**, **Last Disposition**, **Active
-  PTP**, **Additional Fields** (extra data from the original import),
-  **Documents** (upload/view supporting files), and a **History** timeline
-  merging every call/payment/visit/PTP/document into one feed.
+See §8.4 for the full action list. Cards below the actions: Loan Details, Last
+Disposition, Active PTP, Additional Fields, Documents, and a merged **History**
+timeline.
 
 ### Log Call
-Pick a **Disposition Code** — the screen then reveals exactly the fields
-that code needs (Amount, Date, Time, Mode, Reason, Name/Relation — never
-more than what's required). A live preview shows the exact remark that
-will be saved. **Save Call Log**. Works offline — queues and syncs
-automatically, with no risk of double-recording.
+Pick a disposition code; only the fields that code needs appear. Live preview of
+the remark that will be saved. Works offline.
 
 ### Record Payment
-Amount (required), Mode, Date (defaults to today), an optional photo
-(Camera or Gallery), and a **Mark customer as Closed** toggle if this
-payment fully settles the account. **Record Payment**. Works offline.
+Amount (required), Mode, Date (defaults to today), optional photo (camera or
+gallery), and a **Mark customer as Closed** toggle if this settles the account.
+Generates a receipt number. Works offline.
 
-### View PTPs
-Read-only list of this customer's promises: amount, due date (flagged
-**Overdue** in red if past and still pending), status (Pending/Kept/
-Broken).
+### PTPs
+This customer's promises, with **Create PTP**, **Reschedule / Update PTP**, **Mark
+Kept**, and **Mark Broken**. Overdue pending promises are flagged in red. After
+saving you can **Confirm via SMS** or **Confirm on WhatsApp**. Modes available:
+Cash, NEFT, RTGS, UPI, Cheque, DD.
 
 ### Field Visit
-A **photo is required** (Camera or Gallery); an optional remark. GPS
-location is captured automatically in the background when you save — no
-separate button. **Save Visit**. Works offline.
+A **photo is required**; a remark is optional; GPS is captured automatically on
+save. Works offline.
 
-### Set Reminder / Due Today
-Pick a date & time, add an optional note, **Save Reminder** — this
-schedules a phone notification for that exact moment, even if the app is
-closed and even without network at the time it fires. Reminders due today
-show on the **My Worklist** screen's Due Today strip; tap the checkmark to
-mark one done. Marking done requires connectivity; creating one does not
-(it still fires on time, then syncs when back online).
+### Set Reminder / Send Reminder
+**Set Reminder** schedules a notification on your own phone for a chosen date and
+time — it fires even if the app is closed and even with no network. **Send
+Reminder** messages the *customer* via SMS or WhatsApp.
 
-### Documents (on Customer Detail)
-Upload a photo (Camera/Gallery) or a PDF (file picker) against the
-customer — for KYC documents, agreements, ID proofs, etc. Photos queue
-offline like any other photo; **PDFs need an active connection** to
-upload.
+### Documents
+Upload a photo (camera or gallery) or a PDF (file picker) against a customer.
+Photos queue offline; **PDFs need an active connection**.
 
-### My Team *(Team Leaders only)*
-- **Reallocation Approvals** — pending requests from your team members,
-  with **Approve** (optionally pick a new agent, or leave blank to return
-  the customer to the pool) or **Reject**.
-- **Team Today** — every team member's on-duty status (On duty /
-  Stationary N min / No Signal / Off duty), hours worked, calls made, PTPs
-  taken, payments collected today.
+### Correction Request
+Raised from a saved record you need fixed. Provide the proposed value and a
+reason — the app will ask you to explain properly if the reason is too short.
 
 ### My Performance
-Your own scorecard for the current month, tailored to your role — all
-three pull from the same `/reports/dashboard` and `/tracking/team-day`
-endpoints the web Dashboard and Day Plan use, just self- or team-scoped
-automatically:
-- **Telecaller** — collection vs. target with a progress bar and "amount
-  needed per day to hit target," calls made today with a connected-call
-  rate (a call counts as connected unless it's Not Connected or Out of
-  Service), and per-metric breakdowns (Resolution, Roll Back,
-  Normalization, Recovery).
-- **Field Agent** — the same collection/target scorecard, plus today's
-  attendance/GPS status and receipts captured, since field work is
-  visit-driven rather than call-driven.
-- **Team Leader** — a team-wide "today" snapshot: every member's
-  attendance/GPS status, cash vs. online collections, and field visits, in
-  one screen (the same data behind the web Day Plan, without leaving the
-  app).
-All three are read-only.
+Your own read-only scorecard for the month, shaped to your role — see §8.4 and §9.1.
 
-### Punching In / Out & Location Tracking
-Punching in captures your location, tells the server you're on shift, and
-starts a background tracking service (you'll see a persistent notification
-the whole time you're on duty — this is expected and required for
-tracking to work). Your location is sent automatically every couple of
-minutes while on duty; if signal drops, pings are saved on your phone and
-sent in a batch once you're back in range — nothing is lost. Punching out
-stops all of this. Punch in/out itself needs a live connection; the
-location pings during your shift do not.
+### Account
+Your profile, the **Punch Out** control with your on-duty status, and — for
+Agency Admins, Operations Managers, and Branch Managers — a **Management**
+section with read-only lookups: All Customers, Employees, Teams, Branches,
+Companies, and Catalog (products, buckets, dispositions).
 
 ---
 
-## 7. End-to-End Workflows
+## 14. Best practices for agents
 
-### A. Bringing in a new loan book
-1. **Companies** page → add the lender if not already there.
-2. **Import** page → upload the file as **New customers**, map columns
-   (save as a Template for next time), preview, commit.
-3. New loans land in the **Unallocated Queue**.
-4. Product and Bucket labels are read automatically from the data — check
-   **Buckets** page to configure their order/category/canonical mapping.
+These are working guidelines, not features — how to use the tools well.
 
-### B. Monthly refresh of an existing book
-1. **Import** page → upload as **Monthly allocation**, pick the month.
-2. New loans, or loans that disappeared, or previously-recalled loans
-   reappearing all get flagged.
-3. **Import Review** → an Admin/Ops Manager approves or rejects each
-   discrepancy. Nothing changes until this step happens.
-4. Every loan gets a **Month Snapshot** either way, feeding historical
-   reporting.
-
-### C. Assigning work
-1. **Allocation** page (web) → Unallocated Queue → select rows → pick an
-   agent → **Assign**.
-2. The agent now sees these customers in **My Worklist** on mobile.
-3. Need to move an account later? Same page, **Allocated** tab →
-   **Reallocate…** (reason required), or the agent themselves can
-   **Request Reallocation** from their phone, which a Team Leader then
-   approves/rejects.
-
-### D. Working a customer (agent's day-to-day)
-1. **Punch In** at the start of the day.
-2. Open a customer from **My Worklist**.
-3. **Call** them, then **Log Call** with the outcome — a promise-type
-   disposition automatically creates a **PTP**.
-4. If money changes hands: **Record Payment** (with photo proof), and
-   toggle **Mark customer as Closed** if fully resolved.
-5. For field agents visiting in person: **Field Visit** with a photo.
-6. Set a **Reminder** for anything you need to personally follow up on
-   later, independent of PTPs.
-7. Attach any **Documents** the customer provides.
-8. **Punch Out** at the end of the day.
-
-### E. Manager oversight
-- **Day Plan** (web) — check every agent's attendance and what's due
-  today, at a glance, drilling into specifics as needed.
-- **Tracking** (web) — see agents live on a map; get alerted if someone's
-  stationary too long or has gone off-radar.
-- **My Team** (mobile, Team Leaders) — the same idea, on the go.
-- **Dashboard** (web) — month-level performance against targets, at every
-  level from individual agent up to the whole agency.
-- **Deposits** (web) — reconcile collected cash against what's actually
-  been banked.
-
-### F. Reallocation request lifecycle
-1. Agent taps **Request Reallocation** on a customer (mobile), gives a
-   reason.
-2. Request appears on the Team Leader's **My Team** screen (mobile) and
-   the **Reallocation Requests** page (web).
-3. Team Leader **Approves** (optionally naming a new agent, or returning
-   the customer to the unallocated pool) or **Rejects**.
-4. Nothing changes for the customer until that decision is made.
-
----
-
-## 8. Best Practices for Agents
-
-These are working guidelines, not app features — they describe how to use
-the tools above effectively day to day.
-
-**Call cadence by bucket.** As a rough guide: Current accounts — a monthly
-touch to remind about the upcoming EMI. Early buckets (30–60 DPD) — weekly.
-Later buckets (60–90 DPD and NPA) — weekly or more, since urgency is
-higher. If a customer is responsive, call more often while momentum is on
-your side. If a customer stops responding after 3–5 attempts, raise it
-with your Team Leader rather than continuing to call indefinitely.
+**Call cadence by bucket.** As a rough guide: Current accounts — a monthly touch
+about the upcoming EMI. Early buckets (30–60 DPD) — weekly. Later buckets (60–90
+DPD and NPA) — weekly or more. If a customer is responsive, call more often while
+momentum is with you. If a customer stops responding after 3–5 attempts, raise it
+with your manager rather than calling indefinitely.
 
 **When a customer says they can't pay.** Don't argue — look for a smaller
-commitment instead: "Can you manage a partial amount instead of the full
-EMI?" or "Can you commit to a specific date when you'll have funds?" Log
-whatever is agreed as a disposition (and a PTP if a promise-type code
-fits), and escalate to your Team Leader if the customer describes genuine
-hardship.
+commitment: "Can you manage a partial amount instead of the full EMI?" or "Can
+you commit to a date when you'll have funds?" Log whatever is agreed, and escalate
+genuine hardship to your manager.
 
-**When a customer says they already paid.** Don't argue on the call —
-check the customer's **Payments** history first (visible on the Customer
-Detail / History section). If it's there, acknowledge it and move on. If
-it isn't, tell the customer you'll verify and call back — don't pretend to
-check something you haven't — then flag it to your Team Leader with the
-amount and date the customer claims. It may be a payment still in transit
-or a genuine discrepancy that needs investigating, not something you
-should resolve unilaterally.
+**When a customer says they already paid.** Don't argue on the call — check the
+**Payments** history on Customer Detail first. If it's there, acknowledge it and
+move on. If it isn't, say you'll verify and call back — don't pretend to check
+something you haven't — then flag it to your manager with the amount and date
+claimed. It may be in transit, or a real discrepancy worth investigating.
 
-**Updating a promise that's changed.** There is no way to edit or delete
-an existing PTP — if a customer changes their mind about when they'll pay,
-log a new call with an updated promise-type disposition. The system tracks
-PTPs by their own history rather than overwriting one, so the record of
-what was promised when stays intact.
+**Make promises realistic.** Only money actually received counts toward your
+Collection number — a pending PTP doesn't. A kept promise for a smaller,
+realistic amount is worth more to your numbers, and to the account's history,
+than an ambitious one that gets logged as broken.
 
-**If a customer keeps breaking promises.** A pattern of broken PTPs from
-the same customer (say, three or more) is worth raising with your Team
-Leader — they may decide to reallocate the account to a different agent or
-escalate it further, rather than you continuing to take promises that
-don't hold.
+**Confirm promises in writing.** After creating a PTP, use **Confirm via SMS** or
+**Confirm on WhatsApp**. A customer who has the commitment in writing keeps it
+more often.
 
-**A "Recalled" customer means stop working it.** If a customer's status
-changes to Recalled, the lender has pulled that account back — remove it
-from your personal follow-up habits (it will also disappear from your
-active worklist). If the lender sends it back in a future import
-(a reactivation), it will be reallocated to an agent again and you'll see
-it return if it's assigned to you.
+**Keep the trail honest.** If a promise changes, reschedule the PTP rather than
+letting it lapse. If you make a genuine mistake in a saved record, raise a
+correction request — don't work around it with a misleading second entry.
 
-**Never try to "fix" a bucket yourself.** A loan's bucket always comes from
-the lender's own file — there is no way to edit it manually in the app,
-and there shouldn't be. If you believe a bucket looks wrong, note your
-concern in a call remark and mention it to your Team Leader; they can
-escalate to Operations, who can raise it with the lender for correction in
-their next file.
+**If a customer keeps breaking promises.** Three or more broken PTPs from the
+same customer is worth raising with your manager. They may reallocate the account
+or escalate it, rather than you continuing to take promises that don't hold.
 
-**Tracking your own target.** Your **My Performance** screen shows your
-target and your collection so far for the month. A simple way to check if
-you're on pace: `remaining target ÷ days left in the month` tells you
-roughly how much you need to collect per day to land on target — the same
-"required per day" figure the Dashboard/Performance screens already
-calculate for you.
+**A "Recalled" customer means stop working it.** The lender has pulled the account
+back. It will leave your active worklist. If it returns in a future import as a
+reactivation, it will be reallocated and you'll see it again if it comes to you.
 
-**What counts toward your Collection number, in practice.** Only money
-actually received counts — a PTP that hasn't been kept yet doesn't. A
-kept PTP with a smaller, realistic amount is worth more to your numbers
-(and to the account's history) than an unrealistic promise that gets
-logged as broken later.
+**Never try to "fix" a bucket yourself.** A bucket always comes from the lender's
+file, and there is deliberately no way to edit it. If one looks wrong, note your
+concern in a call remark and tell your manager, who can escalate to Operations
+and on to the lender.
+
+**Tracking your own pace.** Your My Performance screen shows your target and your
+collection so far. `remaining target ÷ days left in the month` tells you roughly
+what you need per day — the same "required per day" figure the app already
+calculates for you.
+
+**Punch out at the end of your shift.** There is no automatic punch-out. Leaving a
+shift open keeps GPS running overnight and drains your battery.
 
 ---
 
-## 9. Troubleshooting & FAQ
+## 15. Troubleshooting & FAQ
+
+**I can't get past the "Punch In Required" screen.**
+That screen is the app's front door — you must punch in to use anything. If
+punch-in itself is failing, check that you granted location and notification
+permissions, and that GPS is switched on. If you're offline and the app has never
+seen your punch state, it will queue the punch-in and let you through.
 
 **"Cannot reach server" on mobile login.**
-Check your phone's internet connection first. If it keeps happening on a
-working connection, the app may be pointed at the wrong server address —
-ask your admin; this is set via the gear icon on the login screen.
+Check your internet connection first. If it persists on a working connection, the
+app may be pointed at the wrong server address — ask your admin (the gear icon on
+the login screen).
 
 **I logged in before but got signed out after restarting the app.**
-This should not normally happen — the app keeps you signed in across
-restarts even without a network connection, only signing you out on an
-actual authentication failure (e.g. your password was reset, or your
-account was deactivated). If it keeps happening, contact your admin.
+This shouldn't normally happen — the app keeps you signed in across restarts even
+without a network, and only signs you out on a real authentication failure (your
+password was reset, or your account was deactivated). If it keeps happening,
+contact your admin.
 
-**Account locked.**
-Too many wrong password attempts in a row locks the account temporarily.
-Contact your manager (only an Admin/Ops Manager can reset a password).
+**My account is locked.**
+Too many wrong password attempts in a row locks an account temporarily. Contact
+your manager.
 
-**A photo/document I uploaded says "will sync automatically" — is it
-saved?**
-Yes. It's stored safely on your phone and will upload as soon as you have
-a connection again (or tap **Sync now** on the worklist screen). You can
-close the app; it will still sync later.
+**I forgot my password.**
+> **Password reset by SMS does not currently work.** The system has an OTP reset
+> flow built, but no SMS provider has been connected yet, so the code never
+> reaches your phone. Until that is set up, ask an Operations Manager or the
+> Agency Admin to set a new password for you directly from the Employees page.
+
+**A photo or document I uploaded says "will sync automatically" — is it saved?**
+Yes. It is stored on your phone and will upload as soon as you have a connection,
+or when you tap **Sync now**. You can close the app.
 
 **A PDF upload failed while I was offline.**
-Unlike photos, PDF documents require an active connection to upload —
-they are not queued. Try again once you're back online.
+Unlike photos, PDFs need an active connection — they are not queued. Try again
+once you're back online.
 
-**Why can't I see the "My Team" tab?**
-Only accounts with Team Leader capability see it. If you should have this
-capability, ask your Operations Manager to grant it on the Employees page.
+**Something has been stuck in my sync queue for days.**
+After repeated failures an item becomes a **dead letter**: it stops retrying on
+its own but stays visible and is never deleted. Try **Sync now** on a good
+connection. If it still won't go, show it to your manager — it may be a record
+the server is legitimately rejecting (for example, a payment against a customer
+who has since been closed).
 
-**Why does a customer I'm working on say "Normalized this month, pending
-lender confirmation"?**
-A payment has brought the account back to current, but the lender hasn't
-confirmed it in their own file yet. This doesn't change what you should
-do — keep working the account normally.
+**Why can't I see the Customers page?**
+If you're a telecaller or field agent, it is hidden on purpose — **My Worklist**
+shows the same accounts with more useful context (last call, active PTP). Nothing
+is being kept from you.
+
+**I'm a Branch Manager and every screen is empty.**
+You have the designation, but nobody has assigned you as the manager of an actual
+branch yet. The system shows nothing rather than risk showing another branch's
+data. Ask an Operations Manager to complete the assignment.
+
+**I'm a Branch Manager and I can't edit an employee.**
+Correct — you can add staff to your branch but not edit or deactivate them. That
+is an Operations Manager action. See §7.5.
+
+**Why does a customer say "Normalized this month, pending lender confirmation"?**
+A payment has brought the account back to current, but the lender hasn't confirmed
+it in their own file yet. It doesn't change what you should do — keep working the
+account normally.
 
 **What's the difference between Closed and Recalled?**
-**Closed** means the account was fully resolved (paid) and marked closed
-from the app. **Recalled** means the *lender* pulled the account back
-(usually seen in a monthly import) — it's not something an agent does, and
-it doesn't mean the debt was resolved.
+**Closed** means the account was fully resolved and marked closed from the app.
+**Recalled** means the *lender* pulled it back — not something an agent does, and
+it does not mean the debt was resolved.
+
+**I can't edit a payment I entered wrongly.**
+By design. Raise a **Correction Request** and your manager will approve it.
 
 **I set a reminder but didn't get the notification.**
-Make sure notifications are allowed for the app in your phone's settings
-(you should be prompted for this the first time you set a reminder).
-Reminders are rescheduled automatically every time you open the app while
-online, so restarting the app or your phone shouldn't lose them.
+Check that notifications are allowed for the app in your phone's settings.
+Reminders are rescheduled automatically each time you open the app while online,
+so restarting the app or phone shouldn't lose them.
+
+**The app is draining my battery.**
+Continuous GPS while on duty is demanding. Make sure you **punch out** at the end
+of every shift — there is currently no automatic punch-out, so an unclosed shift
+keeps tracking running overnight.
 
 **Where do I see my own performance?**
-**My Performance** tab on mobile, or the Dashboard page on web (which
-shows a personal scorecard if you don't have manager-level report access).
+The **My Performance** tab on mobile, or the Dashboard page on web (which shows a
+personal scorecard if you don't have manager-level report access).
+
+---
+
+## 16. Appendices
+
+### Appendix A — Permission quick reference
+
+The full matrix is in [§3](#3-the-five-roles-at-a-glance). The short version:
+
+| If you want to… | You need to be at least a… |
+|---|---|
+| Work a book of accounts | Telecaller or Field Agent |
+| Allocate work, approve requests, see team reports | Branch Manager |
+| Import files, review discrepancies, set targets, mark deposits, edit employees, manage master data | Operations Manager |
+| Add another Operations Manager, access billing | Agency Admin |
+
+### Appendix B — Disposition codes
+
+Disposition codes are configured by your agency on the **Dispositions** page, so
+your exact list is yours. Each code declares which extra fields it needs, and the
+Log Call screen shows only those. Common categories include Promise to Pay,
+Refuse to Pay, Dispute, Settlement, and Legal Proceedings. Codes are retired
+rather than deleted, so historical trail entries never lose their meaning.
+
+### Appendix C — Where the numbers come from
+
+For the exact definition and formula behind every metric on the dashboards —
+Collection, Resolution, Roll Back, Normalization, Recovery, and the deposited and
+trail-uploaded figures — see **`docs/metrics-formulas.md`**.
+
+### Appendix D — Related documents
+
+| Document | What it covers |
+|---|---|
+| `docs/TECHNICAL_DOCUMENTATION.md` | Architecture, data model, and the full record of design decisions |
+| `docs/metrics-formulas.md` | Exact formula behind every dashboard number |
+| `docs/TESTING_GUIDE.md` | Manual test scenarios by role |
+| `docs/DEPLOYMENT.md` | How the system is deployed |
+| `docs/deferred-work.md` | Known gaps and work explicitly scoped out |
+| `SETUP_GUIDE.md` | Local development setup |
+
+### Appendix E — Known limitations at the time of writing
+
+Stated plainly, so nobody wastes time hunting for something that isn't there:
+
+- **Password reset by SMS does not work.** No SMS provider is connected. An
+  admin must set passwords directly.
+- **The app is English only.** There is no Marathi or Hindi interface yet.
+- **No automatic punch-out and no reminder to punch out.** Shifts stay open until
+  you close them.
+- **One phone number per customer.** No co-borrower or guarantor records.
+- **Very large import files (roughly 20,000 rows or more) can time out.** Split
+  them if you hit this.
+- **Some dashboard chart types are not built yet** — the "Coming Soon" strip on
+  the Management Dashboard is accurate about what's missing.
+
+For the complete and current list, see `docs/deferred-work.md`.

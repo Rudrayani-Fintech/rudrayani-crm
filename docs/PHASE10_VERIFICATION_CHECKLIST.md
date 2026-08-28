@@ -23,7 +23,13 @@ Agent Daily Activity feature completion verification. Test as admin, branch_mana
 ### 1.2 Route Access
 - [ ] Navigate to `/agent-activity` as admin → page loads
 - [ ] Navigate to `/agent-activity` as branch_manager → page loads (scoped to their branch)
-- [ ] Navigate to `/agent-activity` as telecaller → redirects to 403 or home
+- [ ] Navigate to `/agent-activity` as telecaller (nav item hidden, but the route
+      itself has no frontend permission guard — this app relies on the backend
+      to enforce access) → page loads and the backend correctly self-clamps:
+      the telecaller holds `reports.view_self`, not `reports.view`, so
+      `GET /reports/agent-activity` returns 200 with only their own activity,
+      not a 403. Confirm they cannot see any other agent's rows even by
+      editing the URL's filter params.
 - [ ] `/management-dashboard` route no longer exists (404 or redirects)
 
 ---
@@ -243,11 +249,20 @@ Agent Daily Activity feature completion verification. Test as admin, branch_mana
 ## 9. Role-Based Access Control (RBAC)
 
 ### 9.1 Admin
+- [ ] Loading the page with zero filters shows activity from every agent in
+      the agency (not just the admin's own) — the frontend sends `browse=all`
+      whenever no agent_id/agent_type filter is set, which is what puts the
+      backend into its multi-agent resolution path (`scopeFilter()` returns
+      an unclamped agency-wide set for admin/ops). Confirm this explicitly:
+      log activity as a second test agent, then load the page as admin with
+      no filters and verify their rows appear.
 - [ ] Can see all branches, all agents, all data
 - [ ] No filters are pre-applied
 - [ ] Can export full result set
 
 ### 9.2 Branch Manager
+- [ ] Loading the page with zero filters shows every agent in their branch
+      (same `browse=all` path, but `scopeFilter()` clamps it to their branch)
 - [ ] Can only see their own branch (Branch filter only shows own branch)
 - [ ] Attempting to manually pass another branch_id in URL is ignored (server-side clamp)
 - [ ] Can see only their own branch's agents in Agent dropdown
@@ -255,8 +270,15 @@ Agent Daily Activity feature completion verification. Test as admin, branch_mana
 
 ### 9.3 Telecaller / Field Agent
 - [ ] Nav item "Agent Daily Activity" is hidden
-- [ ] Direct access to `/agent-activity` results in 403 or redirect to home
-- [ ] Cannot access page at all
+- [ ] Direct access to `/agent-activity` does NOT 403 — the backend gate is
+      `reports.view OR reports.view_self`, and individual contributors hold
+      `reports.view_self`. The page loads and returns 200, but every agent
+      resolution path (including `browse=all`, if the URL is edited to add
+      it) runs through `scopeFilter()`, which for a plain telecaller/field
+      agent falls back to `u.id = self` — so they only ever see their own
+      activity, never another agent's, regardless of which filters they set.
+- [ ] Manually editing the URL to add another agent's `agent_ids=` value
+      does not leak that agent's data (single-agent path checks scope too)
 
 ### 9.4 Ops Manager
 - [ ] Can see all branches and all agents (like Admin)

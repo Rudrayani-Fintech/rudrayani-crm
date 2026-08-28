@@ -10,6 +10,7 @@ import { WorkScopeProvider } from "./scope/WorkScopeContext";
 // Lazy: none of these are needed until after login, and most users only ever
 // touch a handful of them (role-gated in AppLayout's nav) -- bundling all 15+
 // admin pages into the initial load would bloat the login screen for no reason.
+const AgentActivityPage = lazy(() => import("./pages/AgentActivityPage"));
 const AllocationPage = lazy(() => import("./pages/AllocationPage"));
 const AttendancePage = lazy(() => import("./pages/AttendancePage"));
 const BranchesPage = lazy(() => import("./pages/BranchesPage"));
@@ -81,6 +82,7 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="agent-activity" element={<AgentActivityPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="org-chart" element={<OrgChartPage />} />

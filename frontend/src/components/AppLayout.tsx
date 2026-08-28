@@ -95,6 +95,11 @@ export default function AppLayout() {
       icon: <FileSearchOutlined />,
       label: <Link to="/reports">Reports</Link>,
     },
+    hasPermission("reports.view") && {
+      key: "/agent-activity",
+      icon: <UnorderedListOutlined />,
+      label: <Link to="/agent-activity">Agent Daily Activity</Link>,
+    },
     // Shown to anyone who personally logs calls -- not just individual
     // contributors. Branch managers/ops managers hold customers.allocate
     // too, but still need their own properly-scoped book (GET /worklist is

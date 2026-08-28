@@ -332,7 +332,7 @@ healthy.
 2. **Clear the queues.** Import Review, Reallocation Requests, Correction
    Requests. Nothing in these moves until a human decides, so they are the first
    place work gets stuck.
-3. **Check the Management Dashboard** for the leadership view — total portfolio,
+3. **Check the Agent Daily Activity page** for supervision — what each agent did,
    collection %, top and bottom performers.
 4. **Check Deposits.** Cash collected in the field is only reconciled once
    somebody marks it deposited. Left undone, your reporting understates what
@@ -347,7 +347,7 @@ healthy.
 | **Master data** | Buckets, Field Config, Dispositions | Agency-wide configuration |
 | **Data intake** | Import, Import Review | The 4-step import wizard and the discrepancy queue |
 | **Work management** | Customers, Allocation, Reallocation Requests, Correction Requests | |
-| **Reporting** | Dashboard, Management Dashboard, Reports, Targets | Export to Excel from all of them |
+| **Reporting** | Dashboard, Agent Daily Activity, Reports, Targets | Export to Excel from all of them |
 | **Oversight** | Tracking, Day Plan, Attendance, Deposits | |
 | **Your own book** | My Worklist | Only if you also carry an agent type |
 
@@ -400,7 +400,7 @@ flowchart TD
     H --> I["Allocation:<br/>assign new accounts"]
     F -->|No| I
     I --> J["Evening: Deposits —<br/>reconcile collected cash"]
-    J --> K["Reports / Management<br/>Dashboard: check the day"]
+    J --> K["Agent Daily Activity:<br/>check what was done"]
 ```
 
 ### 6.4 Your core responsibilities in detail
@@ -500,7 +500,7 @@ flowchart TD
 | Page | What you do there |
 |---|---|
 | **Dashboard** | Full performance dashboard, scoped to your branch |
-| **Management Dashboard** | KPI view of your branch |
+| **Agent Daily Activity** | Day-by-day action log of what your agents did |
 | **Reports** | Breakdown by product, bucket, team, agent — exportable |
 | **Allocation** | Assign unallocated accounts; reallocate with a reason |
 | **Reallocation Requests** | Approve or reject requests from your agents |
@@ -1026,14 +1026,17 @@ Performance"* view: your own numbers, no filters.
 
 > For exactly how every number is calculated, see `docs/metrics-formulas.md`.
 
-### Management Dashboard *(`reports.view`)*
-A leadership-oriented KPI view of the same data: Total Portfolio (POS), Collected
-Today vs MTD, Collection %, pending PTP value, broken PTP count, Outstanding
-Balance, Active Agents/Cases, EMI vs Settlement collections, Field vs Telecalling
-collections, a daily Recovery Trend chart, the same Breakdown table, and Top 10 /
-Bottom 10 agent leaderboards. A "Coming Soon" strip lists KPIs not yet built
-(Revenue & Agency Commission, Compliance Alerts, Legal Cases Status, Incentive
-Calculator).
+### Agent Daily Activity *(`reports.view`)*
+A granular, action-by-action log of what your agents did on a specific day.
+Filter by customer branch, bucket, company, product, agent, agent type, action
+type (Call/Payment/PTP/Field Visit), disposition code, PTP status, or customer
+name/loan/phone number. Each row shows the time, agent, action, customer detail
+(name, branch, bucket, company, product), amount (for payments), disposition, and
+PTP status. Download the full activity log as Excel with customer detail columns
+for offline analysis. **URL-synced filters** — so a report can be bookmarked or
+pasted to a colleague and they see exactly what you see. **Perfect for supervision:**
+"What did my team do yesterday?" or "How many calls did Rahul make in the NPA bucket
+yesterday?"
 
 ### Reports *(`reports.view`)*
 A dedicated home for the reporting engine: a free dimension selector, an
@@ -1450,6 +1453,6 @@ Stated plainly, so nobody wastes time hunting for something that isn't there:
 - **Very large import files (roughly 20,000 rows or more) can time out.** Split
   them if you hit this.
 - **Some dashboard chart types are not built yet** — the "Coming Soon" strip on
-  the Management Dashboard is accurate about what's missing.
+  the Agent Daily Activity page shows accurate detail about what was done and by whom.
 
 For the complete and current list, see `docs/deferred-work.md`.

@@ -1,3 +1,17 @@
+/**
+ * ARCHIVED — 2026-08-29
+ *
+ * This page was replaced by Agent Daily Activity (/agent-activity) and ReportsPage (/reports).
+ * The simpler activity-feed view and the breakdown table now live in those two destinations.
+ *
+ * Components intentionally LEFT IN PLACE (other pages depend on them):
+ * - BreakdownTable.tsx (used by ReportsPage, OrgChartPage, DashboardPage)
+ * - AgentDetailDrawer.tsx, BranchDetailDrawer.tsx, TeamDetailDrawer.tsx (used throughout)
+ *
+ * If the 12 KPI tiles, Recovery Trend chart, or Top10/Bottom10 leaderboards are needed again,
+ * the code and SQL are preserved here — this file can be revived without re-engineering.
+ */
+
 import { Card, Col, DatePicker, Row, Select, Space, Spin, theme, Typography, message } from "antd";
 import { Column } from "@ant-design/plots";
 import dayjs, { type Dayjs } from "dayjs";

@@ -25,7 +25,6 @@ const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));
 const FieldConfigPage = lazy(() => import("./pages/FieldConfigPage"));
 const ImportPage = lazy(() => import("./pages/ImportPage"));
 const ImportReviewPage = lazy(() => import("./pages/ImportReviewPage"));
-const ManagementDashboardPage = lazy(() => import("./pages/dashboards/ManagementDashboardPage"));
 const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
 const MyWorklistPage = lazy(() => import("./pages/MyWorklistPage"));
 const OrgChartPage = lazy(() => import("./pages/OrgChartPage"));
@@ -82,7 +81,6 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="management-dashboard" element={<ManagementDashboardPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="org-chart" element={<OrgChartPage />} />

@@ -95,35 +95,73 @@ router.get(
 router.get(
   "/agent-activity",
   asyncHandler(async (req, res) => {
+    // Helper to normalize repeatable query params into arrays
+    const toArray = (val: unknown): string[] => {
+      if (!val) return [];
+      if (typeof val === "string") return [val];
+      if (Array.isArray(val)) return val.filter(v => typeof v === "string");
+      return [];
+    };
+
     const query = z
       .object({
         agent_id: z.string().uuid().optional(),
+        agent_ids: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        agent_type: z.enum(["telecaller", "field_agent"]).optional(),
         // "Today's Work" branch-manager drill-down: every agent under the
         // branch this caller manages, in one grouped query rather than N+1.
         scope: z.enum(["team"]).optional(),
+        date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), // YYYY-MM-DD
         today: z.coerce.boolean().optional(),
-        disposition_code_id: z.string().uuid().optional(),
+        branch_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        bucket: z.union([z.string(), z.array(z.string())]).optional(),
+        company_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        product: z.union([z.string(), z.array(z.string())]).optional(),
+        disposition_code_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
+        ptp_status: z.union([z.enum(["pending", "kept", "broken"]), z.array(z.enum(["pending", "kept", "broken"]))]).optional(),
+        action_type: z.union([z.enum(["call", "payment", "ptp", "field_visit"]), z.array(z.enum(["call", "payment", "ptp", "field_visit"]))]).optional(),
+        search: z.string().optional(),
         limit: z.coerce.number().int().min(1).max(200).default(20),
+        page: z.coerce.number().int().min(1).default(1),
       })
       .parse(req.query);
 
     let agentIds: string[];
     let agentNames: Map<string, string> | null = null;
 
-    if (query.scope === "team") {
-      if (req.user!.designation !== "branch_manager") {
+    // Multi-agent browse mode: scope=team or explicit agent_ids/agent_type
+    if (query.scope === "team" || query.agent_ids || query.agent_type) {
+      if (query.scope === "team" && req.user!.designation !== "branch_manager") {
         throw new HttpError(403, "Only a branch manager can view team activity");
       }
+
       const scope = await scopeFilter(req.user!);
       const clause = scope.param !== null ? scope.clause.replaceAll("$SCOPE", "$2") : "";
-      const params: unknown[] = scope.param !== null ? [req.user!.agency_id, scope.param] : [req.user!.agency_id];
-      const { rows } = await pool.query<{ id: string; full_name: string }>(
-        `SELECT u.id, u.full_name FROM users u WHERE u.agency_id = $1 AND u.is_active = true ${clause}`,
-        params,
-      );
+      let params: unknown[] = scope.param !== null ? [req.user!.agency_id, scope.param] : [req.user!.agency_id];
+      let sql = `SELECT u.id, u.full_name FROM users u WHERE u.agency_id = $1 AND u.is_active = true ${clause}`;
+
+      // Narrow by agent_type if provided
+      if (query.agent_type) {
+        sql += ` AND u.agent_type = $${params.length + 1}`;
+        params.push(query.agent_type);
+      }
+
+      // Narrow by explicit agent_ids if provided
+      if (query.agent_ids && toArray(query.agent_ids).length > 0) {
+        const ids = toArray(query.agent_ids);
+        sql += ` AND u.id = ANY($${params.length + 1}::uuid[])`;
+        params.push(ids);
+      }
+
+      const { rows } = await pool.query<{ id: string; full_name: string }>(sql, params);
       agentIds = rows.map((r) => r.id);
       agentNames = new Map(rows.map((r) => [r.id, r.full_name]));
+
+      if (agentIds.length === 0) {
+        return res.json({ agent_id: null, activity: [], total_count: 0 });
+      }
     } else {
+      // Single agent (self or specified agent_id)
       const targetAgentId = query.agent_id ?? req.user!.id;
       if (targetAgentId !== req.user!.id) {
         const scope = await scopeFilter(req.user!);
@@ -139,14 +177,31 @@ router.get(
       agentIds = [targetAgentId];
     }
 
+    const offset = (query.page - 1) * query.limit;
     const activity = await agentRecentActivity(req.user!.agency_id, agentIds, query.limit, {
+      date: query.date,
       today: query.today,
-      dispositionCodeId: query.disposition_code_id,
+      dispositionCodeId: query.disposition_code_id ? toArray(query.disposition_code_id)[0] : undefined,
+      dispositionCodeIds: toArray(query.disposition_code_id),
+      branchIds: toArray(query.branch_id),
+      buckets: toArray(query.bucket),
+      companyIds: toArray(query.company_id),
+      products: toArray(query.product),
+      ptpStatuses: toArray(query.ptp_status) as ("pending" | "kept" | "broken")[],
+      actionTypes: toArray(query.action_type) as ("call" | "payment" | "ptp" | "field_visit")[],
+      search: query.search,
+      offset,
     });
-    const withNames = agentNames
-      ? activity.map((a) => ({ ...a, agent_name: agentNames!.get(a.agent_id) ?? null }))
-      : activity;
-    res.json({ agent_id: query.agent_id ?? null, activity: withNames });
+
+    const totalCount = (activity as any).total_count || 0;
+    res.json({
+      agent_id: query.agent_id ?? null,
+      activity,
+      total_count: totalCount,
+      page: query.page,
+      limit: query.limit,
+      total_pages: Math.ceil(totalCount / query.limit),
+    });
   }),
 );
 

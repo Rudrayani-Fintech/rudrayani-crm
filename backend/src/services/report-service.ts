@@ -2083,42 +2083,110 @@ export async function agentRecentActivity(
   agencyId: string,
   agentIds: string[],
   limit: number,
-  options: { today?: boolean; dispositionCodeId?: string } = {},
-): Promise<AgentActivityRow[]> {
+  options: {
+    today?: boolean;
+    date?: string; // YYYY-MM-DD, IST-boundary; if set, overrides today
+    dispositionCodeId?: string;
+    dispositionCodeIds?: string[];
+    branchIds?: string[];
+    buckets?: string[];
+    companyIds?: string[];
+    products?: string[];
+    ptpStatuses?: ("pending" | "kept" | "broken")[];
+    actionTypes?: ("call" | "payment" | "ptp" | "field_visit")[];
+    search?: string;
+    offset?: number;
+  } = {},
+): Promise<AgentActivityRow[] & { total_count?: number }> {
   if (agentIds.length === 0) return [];
   const params: unknown[] = [agentIds, agencyId];
 
-  const todayFor = (col: string) =>
-    options.today
-      ? `AND ${col} >= (((now() AT TIME ZONE 'Asia/Kolkata')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-         AND ${col} < (((now() AT TIME ZONE 'Asia/Kolkata')::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')`
-      : "";
-
-  let dispositionClause = "";
-  if (options.dispositionCodeId) {
-    params.push(options.dispositionCodeId);
-    dispositionClause = `AND cl.disposition_code_id = $${params.length}`;
+  // Determine date boundary: explicit date param takes precedence over legacy today param
+  let dateClause = "";
+  if (options.date) {
+    params.push(options.date);
+    const dateParam = `$${params.length}`;
+    dateClause = ` AND {COL} >= (${dateParam}::date::timestamp AT TIME ZONE 'Asia/Kolkata') AND {COL} < ((${dateParam}::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')`;
+  } else if (options.today) {
+    dateClause = ` AND {COL} >= (((now() AT TIME ZONE 'Asia/Kolkata')::date)::timestamp AT TIME ZONE 'Asia/Kolkata') AND {COL} < (((now() AT TIME ZONE 'Asia/Kolkata')::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')`;
   }
 
-  const branches = [
-    `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at, cl.agent_id,
-             u.full_name AS agent_name, u.agent_type,
-             c.id::text AS customer_id, c.customer_name, c.loan_number,
-             c.branch_id AS customer_branch_id, b.name AS customer_branch_name,
-             c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
-             c.mobile_number AS customer_mobile, c.product AS customer_product,
-             c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
-             NULL, cl.remark, NULL::text AS amount, dc.action_code AS detail
-        FROM call_logs cl
-        JOIN users u ON u.id = cl.agent_id
-        JOIN customers c ON c.id = cl.customer_id
-        JOIN companies co ON co.id = c.company_id
-        LEFT JOIN branches b ON b.id = c.branch_id
-        LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
-       WHERE cl.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("cl.created_at")} ${dispositionClause})`,
-  ];
+  const dateFor = (col: string) => (dateClause ? dateClause.replace("{COL}", col) : "");
 
-  if (!options.dispositionCodeId) {
+  // Build disposition filter (backward-compat: single dispositionCodeId or array dispositionCodeIds)
+  let dispositionClause = "";
+  const dispositionIds = options.dispositionCodeIds || (options.dispositionCodeId ? [options.dispositionCodeId] : []);
+  if (dispositionIds.length > 0) {
+    params.push(dispositionIds);
+    dispositionClause = ` AND cl.disposition_code_id = ANY($${params.length}::uuid[])`;
+  }
+
+  // Build customer-level filters (apply to all branches via subquery)
+  let customerFilterClause = "";
+  if (options.branchIds && options.branchIds.length > 0) {
+    params.push(options.branchIds);
+    customerFilterClause += ` AND c.branch_id = ANY($${params.length}::uuid[])`;
+  }
+  if (options.buckets && options.buckets.length > 0) {
+    params.push(options.buckets);
+    customerFilterClause += ` AND c.bucket = ANY($${params.length}::text[])`;
+  }
+  if (options.companyIds && options.companyIds.length > 0) {
+    params.push(options.companyIds);
+    customerFilterClause += ` AND c.company_id = ANY($${params.length}::uuid[])`;
+  }
+  if (options.products && options.products.length > 0) {
+    params.push(options.products);
+    customerFilterClause += ` AND c.product = ANY($${params.length}::text[])`;
+  }
+
+  // Build search filter (apply to all branches via subquery)
+  let searchClause = "";
+  if (options.search) {
+    const searchTerm = `%${options.search}%`;
+    params.push(searchTerm, searchTerm, searchTerm);
+    searchClause = ` AND (c.customer_name ILIKE $${params.length - 2} OR c.loan_number ILIKE $${params.length - 1} OR c.mobile_number ILIKE $${params.length})`;
+  }
+
+  // Determine which action types to include (controls which branches are in UNION)
+  const actionTypes = options.actionTypes && options.actionTypes.length > 0
+    ? options.actionTypes
+    : ["call", "payment", "ptp", "field_visit"];
+  const includeCall = actionTypes.includes("call");
+  const includePayment = actionTypes.includes("payment");
+  const includePtp = actionTypes.includes("ptp");
+  const includeFieldVisit = actionTypes.includes("field_visit");
+
+  // Build PTP status filter (only affects ptp branch)
+  let ptpStatusClause = "";
+  if (options.ptpStatuses && options.ptpStatuses.length > 0) {
+    params.push(options.ptpStatuses);
+    ptpStatusClause = ` AND pt.status = ANY($${params.length}::text[])`;
+  }
+
+  const branches: string[] = [];
+
+  if (includeCall) {
+    branches.push(
+      `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at, cl.agent_id,
+               u.full_name AS agent_name, u.agent_type,
+               c.id::text AS customer_id, c.customer_name, c.loan_number,
+               c.branch_id AS customer_branch_id, b.name AS customer_branch_name,
+               c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
+               c.mobile_number AS customer_mobile, c.product AS customer_product,
+               c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
+               NULL, cl.remark, NULL::text AS amount, dc.action_code AS detail
+          FROM call_logs cl
+          JOIN users u ON u.id = cl.agent_id
+          JOIN customers c ON c.id = cl.customer_id
+          JOIN companies co ON co.id = c.company_id
+          LEFT JOIN branches b ON b.id = c.branch_id
+          LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
+         WHERE cl.agent_id = ANY($1) AND co.agency_id = $2 ${dateFor("cl.created_at")} ${dispositionClause}${customerFilterClause}${searchClause})`,
+    );
+  }
+
+  if (includePayment) {
     branches.push(
       `(SELECT 'payment', p.id::text, p.paid_at, p.collected_by_user_id,
                u.full_name, u.agent_type,
@@ -2131,7 +2199,12 @@ export async function agentRecentActivity(
           JOIN customers c ON c.id = p.customer_id
           JOIN companies co ON co.id = c.company_id
           LEFT JOIN branches b ON b.id = c.branch_id
-         WHERE p.collected_by_user_id = ANY($1) AND co.agency_id = $2 ${todayFor("p.paid_at")})`,
+         WHERE p.collected_by_user_id = ANY($1) AND co.agency_id = $2 ${dateFor("p.paid_at")}${customerFilterClause}${searchClause})`,
+    );
+  }
+
+  if (includePtp) {
+    branches.push(
       `(SELECT 'ptp', pt.id::text, pt.created_at, pt.agent_id,
                u.full_name, u.agent_type,
                c.id::text, c.customer_name, c.loan_number,
@@ -2143,7 +2216,12 @@ export async function agentRecentActivity(
           JOIN customers c ON c.id = pt.customer_id
           JOIN companies co ON co.id = c.company_id
           LEFT JOIN branches b ON b.id = c.branch_id
-         WHERE pt.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("pt.created_at")})`,
+         WHERE pt.agent_id = ANY($1) AND co.agency_id = $2 ${dateFor("pt.created_at")}${customerFilterClause}${searchClause}${ptpStatusClause})`,
+    );
+  }
+
+  if (includeFieldVisit) {
+    branches.push(
       `(SELECT 'field_visit', fv.id::text, fv.created_at, fv.agent_id,
                u.full_name, u.agent_type,
                c.id::text, c.customer_name, c.loan_number,
@@ -2155,14 +2233,34 @@ export async function agentRecentActivity(
           JOIN customers c ON c.id = fv.customer_id
           JOIN companies co ON co.id = c.company_id
           LEFT JOIN branches b ON b.id = c.branch_id
-         WHERE fv.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("fv.created_at")})`,
+         WHERE fv.agent_id = ANY($1) AND co.agency_id = $2 ${dateFor("fv.created_at")}${customerFilterClause}${searchClause})`,
     );
   }
 
-  params.push(limit);
-  const { rows } = await pool.query<AgentActivityRow>(
-    `${branches.join(" UNION ALL ")} ORDER BY at DESC LIMIT $${params.length}`,
-    params,
-  );
-  return rows;
+  // If no branches are included, return empty result
+  if (branches.length === 0) return [];
+
+  const offset = options.offset || 0;
+  params.push(limit, offset);
+  const unionSql = branches.join(" UNION ALL ");
+  const paginatedSql = `
+    WITH activity_rows AS (
+      ${unionSql}
+    )
+    SELECT *, COUNT(*) OVER() AS total_count
+    FROM activity_rows
+    ORDER BY at DESC
+    LIMIT $${params.length - 1} OFFSET $${params.length}
+  `;
+
+  const { rows } = await pool.query<AgentActivityRow & { total_count: number }>(paginatedSql, params);
+
+  // Attach total_count as a property on the array (TypeScript quirk: arrays can have properties)
+  const result = rows.map(r => {
+    const { total_count, ...row } = r;
+    return row as AgentActivityRow;
+  });
+  (result as any).total_count = rows.length > 0 ? rows[0].total_count : 0;
+
+  return result;
 }

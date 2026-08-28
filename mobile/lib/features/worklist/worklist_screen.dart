@@ -12,6 +12,7 @@ import '../../core/tracking/tracking_service.dart';
 import '../../core/utils/friendly_error.dart';
 import '../../core/widgets/state_views.dart';
 import '../../core/utils/money.dart' as money;
+import '../../core/offline/worklist_filter_store.dart';
 import 'worklist_provider.dart';
 import '../reminders/today_section.dart';
 
@@ -31,19 +32,88 @@ enum _SortOrder { defaultOrder, highestDue, nearestPtp, oldestContact }
 class _WorklistScreenState extends ConsumerState<WorklistScreen> {
   String _search = '';
   String? _selectedCompany;
-  String? _selectedBucket;
   _QuickFilter _quickFilter = _QuickFilter.none;
   _SortOrder _sort = _SortOrder.defaultOrder;
   Timer? _debounce;
 
+  // Gates the first `ref.watch(worklistProvider)` in build() until the
+  // persisted branch/bucket selection has been loaded from Hive and pushed
+  // into worklistFiltersProvider. Without this gate, build() would watch
+  // worklistProvider once with the provider's default *empty* filter
+  // (firing an unfiltered network fetch and briefly flashing an unfiltered
+  // list), then again moments later once hydration lands -- the same race
+  // Task 8 hit and fixed on web. Unlike web's RequireAuth (which guarantees
+  // the user is resolved before anything downstream mounts), this app's
+  // router only waits for isLoggedIn + punched-in (see router.dart) --
+  // AuthNotifier.init() sets isLoggedIn:true optimistically *before*
+  // awaiting /auth/me, and attendance's own init() (which the punch-in
+  // gate depends on) runs concurrently with, not after, that call. So
+  // auth.user can genuinely still be null the moment this screen first
+  // builds; a single synchronous initState read isn't reliably enough on
+  // its own, which is why hydration is re-attempted via ref.listen in
+  // build() below, not just once in initState.
+  bool _filtersHydrated = false;
+  String? _hydratingForUserId;
+  Timer? _hydrationTimeoutTimer;
+
   @override
   void initState() {
     super.initState();
+    // ref is available synchronously from initState onward in
+    // flutter_riverpod -- main.dart and punch_in_screen.dart both already
+    // rely on this for their own startup reads via ref.read, so no
+    // addPostFrameCallback deferral is needed just to call ref.read here.
+    final userId = ref.read(authProvider).user?['id'] as String?;
+    if (userId != null) _hydrateFilters(userId);
+    // Safety valve: if `user` never populates this session (e.g. /auth/me
+    // keeps failing while cached tokens stay valid -- AuthNotifier.init()
+    // has no retry for that case, see its catch-all branch), don't leave
+    // this screen on a spinner forever. Filters simply won't be restored
+    // for this session, which is a strict improvement over never showing
+    // the worklist at all.
+    _hydrationTimeoutTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && !_filtersHydrated) setState(() => _filtersHydrated = true);
+    });
+  }
+
+  void _hydrateFilters(String userId) {
+    if (_hydratingForUserId == userId) return;
+    _hydratingForUserId = userId;
+    WorklistFilterStore.load(userId).then((selection) {
+      if (!mounted) return;
+      ref.read(worklistFiltersProvider.notifier).state = selection;
+      _hydrationTimeoutTimer?.cancel();
+      setState(() => _filtersHydrated = true);
+    });
+  }
+
+  void _updateFilters(WorklistFilterSelection selection) {
+    ref.read(worklistFiltersProvider.notifier).state = selection;
+    final userId = ref.read(authProvider).user?['id'] as String?;
+    if (userId != null) WorklistFilterStore.save(userId, selection);
+  }
+
+  // Resets every worklist filter -- search, company, quick filter, AND the
+  // server-side branch/bucket selection (persisted via _updateFilters). A
+  // stale persisted branch/bucket that no longer matches any allocated
+  // customer would otherwise be an unrecoverable dead end: no chip renders
+  // for a value absent from worklistFilterOptionsProvider's results, so
+  // there is nothing in the UI to tap to deselect it, and the filtered
+  // request (now server-side, not client-side) returns zero rows regardless
+  // of search/company/quickFilter state.
+  void _clearAllFilters() {
+    setState(() {
+      _search = '';
+      _selectedCompany = null;
+      _quickFilter = _QuickFilter.none;
+    });
+    _updateFilters(const WorklistFilterSelection());
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _hydrationTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -58,6 +128,19 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Catch the moment `user` becomes available if it wasn't ready yet in
+    // initState (see the comment on _filtersHydrated above) -- called
+    // unconditionally on every build, before the hydration gate below, so
+    // the listener stays registered regardless of which branch returns.
+    ref.listen<AuthState>(authProvider, (prev, next) {
+      final userId = next.user?['id'] as String?;
+      if (userId != null) _hydrateFilters(userId);
+    });
+
+    if (!_filtersHydrated) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     final auth = ref.watch(authProvider);
     final wl = ref.watch(worklistProvider);
     final user = auth.user;
@@ -101,6 +184,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
             onPressed: () {
               ref.invalidate(worklistProvider);
               ref.invalidate(dispositionCodesProvider);
+              ref.invalidate(worklistFilterOptionsProvider);
             },
           ),
           IconButton(
@@ -169,12 +253,8 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                         .toSet()
                         .toList()
                         ..sort();
-                    final buckets = customers
-                        .map((c) => c.bucket)
-                        .whereType<String>()
-                        .toSet()
-                        .toList()
-                        ..sort();
+                    final filters = ref.watch(worklistFiltersProvider);
+                    final options = ref.watch(worklistFilterOptionsProvider);
                     return Column(
                       children: [
                         Row(
@@ -200,31 +280,70 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                                     setState(() => _selectedCompany = value),
                               ),
                             ),
-                            if (buckets.isNotEmpty) ...[
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: DropdownButton<String?>(
-                                  isExpanded: true,
-                                  value: _selectedBucket,
-                                  hint: const Text('Filter by bucket'),
-                                  items: [
-                                    const DropdownMenuItem<String?>(
-                                      value: null,
-                                      child: Text('All buckets'),
-                                    ),
-                                    ...buckets.map(
-                                      (bucket) => DropdownMenuItem(
-                                        value: bucket,
-                                        child: Text(bucket),
-                                      ),
-                                    ),
-                                  ],
-                                  onChanged: (value) =>
-                                      setState(() => _selectedBucket = value),
-                                ),
-                              ),
-                            ],
                           ],
+                        ),
+                        const SizedBox(height: 8),
+                        options.when(
+                          data: (opts) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (opts.branches.isNotEmpty) ...[
+                                const Text('Branch', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: opts.branches
+                                      .map(
+                                        (b) => FilterChip(
+                                          label: Text(b),
+                                          selected: filters.branches.contains(b),
+                                          onSelected: (sel) {
+                                            final next = List<String>.from(filters.branches);
+                                            if (sel) {
+                                              next.add(b);
+                                            } else {
+                                              next.remove(b);
+                                            }
+                                            _updateFilters(
+                                              WorklistFilterSelection(branches: next, buckets: filters.buckets),
+                                            );
+                                          },
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                                const SizedBox(height: 6),
+                              ],
+                              if (opts.buckets.isNotEmpty) ...[
+                                const Text('Bucket', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: opts.buckets
+                                      .map(
+                                        (b) => FilterChip(
+                                          label: Text(b),
+                                          selected: filters.buckets.contains(b),
+                                          onSelected: (sel) {
+                                            final next = List<String>.from(filters.buckets);
+                                            if (sel) {
+                                              next.add(b);
+                                            } else {
+                                              next.remove(b);
+                                            }
+                                            _updateFilters(
+                                              WorklistFilterSelection(branches: filters.branches, buckets: next),
+                                            );
+                                          },
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              ],
+                            ],
+                          ),
+                          loading: () => const SizedBox.shrink(),
+                          error: (_, _) => const SizedBox.shrink(),
                         ),
                         const SizedBox(height: 8),
                         Wrap(
@@ -270,14 +389,30 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                 onRetry: () {
                   ref.invalidate(worklistProvider);
                   ref.invalidate(dispositionCodesProvider);
+                  ref.invalidate(worklistFilterOptionsProvider);
                 },
               ),
               data: (customers) {
                 if (customers.isEmpty) {
-                  return const EmptyState(
+                  // A previously-persisted branch/bucket selection can go
+                  // stale overnight (reallocation moves the agent off that
+                  // branch/bucket entirely) and the server-side filter then
+                  // legitimately returns zero rows -- give an explicit way
+                  // back rather than leaving the agent stuck on an
+                  // unexplained empty worklist.
+                  final activeFilters = ref.watch(worklistFiltersProvider);
+                  final hasBranchOrBucketFilter =
+                      activeFilters.branches.isNotEmpty || activeFilters.buckets.isNotEmpty;
+                  return EmptyState(
                     icon: Icons.people_outline,
                     message: 'No customers assigned today.',
                     hint: 'Pull down to refresh once new accounts land.',
+                    action: hasBranchOrBucketFilter
+                        ? TextButton(
+                            onPressed: _clearAllFilters,
+                            child: const Text('Clear filters'),
+                          )
+                        : null,
                   );
                 }
 
@@ -287,10 +422,6 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                         .where((c) => c.companyName == _selectedCompany)
                         .toList()
                     : customers;
-
-                if (_selectedBucket != null) {
-                  filtered = filtered.where((c) => c.bucket == _selectedBucket).toList();
-                }
 
                 final today = DateTime.now();
                 final todayDateOnly = DateTime(today.year, today.month, today.day);
@@ -360,12 +491,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                     message: 'No matches for your search or filters.',
                     hint: 'Try clearing the search box or filters.',
                     action: TextButton(
-                      onPressed: () => setState(() {
-                        _search = '';
-                        _selectedCompany = null;
-                        _selectedBucket = null;
-                        _quickFilter = _QuickFilter.none;
-                      }),
+                      onPressed: _clearAllFilters,
                       child: const Text('Clear all filters'),
                     ),
                   );
@@ -375,6 +501,7 @@ class _WorklistScreenState extends ConsumerState<WorklistScreen> {
                   onRefresh: () async {
                     ref.invalidate(worklistProvider);
                     ref.invalidate(dispositionCodesProvider);
+                    ref.invalidate(worklistFilterOptionsProvider);
                   },
                   child: ListView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 12),

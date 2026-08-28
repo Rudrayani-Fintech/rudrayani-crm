@@ -21,9 +21,11 @@ export interface AgentActivityRow {
   customer_due_amount: string | null;
   ptp_status: "pending" | "kept" | "broken" | null;
   remark: string | null;
+  extra_remark: string | null;
   amount: string | null;
   detail: string | null;
   disposition_description: string | null;
+  edited_at: string | null;
 }
 
 export interface AgentActivityResponse {

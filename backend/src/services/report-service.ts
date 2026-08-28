@@ -2059,9 +2059,11 @@ export interface AgentActivityRow {
   customer_due_amount: string | null;
   ptp_status: "pending" | "kept" | "broken" | null;
   remark: string | null;
+  extra_remark: string | null;
   amount: string | null;
   detail: string | null;
   disposition_description: string | null;
+  edited_at: string | null;
 }
 
 /**
@@ -2176,7 +2178,8 @@ export async function agentRecentActivity(
                c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
                c.mobile_number AS customer_mobile, c.product AS customer_product,
                c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
-               NULL, cl.remark, NULL::text AS amount, dc.action_code AS detail, dc.description AS disposition_description
+               NULL, cl.remark, cl.extra_remark, NULL::text AS amount, dc.action_code AS detail,
+               dc.description AS disposition_description, cl.edited_at
           FROM call_logs cl
           JOIN users u ON u.id = cl.agent_id
           JOIN customers c ON c.id = cl.customer_id
@@ -2194,7 +2197,7 @@ export async function agentRecentActivity(
                c.id::text, c.customer_name, c.loan_number,
                c.branch_id, b.name, c.bucket, c.company_id, co.name,
                c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
-               NULL, NULL::text, p.amount::text, p.mode, NULL::text
+               NULL, NULL::text, NULL::text, p.amount::text, p.mode, NULL::text, NULL::timestamptz
           FROM payments p
           JOIN users u ON u.id = p.collected_by_user_id
           JOIN customers c ON c.id = p.customer_id
@@ -2211,7 +2214,7 @@ export async function agentRecentActivity(
                c.id::text, c.customer_name, c.loan_number,
                c.branch_id, b.name, c.bucket, c.company_id, co.name,
                c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
-               pt.status, NULL::text, pt.amount::text, pt.promised_date::text, NULL::text
+               pt.status, NULL::text, NULL::text, pt.amount::text, pt.promised_date::text, NULL::text, NULL::timestamptz
           FROM ptps pt
           JOIN users u ON u.id = pt.agent_id
           JOIN customers c ON c.id = pt.customer_id
@@ -2228,7 +2231,7 @@ export async function agentRecentActivity(
                c.id::text, c.customer_name, c.loan_number,
                c.branch_id, b.name, c.bucket, c.company_id, co.name,
                c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
-               NULL, fv.remark, NULL::text, NULL::text, NULL::text
+               NULL, fv.remark, NULL::text, NULL::text, NULL::text, NULL::text, fv.edited_at
           FROM field_visits fv
           JOIN users u ON u.id = fv.agent_id
           JOIN customers c ON c.id = fv.customer_id

@@ -20,9 +20,9 @@ router.get(
   asyncHandler(async (req, res) => {
     const q = (req.query.q as string | undefined)?.trim();
     const companyId = req.query.company_id as string | undefined;
-    const customerBranch = req.query.customer_branch as string | undefined;
+    const customerBranchParam = req.query.customer_branch as string | undefined;
     const product = req.query.product as string | undefined;
-    const bucket = req.query.bucket as string | undefined;
+    const bucketParam = req.query.bucket as string | undefined;
     const scope = req.query.scope as string | undefined;
 
     const params: unknown[] = [req.user!.id];
@@ -60,18 +60,42 @@ router.get(
       params.push(companyId);
       conditions += ` AND c.company_id = $${params.length}`;
     }
-    if (customerBranch) {
-      params.push(customerBranch);
-      const n = params.length;
-      conditions += ` AND (c.branch_id::text = $${n} OR (c.branch_id IS NULL AND (c.custom_fields->>'branch' ILIKE '%' || $${n} || '%' OR c.custom_fields->>'Branch' ILIKE '%' || $${n} || '%')))`;
+    if (customerBranchParam) {
+      const values = customerBranchParam.split(",").map((s) => s.trim()).filter(Boolean);
+      if (values.length > 0) {
+        params.push(values);
+        const n = params.length;
+        // Case-insensitive but otherwise exact copy of `values`, for the
+        // custom_fields freetext fallback below -- lowercased once here
+        // rather than wrapping lower() around every array element inline.
+        params.push(values.map((v) => v.toLowerCase()));
+        const nLower = params.length;
+        // Matches on branch_id (legacy callers still pass the branch UUID,
+        // e.g. CustomersPage.tsx/AllocationPage.tsx via /customers/branches'
+        // {value: id}) OR on the branch's name via the `b` alias joined
+        // below (GET /worklist/filter-options below returns bare branch
+        // *names*, not ids, so a name must also match directly here) OR,
+        // for legacy imported rows with no branch_id at all, the raw
+        // custom_fields branch text. The custom_fields leg used to be
+        // `ILIKE ANY($n)`, which treats each value as a LIKE pattern --
+        // a branch name containing a literal `_` or `%` (both valid in
+        // freetext) would over-match. Values here come from an exact-value
+        // picker (this endpoint's own /filter-options), never free-typed
+        // search, so a case-insensitive exact `lower() = ANY(...)` compare
+        // is both correct and safe.
+        conditions += ` AND (c.branch_id::text = ANY($${n}) OR b.name = ANY($${n}) OR (c.branch_id IS NULL AND (lower(c.custom_fields->>'branch') = ANY($${nLower}) OR lower(c.custom_fields->>'Branch') = ANY($${nLower}))))`;
+      }
     }
     if (product) {
       params.push(product);
       conditions += ` AND c.product = $${params.length}`;
     }
-    if (bucket) {
-      params.push(bucket);
-      conditions += ` AND c.bucket = $${params.length}`;
+    if (bucketParam) {
+      const values = bucketParam.split(",").map((s) => s.trim()).filter(Boolean);
+      if (values.length > 0) {
+        params.push(values);
+        conditions += ` AND c.bucket = ANY($${params.length})`;
+      }
     }
 
     // Bare `date_trunc('month', now())` resolves in the DB session's UTC
@@ -126,6 +150,51 @@ router.get(
       params,
     );
     res.json({ customers: rows, total: rows.length });
+  }),
+);
+
+/**
+ * Branch/bucket dropdown options for the worklist filter (Track: agent
+ * branch/bucket filtering) -- scoped to the requesting agent's own
+ * currently-allocated active customers (or, with scope=team, everyone a
+ * branch_manager manages), not the agency-wide GET /customers/branches or
+ * GET /buckets lists. Mirrors the exact scope block the list route above
+ * uses, so the options offered here always match what that same query would
+ * actually return.
+ */
+router.get(
+  "/filter-options",
+  asyncHandler(async (req, res) => {
+    const scope = req.query.scope as string | undefined;
+    const wantsTeamScope = scope === "team" && req.user!.designation === "branch_manager";
+    const clamp = wantsTeamScope ? await resolveBranchClamp(req.user!) : null;
+
+    const params: unknown[] = [];
+    let conditions: string;
+    if (clamp) {
+      const agentMatch = agentBranchClamp(clamp, params, "u").replace(/^ AND /, "");
+      const fieldAgentMatch = agentBranchClamp(clamp, params, "u").replace(/^ AND /, "");
+      conditions = `(
+          EXISTS (SELECT 1 FROM users u WHERE u.id = c.assigned_agent_id AND ${agentMatch})
+          OR EXISTS (SELECT 1 FROM users u WHERE u.id = c.assigned_field_agent_id AND ${fieldAgentMatch})
+        ) AND c.status = 'active'`;
+    } else {
+      params.push(req.user!.id);
+      conditions = `(c.assigned_agent_id = $${params.length} OR c.assigned_field_agent_id = $${params.length}) AND c.status = 'active'`;
+    }
+
+    const { rows } = await pool.query<{ branch: string | null; bucket: string | null }>(
+      `SELECT DISTINCT
+              COALESCE(b.name, NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch,
+              c.bucket
+         FROM customers c
+         LEFT JOIN branches b ON b.id = c.branch_id
+        WHERE ${conditions}`,
+      params,
+    );
+    const branches = Array.from(new Set(rows.map((r) => r.branch).filter((v): v is string => !!v))).sort();
+    const buckets = Array.from(new Set(rows.map((r) => r.bucket).filter((v): v is string => !!v))).sort();
+    res.json({ branches, buckets });
   }),
 );
 

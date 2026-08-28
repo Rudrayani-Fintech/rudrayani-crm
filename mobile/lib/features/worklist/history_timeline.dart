@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'correction_request_dialog.dart';
 import 'customer_detail_provider.dart';
+import 'edit_remark_dialog.dart';
 import '../../../core/utils/parser.dart';
 import '../../core/utils/money.dart' as money;
+import '../../core/auth/auth_provider.dart';
 
 String _rupee(num? v) => money.rupees(v);
 final _dateTime = DateFormat('dd MMM yyyy, HH:mm');
@@ -17,11 +19,14 @@ class _HistoryEntry {
   final String title;
   final String? subtitle;
   // Only set for entries a correction request can be filed against
-  // (payment / call_log / ptp) — field_visits and attachments have no
+  // (payment / call_log / ptp / field_visit) — attachments have no
   // correction flow.
   final String? correctableRecordType;
   final String? recordId;
   final Map<String, dynamic>? rawFields;
+  final String? agentId;
+  final String? directEditText;
+  final DateTime? editedAt;
   const _HistoryEntry({
     required this.at,
     required this.icon,
@@ -31,10 +36,13 @@ class _HistoryEntry {
     this.correctableRecordType,
     this.recordId,
     this.rawFields,
+    this.agentId,
+    this.directEditText,
+    this.editedAt,
   });
 }
 
-List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
+List<_HistoryEntry> _merge(Map<String, dynamic> detail, String? currentUserId) {
   final entries = <_HistoryEntry>[];
 
   for (final t in (detail['trail'] as List? ?? [])) {
@@ -61,6 +69,9 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
         correctableRecordType: 'call_log',
         recordId: m['id'] as String?,
         rawFields: {'remark': m['remark']},
+        agentId: m['agent_id'] as String?,
+        directEditText: (m['extra_remark'] as String?) ?? '',
+        editedAt: m['edited_at'] != null ? DateTime.parse(m['edited_at'] as String) : null,
       ),
     );
   }
@@ -95,6 +106,12 @@ List<_HistoryEntry> _merge(Map<String, dynamic> detail) {
           m['agent_name'],
           m['remark'],
         ].whereType<String>().where((v) => v.isNotEmpty).join(' — '),
+        correctableRecordType: 'field_visit',
+        recordId: m['id'] as String?,
+        rawFields: {'remark': m['remark']},
+        agentId: m['agent_id'] as String?,
+        directEditText: (m['remark'] as String?) ?? '',
+        editedAt: m['edited_at'] != null ? DateTime.parse(m['edited_at'] as String) : null,
       ),
     );
   }
@@ -145,6 +162,7 @@ class HistoryTimeline extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final detail = ref.watch(customerDetailProvider(customerId));
+    final currentUserId = ref.watch(authProvider).user?['id'] as String?;
 
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -220,7 +238,7 @@ class HistoryTimeline extends ConsumerWidget {
                 ),
               ),
               data: (d) {
-                final entries = _merge(d);
+                final entries = _merge(d, currentUserId);
                 if (entries.isEmpty) {
                   return const Padding(
                     padding: EdgeInsets.symmetric(vertical: 8),
@@ -244,6 +262,7 @@ class HistoryTimeline extends ConsumerWidget {
                           subtitle: Text(
                             [
                               _dateTime.format(e.at.toLocal()),
+                              if (e.editedAt != null) 'edited ${_dateTime.format(e.editedAt!.toLocal())}',
                               if (e.subtitle != null && e.subtitle!.isNotEmpty)
                                 e.subtitle,
                             ].join(' — '),
@@ -252,21 +271,42 @@ class HistoryTimeline extends ConsumerWidget {
                               color: AppColors.textTertiary,
                             ).tabular,
                           ),
-                          trailing: e.correctableRecordType != null
-                              ? IconButton(
-                                  icon: const Icon(Icons.flag_outlined, size: 18),
-                                  tooltip: 'Report an error',
-                                  onPressed: () => showCorrectionRequestDialog(
-                                    context,
-                                    ref,
-                                    recordType: e.correctableRecordType!,
-                                    recordId: e.recordId!,
-                                    currentValues: e.rawFields!,
-                                    onSubmitted: () =>
-                                        ref.invalidate(customerDetailProvider(customerId)),
-                                  ),
-                                )
-                              : null,
+                          trailing: () {
+                            final canDirectEdit = e.directEditText != null &&
+                                e.agentId != null &&
+                                e.agentId == currentUserId &&
+                                DateTime.now().difference(e.at).inHours < 24;
+                            if (canDirectEdit) {
+                              return IconButton(
+                                icon: const Icon(Icons.edit_outlined, size: 18),
+                                tooltip: 'Edit remark',
+                                onPressed: () => showEditRemarkDialog(
+                                  context,
+                                  ref,
+                                  recordType: e.correctableRecordType!,
+                                  recordId: e.recordId!,
+                                  currentText: e.directEditText!,
+                                  onSaved: () => ref.invalidate(customerDetailProvider(customerId)),
+                                ),
+                              );
+                            }
+                            if (e.correctableRecordType != null) {
+                              return IconButton(
+                                icon: const Icon(Icons.flag_outlined, size: 18),
+                                tooltip: 'Report an error',
+                                onPressed: () => showCorrectionRequestDialog(
+                                  context,
+                                  ref,
+                                  recordType: e.correctableRecordType!,
+                                  recordId: e.recordId!,
+                                  currentValues: e.rawFields!,
+                                  onSubmitted: () =>
+                                      ref.invalidate(customerDetailProvider(customerId)),
+                                ),
+                              );
+                            }
+                            return null;
+                          }(),
                         ),
                       )
                       .toList(),

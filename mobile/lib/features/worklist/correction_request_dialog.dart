@@ -112,7 +112,7 @@ Future<void> showCorrectionRequestDialog(
                 ),
                 const SizedBox(height: 12),
               ],
-              if (recordType == 'call_log') ...[
+              if (recordType == 'call_log' || recordType == 'field_visit') ...[
                 TextField(
                   controller: remarkCtrl,
                   maxLines: 3,
@@ -177,7 +177,7 @@ Future<void> showCorrectionRequestDialog(
         : null;
     if (formatted != currentFormatted) proposedChanges[dateField] = formatted;
   }
-  if (recordType == 'call_log' &&
+  if ((recordType == 'call_log' || recordType == 'field_visit') &&
       remarkCtrl.text.trim() != (currentValues['remark']?.toString() ?? '')) {
     proposedChanges['remark'] = remarkCtrl.text.trim();
   }

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
+import EditRemarkModal, { canDirectEditRecord, type DirectEditableKind } from "../components/EditRemarkModal";
 import LogCallModal from "../components/LogCallModal";
 import RecordPaymentModal from "../components/RecordPaymentModal";
 import ReportCorrectionModal, { type CorrectableRecordType } from "../components/ReportCorrectionModal";
@@ -16,6 +17,29 @@ import { rupees as fmtAmount } from "../utils/money";
 import type { DispositionCode, WorklistCustomer } from "../types";
 
 dayjs.extend(relativeTime);
+
+const FILTER_STORAGE_PREFIX = "rcrm_worklist_filters_";
+
+function loadPersistedFilters(userId: string | undefined): { branches: string[]; buckets: string[] } {
+  if (!userId) return { branches: [], buckets: [] };
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_PREFIX + userId);
+    if (!raw) return { branches: [], buckets: [] };
+    const parsed = JSON.parse(raw) as { branches?: string[]; buckets?: string[] };
+    return { branches: parsed.branches ?? [], buckets: parsed.buckets ?? [] };
+  } catch {
+    return { branches: [], buckets: [] };
+  }
+}
+
+function savePersistedFilters(userId: string | undefined, branches: string[], buckets: string[]): void {
+  if (!userId) return;
+  try {
+    localStorage.setItem(FILTER_STORAGE_PREFIX + userId, JSON.stringify({ branches, buckets }));
+  } catch {
+    // Private browsing / storage disabled -- filters still work for this session.
+  }
+}
 
 interface ReminderDue {
   id: string;
@@ -45,8 +69,10 @@ interface AgentActivityRow {
   customer_name: string;
   loan_number: string;
   remark: string | null;
+  extra_remark: string | null;
   amount: string | null;
   detail: string | null;
+  edited_at: string | null;
 }
 
 const ACTIVITY_ICON: Record<AgentActivityRow["kind"], React.ReactNode> = {
@@ -63,13 +89,26 @@ const ACTIVITY_LABEL: Record<AgentActivityRow["kind"], string> = {
   field_visit: "Field Visit",
 };
 
-// field_visit has no correction-request equivalent -- only calls/payments/PTPs
-// are correctable (see ReportCorrectionModal's CorrectableRecordType).
 const CORRECTABLE_KIND: Partial<Record<AgentActivityRow["kind"], CorrectableRecordType>> = {
   call: "call_log",
   payment: "payment",
   ptp: "ptp",
+  field_visit: "field_visit",
 };
+
+// Same-day (rolling 24h) owner-only direct edit -- distinct from the
+// correction-request flow above (manager-approved, no time limit). Only
+// calls and field visits carry a free-text remark that's worth editing this
+// way; payments/PTPs still go through "Report an error" only.
+const DIRECT_EDIT_KIND: Partial<Record<AgentActivityRow["kind"], DirectEditableKind>> = {
+  call: "call",
+  field_visit: "field_visit",
+};
+
+function canDirectEdit(a: AgentActivityRow, userId: string | undefined): boolean {
+  if (!DIRECT_EDIT_KIND[a.kind]) return false;
+  return canDirectEditRecord(a.at, a.agent_id, userId);
+}
 
 /**
  * A telecaller/field agent's own worklist on web -- the properly-scoped
@@ -91,15 +130,26 @@ export default function MyWorklistPage() {
   const [customers, setCustomers] = useState<WorklistCustomer[]>([]);
   const [reminders, setReminders] = useState<ReminderDue[]>([]);
   const [ptpsDue, setPtpsDue] = useState<PtpDue[]>([]);
-  const [customerBranches, setCustomerBranches] = useState<{ value: string; label: string }[]>([]);
+  const [filterOptions, setFilterOptions] = useState<{ branches: string[]; buckets: string[] }>({
+    branches: [],
+    buckets: [],
+  });
   const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
-  const [buckets, setBuckets] = useState<{ id: string; name: string }[]>([]);
 
   const [search, setSearch] = useState("");
   const [filterCompany, setFilterCompany] = useState<string | undefined>();
-  const [filterCustomerBranch, setFilterCustomerBranch] = useState<string | undefined>();
+  // Lazy initializers: MyWorklistPage only ever mounts once RequireAuth's
+  // `loading` gate has cleared (see App.tsx), so `user` is already resolved
+  // at this component's first render -- hydrating synchronously here means
+  // `load` below is correctly filtered from its very first identity, with
+  // no separate post-mount hydration effect racing the initial /worklist
+  // fetch (which previously caused either a lost selection or a flash of
+  // the unfiltered list depending on effect ordering).
+  const [filterCustomerBranches, setFilterCustomerBranches] = useState<string[]>(
+    () => loadPersistedFilters(user?.id).branches,
+  );
   const [filterProduct, setFilterProduct] = useState<string | undefined>();
-  const [filterBucket, setFilterBucket] = useState<string | undefined>();
+  const [filterBuckets, setFilterBuckets] = useState<string[]>(() => loadPersistedFilters(user?.id).buckets);
   // Driven by the one app-level "My Team ↔ My Work" switch in AppLayout's
   // header (see WorkScopeContext) instead of its own Segmented control --
   // usage below stays gated on isBranchManager, so this has no effect for
@@ -136,6 +186,7 @@ export default function MyWorklistPage() {
   const todayScope: "personal" | "branch" = myWorkOnly ? "personal" : "branch";
   const [todayDisposition, setTodayDisposition] = useState<string | undefined>();
   const [correctionTarget, setCorrectionTarget] = useState<AgentActivityRow | null>(null);
+  const [editRemarkTarget, setEditRemarkTarget] = useState<AgentActivityRow | null>(null);
 
   const loadTodayActivity = useCallback(async () => {
     setTodayLoading(true);
@@ -162,9 +213,9 @@ export default function MyWorklistPage() {
       const today = dayjs().format("YYYY-MM-DD");
       const params: Record<string, string> = {};
       if (search) params.q = search;
-      if (filterCustomerBranch) params.customer_branch = filterCustomerBranch;
+      if (filterCustomerBranches.length > 0) params.customer_branch = filterCustomerBranches.join(",");
       if (filterProduct) params.product = filterProduct;
-      if (filterBucket) params.bucket = filterBucket;
+      if (filterBuckets.length > 0) params.bucket = filterBuckets.join(",");
       if (isBranchManager && scope === "team") params.scope = "team";
 
       const [worklistRes, remindersRes, ptpsRes] = await Promise.all([
@@ -180,14 +231,20 @@ export default function MyWorklistPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterCustomerBranch, filterProduct, filterBucket, isBranchManager, scope]);
+  }, [search, filterCustomerBranches, filterProduct, filterBuckets, isBranchManager, scope]);
 
   useEffect(() => {
     api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes)).catch((err) => message.error(errorMessage(err)));
-    api.get("/customers/branches").then((res) => setCustomerBranches(res.data.branches)).catch((err) => message.error(errorMessage(err)));
     api.get("/products").then((res) => setProducts(res.data.products)).catch((err) => message.error(errorMessage(err)));
-    api.get("/buckets").then((res) => setBuckets(res.data.buckets)).catch((err) => message.error(errorMessage(err)));
   }, []);
+
+  useEffect(() => {
+    const params = isBranchManager && scope === "team" ? { scope: "team" } : undefined;
+    api
+      .get("/worklist/filter-options", { params })
+      .then((res) => setFilterOptions({ branches: res.data.branches, buckets: res.data.buckets }))
+      .catch((err) => message.error(errorMessage(err)));
+  }, [isBranchManager, scope]);
 
   useEffect(() => {
     void load();
@@ -245,13 +302,18 @@ export default function MyWorklistPage() {
           options={companyOptions}
         />
         <Select
+          mode="multiple"
           title="All branches" placeholder="All branches"
           allowClear
           showSearch
-          style={{ width: 180 }}
-          value={filterCustomerBranch}
-          onChange={(v) => setFilterCustomerBranch(v ?? undefined)}
-          options={customerBranches}
+          style={{ width: 220 }}
+          value={filterCustomerBranches}
+          onChange={(v) => {
+            setFilterCustomerBranches(v);
+            savePersistedFilters(user?.id, v, filterBuckets);
+          }}
+          options={filterOptions.branches.map((b) => ({ value: b, label: b }))}
+          maxTagCount="responsive"
         />
         <Select
           title="All products" placeholder="All products"
@@ -265,15 +327,17 @@ export default function MyWorklistPage() {
           }))}
         />
         <Select
+          mode="multiple"
           title="All buckets" placeholder="All buckets"
           allowClear
-          style={{ width: 140 }}
-          value={filterBucket}
-          onChange={(v) => setFilterBucket(v ?? undefined)}
-          options={Array.from(new Set(buckets.map((b) => b.name))).map((label) => ({
-            value: label,
-            label,
-          }))}
+          style={{ width: 180 }}
+          value={filterBuckets}
+          onChange={(v) => {
+            setFilterBuckets(v);
+            savePersistedFilters(user?.id, filterCustomerBranches, v);
+          }}
+          options={filterOptions.buckets.map((b) => ({ value: b, label: b }))}
+          maxTagCount="responsive"
         />
       </div>
 
@@ -391,6 +455,11 @@ export default function MyWorklistPage() {
                               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                                 {dayjs(a.at).format("HH:mm")}
                               </Typography.Text>
+                              {a.edited_at && (
+                                <Tag color="default" style={{ fontSize: 11 }}>
+                                  edited {dayjs(a.edited_at).format("HH:mm")}
+                                </Tag>
+                              )}
                             </Space>
                             {a.remark && <Typography.Text>{a.remark}</Typography.Text>}
                             {a.amount != null && (
@@ -408,10 +477,17 @@ export default function MyWorklistPage() {
                                 /correction-requests requires the record's own
                                 agent_id to match the caller) -- showing Edit on a
                                 teammate's row in Branch scope would just 404. */}
-                            {CORRECTABLE_KIND[a.kind] && a.agent_id === user?.id && (
-                              <Button size="small" icon={<EditOutlined />} onClick={() => setCorrectionTarget(a)}>
+                            {canDirectEdit(a, user?.id) ? (
+                              <Button size="small" icon={<EditOutlined />} onClick={() => setEditRemarkTarget(a)}>
                                 Edit
                               </Button>
+                            ) : (
+                              CORRECTABLE_KIND[a.kind] &&
+                              a.agent_id === user?.id && (
+                                <Button size="small" icon={<EditOutlined />} onClick={() => setCorrectionTarget(a)}>
+                                  Edit
+                                </Button>
+                              )
                             )}
                           </Space>
                         </div>
@@ -610,12 +686,32 @@ export default function MyWorklistPage() {
               ? { remark: correctionTarget.remark ?? "" }
               : correctionTarget.kind === "payment"
                 ? { amount: Number(correctionTarget.amount), mode: correctionTarget.detail, paid_at: correctionTarget.at }
-                : { amount: Number(correctionTarget.amount), promised_date: correctionTarget.detail }
+                : correctionTarget.kind === "field_visit"
+                  ? { remark: correctionTarget.remark ?? "" }
+                  : { amount: Number(correctionTarget.amount), promised_date: correctionTarget.detail }
           }
           open={correctionTarget !== null}
           onClose={() => setCorrectionTarget(null)}
           onSubmitted={() => {
             setCorrectionTarget(null);
+            void loadTodayActivity();
+          }}
+        />
+      )}
+
+      {editRemarkTarget && DIRECT_EDIT_KIND[editRemarkTarget.kind] && (
+        <EditRemarkModal
+          kind={DIRECT_EDIT_KIND[editRemarkTarget.kind]!}
+          recordId={editRemarkTarget.id}
+          currentText={
+            editRemarkTarget.kind === "call"
+              ? (editRemarkTarget.extra_remark ?? "")
+              : (editRemarkTarget.remark ?? "")
+          }
+          open={editRemarkTarget !== null}
+          onClose={() => setEditRemarkTarget(null)}
+          onSaved={() => {
+            setEditRemarkTarget(null);
             void loadTodayActivity();
           }}
         />

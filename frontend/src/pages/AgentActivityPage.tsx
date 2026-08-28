@@ -23,17 +23,23 @@ export default function AgentActivityPage() {
   const [activity, setActivity] = useState<AgentActivityRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [filters, setFilters] = useState<FilterState>(() => {
+    // Note: URLSearchParams.getAll() always returns an array, even when no
+    // param was present (an empty array) -- `[] || fallback` would silently
+    // discard the fallback because `[]` is truthy in JS, so an explicit
+    // length check is required wherever "absent from the URL" should mean
+    // "use the default set," not "the user explicitly cleared it."
     const date = searchParams.get("date") || dayjs().format("YYYY-MM-DD");
     const search = searchParams.get("search") || "";
     const branchIds = searchParams.getAll("branch_id");
     const buckets = searchParams.getAll("bucket");
-    const agentIds = searchParams.getAll("agent_id");
+    const agentIds = searchParams.getAll("agent_ids");
     const agentType = (searchParams.get("agent_type") as FilterState["agentType"]) || "all";
     const companyIds = searchParams.getAll("company_id");
     const products = searchParams.getAll("product");
-    const actionTypes = (searchParams.getAll("action_type") as any[]) || ["call", "payment", "ptp", "field_visit"];
+    const rawActionTypes = searchParams.getAll("action_type") as FilterState["actionTypes"];
+    const actionTypes = rawActionTypes.length > 0 ? rawActionTypes : (["call", "payment", "ptp", "field_visit"] as FilterState["actionTypes"]);
     const dispositionCodeIds = searchParams.getAll("disposition_code_id");
-    const ptpStatuses = (searchParams.getAll("ptp_status") as any[]) || [];
+    const ptpStatuses = searchParams.getAll("ptp_status") as FilterState["ptpStatuses"];
 
     return { date, search, branchIds, buckets, agentIds, agentType, companyIds, products, actionTypes, dispositionCodeIds, ptpStatuses };
   });
@@ -47,11 +53,13 @@ export default function AgentActivityPage() {
   useEffect(() => {
     const loadOptions = async () => {
       try {
-        const [branchesRes, agentsRes, companiesRes, dispositionCodesRes] = await Promise.all([
+        const [branchesRes, agentsRes, companiesRes, dispositionCodesRes, bucketsRes, productsRes] = await Promise.all([
           api.get("/branches"),
           api.get("/employees"),
           api.get("/companies"),
-          api.get("/disposition-codes"),
+          api.get("/dispositions"),
+          api.get("/buckets"), // no company_id -- agency-wide distinct bucket labels
+          api.get("/products"), // no company_id -- agency-wide distinct product labels
         ]);
 
         const branches = branchesRes.data.branches || [];
@@ -59,9 +67,13 @@ export default function AgentActivityPage() {
           .filter((e: any) => e.is_active && (e.capabilities.includes("telecaller") || e.capabilities.includes("field_agent")))
           .map((e: any) => ({ id: e.id, full_name: e.full_name }));
         const companies = companiesRes.data.companies || [];
-        const dispositionCodes = dispositionCodesRes.data.dispositionCodes || [];
-        const buckets: string[] = [];
-        const products: string[] = [];
+        const dispositionCodes = dispositionCodesRes.data.disposition_codes || [];
+        const buckets: string[] = Array.from(
+          new Set((bucketsRes.data.buckets || []).map((b: any) => b.label as string)),
+        );
+        const products: string[] = Array.from(
+          new Set((productsRes.data.products || []).map((p: any) => p.raw_label as string)),
+        );
 
         setOptions({ branches, agents, buckets, companies, products, dispositionCodes });
       } catch (err) {
@@ -86,8 +98,13 @@ export default function AgentActivityPage() {
         if (filters.search) params.append("search", filters.search);
         filters.branchIds.forEach((id) => params.append("branch_id", id));
         filters.buckets.forEach((b) => params.append("bucket", b));
-        filters.agentIds.forEach((id) => params.append("agent_id", id));
+        filters.agentIds.forEach((id) => params.append("agent_ids", id));
         if (filters.agentType !== "all") params.append("agent_type", filters.agentType);
+        // Trigger multi-agent browse mode for reports.view callers with no explicit agent filter.
+        // Without this, backend falls into single-agent mode and returns only req.user's own activity.
+        if (filters.agentIds.length === 0 && filters.agentType === "all") {
+          params.append("browse", "all");
+        }
         filters.companyIds.forEach((id) => params.append("company_id", id));
         filters.products.forEach((p) => params.append("product", p));
         filters.actionTypes.forEach((a) => params.append("action_type", a));
@@ -131,8 +148,11 @@ export default function AgentActivityPage() {
       if (filters.search) params.append("search", filters.search);
       filters.branchIds.forEach((id) => params.append("branch_id", id));
       filters.buckets.forEach((b) => params.append("bucket", b));
-      filters.agentIds.forEach((id) => params.append("agent_id", id));
+      filters.agentIds.forEach((id) => params.append("agent_ids", id));
       if (filters.agentType !== "all") params.append("agent_type", filters.agentType);
+      if (filters.agentIds.length === 0 && filters.agentType === "all") {
+        params.append("browse", "all");
+      }
       filters.companyIds.forEach((id) => params.append("company_id", id));
       filters.products.forEach((p) => params.append("product", p));
       filters.actionTypes.forEach((a) => params.append("action_type", a));

@@ -23,6 +23,7 @@ export interface AgentActivityRow {
   remark: string | null;
   amount: string | null;
   detail: string | null;
+  disposition_description: string | null;
 }
 
 export interface AgentActivityResponse {

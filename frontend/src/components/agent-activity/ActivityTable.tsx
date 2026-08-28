@@ -109,6 +109,20 @@ export default function ActivityTable({
       ),
     },
     {
+      title: "Company",
+      dataIndex: "customer_company_name",
+      key: "customer_company_name",
+      width: 120,
+      render: (company: string) => company || "—",
+    },
+    {
+      title: "Product",
+      dataIndex: "customer_product",
+      key: "customer_product",
+      width: 120,
+      render: (product: string | null) => product || "—",
+    },
+    {
       title: "Branch",
       dataIndex: "customer_branch_name",
       key: "customer_branch_name",
@@ -212,7 +226,7 @@ export default function ActivityTable({
           onClick: () => onRowClick?.(record),
           style: { cursor: onRowClick ? "pointer" : "default" },
         })}
-        scroll={{ x: 1700 }}
+        scroll={{ x: 1940 }}
         size="small"
       />
     </div>

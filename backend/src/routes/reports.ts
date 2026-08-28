@@ -111,6 +111,9 @@ router.get(
         // "Today's Work" branch-manager drill-down: every agent under the
         // branch this caller manages, in one grouped query rather than N+1.
         scope: z.enum(["team"]).optional(),
+        // Admin/ops "browse all agents" mode — reports.view callers can see
+        // every agent they can scope to, without needing to name each one.
+        browse: z.enum(["all"]).optional(),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), // YYYY-MM-DD
         today: z.coerce.boolean().optional(),
         branch_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
@@ -129,8 +132,11 @@ router.get(
     let agentIds: string[];
     let agentNames: Map<string, string> | null = null;
 
-    // Multi-agent browse mode: scope=team or explicit agent_ids/agent_type
-    if (query.scope === "team" || query.agent_ids || query.agent_type) {
+    // Multi-agent browse mode: scope=team, explicit agent_ids/agent_type, or
+    // browse=all (admin/ops browsing every agent they can see with no name/type filter --
+    // without this branch, such a request falls into the single-agent "else" below and
+    // silently resolves to req.user's own activity instead of the whole scoped set).
+    if (query.scope === "team" || query.agent_ids || query.agent_type || query.browse === "all") {
       if (query.scope === "team" && req.user!.designation !== "branch_manager") {
         throw new HttpError(403, "Only a branch manager can view team activity");
       }
@@ -226,6 +232,7 @@ router.get(
         agent_ids: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
         agent_type: z.enum(["telecaller", "field_agent"]).optional(),
         scope: z.enum(["team"]).optional(),
+        browse: z.enum(["all"]).optional(),
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         today: z.coerce.boolean().optional(),
         branch_id: z.union([z.string().uuid(), z.array(z.string().uuid())]).optional(),
@@ -242,7 +249,7 @@ router.get(
     // Same agent resolution as JSON endpoint
     let agentIds: string[];
 
-    if (query.scope === "team" || query.agent_ids || query.agent_type) {
+    if (query.scope === "team" || query.agent_ids || query.agent_type || query.browse === "all") {
       if (query.scope === "team" && req.user!.designation !== "branch_manager") {
         throw new HttpError(403, "Only a branch manager can view team activity");
       }
@@ -285,32 +292,15 @@ router.get(
       agentIds = [targetAgentId];
     }
 
-    // Check row count before building workbook (cap at 25,000)
+    // Fetch activity data (no pagination for export). Cap the fetch itself at
+    // ROW_LIMIT so an oversized result never costs more than one bounded query --
+    // agentRecentActivity's COUNT(*) OVER() tells us the true total (respecting
+    // every filter below) whether or not it exceeds the cap, so a second,
+    // separately-built COUNT query (which previously ignored disposition/branch/
+    // bucket/company/product/ptpStatus/actionType/search and could disagree with
+    // what's actually exported) is unnecessary.
     const ROW_LIMIT = 25000;
-    const countResult = await pool.query<{ count: number }>(
-      `SELECT COUNT(*) as count FROM (
-        SELECT 1 FROM call_logs WHERE agent_id = ANY($1) AND created_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-        UNION ALL
-        SELECT 1 FROM payments WHERE collected_by_user_id = ANY($1) AND paid_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-        UNION ALL
-        SELECT 1 FROM ptps WHERE agent_id = ANY($1) AND created_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-        UNION ALL
-        SELECT 1 FROM field_visits WHERE agent_id = ANY($1) AND created_at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-      ) sub`,
-      [agentIds, query.date || new Date().toISOString().split("T")[0]],
-    );
-    const rowCount = parseInt(String(countResult.rows[0]?.count || "0"), 10);
-
-    if (rowCount > ROW_LIMIT) {
-      return res.status(400).json({
-        error: `Too many rows (${rowCount.toLocaleString()}) for one export — narrow your filters (date, branch, bucket, or agent) and try again.`,
-        row_count: rowCount,
-        limit: ROW_LIMIT,
-      });
-    }
-
-    // Fetch activity data (no pagination for export)
-    const activity = await agentRecentActivity(req.user!.agency_id, agentIds, 10000, {
+    const activity = await agentRecentActivity(req.user!.agency_id, agentIds, ROW_LIMIT, {
       date: query.date,
       today: query.today,
       dispositionCodeIds: toArray(query.disposition_code_id),
@@ -322,6 +312,15 @@ router.get(
       actionTypes: toArray(query.action_type) as ("call" | "payment" | "ptp" | "field_visit")[],
       search: query.search,
     });
+
+    const rowCount = (activity as any).total_count ?? activity.length;
+    if (rowCount > ROW_LIMIT) {
+      return res.status(400).json({
+        error: `Too many rows (${rowCount.toLocaleString()}) for one export — narrow your filters (date, branch, bucket, or agent) and try again.`,
+        row_count: rowCount,
+        limit: ROW_LIMIT,
+      });
+    }
 
     // Build Excel workbook
     const wb = new ExcelJS.Workbook();
@@ -386,7 +385,7 @@ router.get(
         row.customer_due_amount || "",
         row.amount || "",
         row.kind === "call" ? row.detail || "" : "",
-        row.kind === "call" ? "" : "",
+        row.kind === "call" ? row.disposition_description || "" : "",
         row.ptp_status ? ptpStatusLabel[row.ptp_status as keyof typeof ptpStatusLabel] : "",
         row.remark || "",
       ]);

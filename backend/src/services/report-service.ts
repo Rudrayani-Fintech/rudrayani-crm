@@ -2042,9 +2042,22 @@ export interface AgentActivityRow {
   id: string;
   at: string;
   agent_id: string;
+  agent_name: string;
+  agent_type: "telecaller" | "field_agent" | null;
   customer_id: string;
   customer_name: string;
   loan_number: string;
+  customer_branch_id: string | null;
+  customer_branch_name: string | null;
+  customer_bucket: string | null;
+  customer_company_id: string;
+  customer_company_name: string;
+  customer_mobile: string | null;
+  customer_product: string | null;
+  customer_pos: string | null;
+  customer_emi: string | null;
+  customer_due_amount: string | null;
+  ptp_status: "pending" | "kept" | "broken" | null;
   remark: string | null;
   amount: string | null;
   detail: string | null;
@@ -2089,11 +2102,18 @@ export async function agentRecentActivity(
 
   const branches = [
     `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at, cl.agent_id,
+             u.full_name AS agent_name, u.agent_type,
              c.id::text AS customer_id, c.customer_name, c.loan_number,
-             cl.remark, NULL::text AS amount, dc.action_code AS detail
+             c.branch_id AS customer_branch_id, b.name AS customer_branch_name,
+             c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
+             c.mobile_number AS customer_mobile, c.product AS customer_product,
+             c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
+             NULL, cl.remark, NULL::text AS amount, dc.action_code AS detail
         FROM call_logs cl
+        JOIN users u ON u.id = cl.agent_id
         JOIN customers c ON c.id = cl.customer_id
         JOIN companies co ON co.id = c.company_id
+        LEFT JOIN branches b ON b.id = c.branch_id
         LEFT JOIN disposition_codes dc ON dc.id = cl.disposition_code_id
        WHERE cl.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("cl.created_at")} ${dispositionClause})`,
   ];
@@ -2101,25 +2121,40 @@ export async function agentRecentActivity(
   if (!options.dispositionCodeId) {
     branches.push(
       `(SELECT 'payment', p.id::text, p.paid_at, p.collected_by_user_id,
+               u.full_name, u.agent_type,
                c.id::text, c.customer_name, c.loan_number,
-               NULL::text, p.amount::text, p.mode
+               c.branch_id, b.name, c.bucket, c.company_id, co.name,
+               c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
+               NULL, NULL::text, p.amount::text, p.mode
           FROM payments p
+          JOIN users u ON u.id = p.collected_by_user_id
           JOIN customers c ON c.id = p.customer_id
           JOIN companies co ON co.id = c.company_id
+          LEFT JOIN branches b ON b.id = c.branch_id
          WHERE p.collected_by_user_id = ANY($1) AND co.agency_id = $2 ${todayFor("p.paid_at")})`,
       `(SELECT 'ptp', pt.id::text, pt.created_at, pt.agent_id,
+               u.full_name, u.agent_type,
                c.id::text, c.customer_name, c.loan_number,
-               NULL::text, pt.amount::text, pt.promised_date::text
+               c.branch_id, b.name, c.bucket, c.company_id, co.name,
+               c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
+               pt.status, NULL::text, pt.amount::text, pt.promised_date::text
           FROM ptps pt
+          JOIN users u ON u.id = pt.agent_id
           JOIN customers c ON c.id = pt.customer_id
           JOIN companies co ON co.id = c.company_id
+          LEFT JOIN branches b ON b.id = c.branch_id
          WHERE pt.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("pt.created_at")})`,
       `(SELECT 'field_visit', fv.id::text, fv.created_at, fv.agent_id,
+               u.full_name, u.agent_type,
                c.id::text, c.customer_name, c.loan_number,
-               fv.remark, NULL::text, NULL::text
+               c.branch_id, b.name, c.bucket, c.company_id, co.name,
+               c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
+               NULL, fv.remark, NULL::text, NULL::text
           FROM field_visits fv
+          JOIN users u ON u.id = fv.agent_id
           JOIN customers c ON c.id = fv.customer_id
           JOIN companies co ON co.id = c.company_id
+          LEFT JOIN branches b ON b.id = c.branch_id
          WHERE fv.agent_id = ANY($1) AND co.agency_id = $2 ${todayFor("fv.created_at")})`,
     );
   }

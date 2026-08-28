@@ -41,6 +41,7 @@ export default function AgentActivityPage() {
   const pageSize = 50;
 
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Load lookup options
   useEffect(() => {
@@ -121,6 +122,7 @@ export default function AgentActivityPage() {
   };
 
   const handleExport = async () => {
+    setExporting(true);
     try {
       const params = new URLSearchParams({
         date: filters.date,
@@ -152,6 +154,8 @@ export default function AgentActivityPage() {
       message.success("Export downloaded successfully");
     } catch (err) {
       message.error(errorMessage(err));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -172,7 +176,8 @@ export default function AgentActivityPage() {
             type="primary"
             icon={<DownloadOutlined />}
             onClick={handleExport}
-            loading={loading}
+            loading={exporting}
+            disabled={exporting}
           >
             Export to Excel
           </Button>

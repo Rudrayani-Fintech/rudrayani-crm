@@ -106,18 +106,18 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Review Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Review Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_operations_manager)
-     VALUES ($1, 'Review Ops', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_operations_manager, designation)
+     VALUES ($1, 'Review Ops', $2, $3, true, 'operations_manager')`,
     [agencyId, OPS_PHONE, hash],
   );
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
-     VALUES ($1, 'Review Telecaller', $2, $3, true, $4)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id, designation)
+     VALUES ($1, 'Review Telecaller', $2, $3, true, $4, 'telecaller')`,
     [agencyId, TELECALLER_PHONE, hash, teamId],
   );
   await pool.query(

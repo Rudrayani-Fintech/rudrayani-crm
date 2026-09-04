@@ -29,8 +29,8 @@ beforeAll(async () => {
   agencyId = agency.rows[0].id;
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Org Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Org Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   adminToken = await login(ADMIN_PHONE);
@@ -246,8 +246,8 @@ describe("Org structure", () => {
       otherAgencyId = otherAgency.rows[0].id;
       const hash = await hashPassword(PASSWORD);
       const otherUser = await pool.query(
-        `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-         VALUES ($1, 'Other Admin', '7199999999', $2, true) RETURNING id`,
+        `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Other Admin', '7199999999', $2, true, 'agency_admin') RETURNING id`,
         [otherAgencyId, hash],
       );
       const otherAgencyManagerId = otherUser.rows[0].id;

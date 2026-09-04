@@ -57,8 +57,8 @@ beforeAll(async () => {
   agencyId = agency.rows[0].id;
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Import Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Import Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   const company = await pool.query(
@@ -314,8 +314,8 @@ describe("Products & buckets derivation (brief §4)", () => {
 
   it("an agent (customers.view only) cannot run imports", async () => {
     await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent)
-       VALUES ($1, 'No Import Rights', '7200000002', $2, true)`,
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'No Import Rights', '7200000002', $2, true, 'field_agent')`,
       [agencyId, await hashPassword(PASSWORD)],
     );
     const login = await request(app)

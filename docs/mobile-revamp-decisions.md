@@ -624,3 +624,40 @@ against Phase 12.
 Phase 1 was merged to local `main` (`22bcb27`), not pushed to `origin`, same policy as Phase 0.
 All four originally-open questions (O3–O6) are now answered; O5 and O6 still block their
 respective phases (11, 12) until those phases are implemented.
+
+## Phase 2 and 3 execution (2026-09-04)
+
+Both implemented in one worktree (`worktree-phase2-3-password-reset-worklist`) for turnaround,
+committed separately, merged to local `main` as one merge (`47e691d`) — not pushed to `origin`,
+same policy as Phase 0/1.
+
+**Phase 2** (password-reset request queue, `a77dc8f`): implements §4.6. One deviation from the
+spec's literal text: §4.6 gates `GET /password-reset-requests` and its resolve endpoint on
+`employees.update`, but `branch_manager` doesn't hold that permission by design (it gets
+`employees.view`/`create`, deliberately not `update`/`deactivate`) — so a branch manager would
+403 before ever reaching the branch-scoping logic, directly contradicting Phase 2's own
+acceptance criterion. Used `employees.view` instead: the queue itself is read/triage-only, and
+the actually-sensitive action (changing a password) stays on the unchanged,
+`employees.update`-gated `POST /employees/:id/reset-password` (Phase 1). Verified: 6 new test
+cases, all pass.
+
+**Phase 3** (worklist pagination/worked-state, `debae2b`): implements §4.1 exactly. Found and
+fixed the same "$1 unreferenced, Postgres can't infer its type" bug the file's own existing
+regression test already documents for `filter-options` — it reappeared in the new `COUNT(*)`
+query (no `is_primary_for_me` column to anchor `$1` the way the main SELECT does), fixed with a
+harmless `$1::uuid IS NOT NULL` clause. Verified: 5 new test cases (pagination boundaries,
+worked_today toggling + bottom-sort, collected_today scoping, server-side branch filtering), all
+pass; the 6 pre-existing tests in the same file still pass (no regression).
+
+Also renumbered `password-reset-requests.test.ts`'s phone-number fixtures after discovering they
+collided with three other already-existing test files (`users.phone` is globally unique across
+the whole suite, which runs against one real shared Postgres DB, not a per-file fixture) —
+picked an unused `798xxxxxxx` prefix. Worth remembering when writing any new test file with
+phone-number fixtures: grep the existing range first.
+
+Full backend suite after both phases: same 23 of 34 files failing on the pre-existing, unrelated
+`users.designation` NOT NULL fixture gap as every prior phase's baseline (one more file than
+before — Phase 2 added its own test file — no new failures), 111 passed (up from 100 after
+Phase 1), 1 pre-existing unrelated failure (the dormant OTP flow, `ALLOW_OTP_ECHO` off by
+design). `tsc --noEmit`: back to the same 2 pre-existing unrelated errors after fixing 3 new
+ones in the new test file's own assertions.

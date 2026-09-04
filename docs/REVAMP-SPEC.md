@@ -356,10 +356,16 @@ Endpoints:
   OTP-request convention, so the endpoint cannot be used to enumerate accounts.
 - `GET /auth/password-reset-request?phone=` — unauthenticated status check for S2. Return only
   `{ status }`, never user details.
-- `GET /password-reset-requests` — authenticated, `employees.update`, scoped by
+- `GET /password-reset-requests` — authenticated, **`employees.view`** (see note), scoped by
   `resolveBranchClamp()`.
-- `POST /password-reset-requests/:id/resolve` — marks resolved. The actual reset stays
-  `POST /employees/:id/reset-password`.
+- `POST /password-reset-requests/:id/resolve` — marks resolved, **`employees.view`**. The actual
+  reset stays `POST /employees/:id/reset-password` (still `employees.update`-gated).
+
+**RESOLVED, implemented:** originally specified as `employees.update`, changed to `employees.view`
+— `branch_manager` doesn't hold `employees.update` (deliberately, by design), so a branch manager
+would 403 before ever reaching the branch-scoping logic, contradicting this phase's own acceptance
+criterion. The queue itself is read/triage-only; the sensitive action (changing a password) stays
+gated on the unchanged `employees.update`-only reset endpoint.
 
 **Rate-limit the unauthenticated POST** with the existing `otpRequestRateLimiter` pattern.
 

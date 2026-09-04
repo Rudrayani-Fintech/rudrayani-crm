@@ -112,5 +112,5 @@ Everything else: `branches`, `teams`, `companies`, `company_field_settings`,
 `import_review_items`, `allocation_logs`, `bucket_movements`, `buckets`,
 `targets`, `reminders`, `attachments`, `field_visits`,
 `reallocation_requests`, `correction_requests`, `dashboard_preferences`,
-`attendance`, `location_pings`, `refresh_tokens`, `otp_requests`, and
-every user other than phone `9999999999`.
+`attendance`, `location_pings`, `refresh_tokens`, `otp_requests`,
+`audit_logs`, and every user other than phone `9999999999`.

@@ -130,6 +130,10 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
         );
         return;
       }
+      // X2: after location permission is granted and before tracking starts,
+      // so the OEM battery-optimization prompt (if shown) doesn't compete
+      // with the location-permission prompt above.
+      await TrackingService.requestIgnoreBatteryOptimization();
       // No fix (fresh or cached) is no longer fatal -- the server accepts a
       // punch-in with coordinates omitted rather than blocking the agent
       // indoors or on a cold GPS start.

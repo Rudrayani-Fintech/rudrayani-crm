@@ -367,9 +367,17 @@ Endpoints:
 
 - In `login()`, change the revoke to
   `AND device_id IS NOT NULL AND device_id IS DISTINCT FROM $2` so web (NULL) sessions survive.
-- In `POST /employees/:id/reset-password`, stop revoking every refresh token. **DECIDE:** either
-  revoke nothing (the new password alone is sufficient) or revoke only tokens whose `device_id`
-  is NULL. Prefer the former for simplicity.
+- In `POST /employees/:id/reset-password`, stop revoking every refresh token. **RESOLVED (O4,
+  owner, 2026-09-04):** revoke only tokens whose `device_id` is NULL (web sessions) — a mobile
+  session survives an admin reset.
+- **Found during Phase 1 verification, not originally listed here:** `refresh()`'s replay defense
+  (a revoked token being presented again revokes *every* session for the user) doesn't distinguish
+  a genuinely-suspicious rotated-token replay from a client presenting a token that was revoked for
+  an ordinary reason (this reset, a device login superseding another, deactivation, logout, a
+  self-service password change). Without fixing that too, the web client's very next ordinary
+  refresh after this reset would cascade-revoke the mobile session the reset was supposed to
+  protect — defeating O4 in practice. Added `refresh_tokens.revoked_reason`; every revoke site
+  tags why, and only `'rotated'` triggers the cascade.
 
 ### 4.8 Permission changes
 
@@ -581,10 +589,13 @@ this class of bug must not recur.
 **C**
 1. In `login()`, change the device revoke to
    `AND device_id IS NOT NULL AND device_id IS DISTINCT FROM $2`.
-2. In `POST /employees/:id/reset-password`, remove the blanket
-   `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1` (§4.7). **DECIDE** per §4.7.
+2. In `POST /employees/:id/reset-password`, replace the blanket
+   `UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1` with the O4-resolved,
+   web-only-scoped revoke (§4.7).
 3. Leave the deactivation revoke (line ~959) untouched — deactivating a user *should* kill
    every session.
+4. Add `refresh_tokens.revoked_reason` and tag every revoke site; scope `refresh()`'s replay
+   cascade to `revoked_reason = 'rotated'` only (§4.7 note).
 
 **A** Log in on web, then on mobile as the same user. The web session still works: a page
 refresh succeeds and no "Session revoked" error appears. Then reset that user's password as an
@@ -919,10 +930,11 @@ Answer before the phase that depends on each.
 
 O1 and O2 were answered on 2026-09-04 and are now S4 and S6 in §2.6. O3 was answered
 2026-09-04 and implemented in Phase 0 (migration `1789200000000_inability-to-pay-oc-fv.sql`).
-Three questions remain.
+O4 was answered 2026-09-04 and implemented in Phase 1 (§4.7). O5 and O6 were answered
+2026-09-04; both still block their respective phase since neither has been implemented yet.
 
-| # | Question | Blocks |
-|---|---|---|
-| O4 | §4.7 DECIDE — should an admin password reset revoke *nothing*, or only web (NULL-device) tokens? | Phase 1 |
-| O5 | When a customer is contacted by phone *and* visited on the same day, is that one interaction record or two? Affects whether "customers contacted" double-counts. | Phase 11 |
-| O6 | Will commissions ever be computed from collection numbers? If yes, N4's "whoever recorded it" attribution needs revisiting. | Phase 12 |
+| # | Question | Answer | Blocks |
+|---|---|---|---|
+| O4 | §4.7 DECIDE — should an admin password reset revoke *nothing*, or only web (NULL-device) tokens? | Only web (NULL-device) tokens — **implemented**, Phase 1. | Phase 1 (done) |
+| O5 | When a customer is contacted by phone *and* visited on the same day, is that one interaction record or two? | **One** interaction record; when both a call and a visit happen the same day, the **latest one takes precedence** (overwrites/supersedes the earlier record for same-day dedup purposes, per "customers contacted" not double-counting). | Phase 11 |
+| O6 | Will commissions ever be computed from collection numbers? | **No**, not as of 2026-09-04. N4's "whoever recorded it" attribution stands as-is; revisit if this changes. | Phase 12 |

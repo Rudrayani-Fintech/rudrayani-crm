@@ -592,4 +592,35 @@ lists `Inability to Pay` as OC-only, so a fresh agency onboarded later would sil
 decision unless the sheet is also updated — flagged, not fixed, since editing the binary sheet
 programmatically carries real corruption risk for a single-cell change.
 
-Three questions remain open (O4–O6 in the spec); each blocks a specific later phase.
+Phase 0 was merged to local `main` (`5b1768a`), not pushed to `origin` — new project policy
+(2026-09-04): work merges to local `main` and its worktree is deleted per phase; nothing pushes to
+`origin` until a complete, verified feature is ready to go live (pushing `main` deploys to
+production via Railway).
+
+### D53 — O4 answered: admin password reset revokes only web sessions (2026-09-04)
+**Decision.** §4.7's DECIDE is resolved: an admin password reset revokes only the target's web
+sessions (`device_id IS NULL`); a live mobile session is untouched. Implemented in Phase 1
+(migration `1789300000000_refresh-token-revoked-reason.sql`, `auth-service.ts`,
+`employees.ts`). Verification surfaced a second bug not in the original defect list: `refresh()`'s
+replay-abuse defense revoked every session for a user whenever *any* revoked token was presented
+again, regardless of why it was revoked — so the web client's ordinary next refresh after this
+reset would have cascaded into revoking the mobile session the reset was meant to protect,
+silently undoing D53 in practice. Fixed by tagging every revoke site with why
+(`refresh_tokens.revoked_reason`) and scoping the cascade to `'rotated'` (single-use-token replay)
+only. See [[rudrayani-crm-project-state]] for the general lesson about token-replay defenses
+conflating unrelated revoke sources.
+
+### D54 — O5 answered: call + visit same day is one record, latest wins (2026-09-04)
+**Decision.** When a customer is contacted by phone *and* visited on the same day, that's **one**
+interaction record for "customers contacted" purposes, not two — the latest of the two
+(call-then-visit or visit-then-call) takes precedence. Affects Phase 11 (interaction/ledger
+counting); not yet implemented.
+
+### D55 — O6 answered: no commission-based attribution, for now (2026-09-04)
+**Decision.** Commissions will not be computed from collection numbers as of 2026-09-04. N4's
+"whoever recorded it" payment attribution rule stands unchanged. Revisit if this changes — flagged
+against Phase 12.
+
+Phase 1 was merged to local `main` (`22bcb27`), not pushed to `origin`, same policy as Phase 0.
+All four originally-open questions (O3–O6) are now answered; O5 and O6 still block their
+respective phases (11, 12) until those phases are implemented.

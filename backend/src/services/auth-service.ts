@@ -245,3 +245,45 @@ export async function resetPasswordWithOtp(
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
+
+// Phase 2 (A4, S1-S3): mobile password recovery is a request to an admin,
+// not self-service -- the user can't log in to trigger anything themselves,
+// so both of these are unauthenticated and, like the OTP flow, must behave
+// identically whether or not the phone exists (no account-enumeration
+// signal, matching requestPasswordOtp's convention above).
+export async function submitPasswordResetRequest(phone: string, message: string): Promise<void> {
+  const { rows } = await pool.query<UserRow>(
+    "SELECT id, agency_id FROM users WHERE phone = $1 AND is_active = true",
+    [phone],
+  );
+  const user = rows[0];
+  if (!user) return;
+  // S3: one open request per user -- a second submission collapses onto the
+  // existing pending row (relies on uq_prr_open, the partial unique index
+  // on user_id WHERE status = 'pending') instead of creating a duplicate.
+  await pool.query(
+    `INSERT INTO password_reset_requests (agency_id, user_id, message, status)
+     VALUES ($1, $2, $3, 'pending')
+     ON CONFLICT (user_id) WHERE status = 'pending'
+       DO UPDATE SET message = EXCLUDED.message, created_at = now()`,
+    [user.agency_id, user.id, message],
+  );
+}
+
+// S2: the mobile login screen polls this to show "Request sent -- waiting
+// on your manager". 'none' covers both "no account" and "account exists,
+// no request yet" identically -- same no-enumeration guarantee as above.
+export async function passwordResetRequestStatus(
+  phone: string,
+): Promise<"none" | "pending" | "resolved" | "rejected"> {
+  const { rows } = await pool.query<{ status: string }>(
+    `SELECT prr.status
+       FROM password_reset_requests prr
+       JOIN users u ON u.id = prr.user_id
+      WHERE u.phone = $1
+      ORDER BY prr.created_at DESC
+      LIMIT 1`,
+    [phone],
+  );
+  return (rows[0]?.status as "pending" | "resolved" | "rejected" | undefined) ?? "none";
+}

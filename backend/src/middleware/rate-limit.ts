@@ -26,3 +26,14 @@ export const otpRequestRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many OTP requests from this network. Try again later." },
 });
+
+// Same shape as otpRequestRateLimiter -- unauthenticated, phone-targeted,
+// and the reset request itself alerts a human, so it doesn't need OTP's
+// tighter SMS-cost pressure, but still needs its own bucket (Phase 2, A4).
+export const passwordResetRequestRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many password reset requests from this network. Try again later." },
+});

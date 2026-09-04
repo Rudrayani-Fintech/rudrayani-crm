@@ -11,6 +11,7 @@ const PASSWORD = "Secret@123";
 const ADMIN_PHONE = "7000000001";
 const AGENT_PHONE = "7000000002";
 const LOCKOUT_PHONE = "7000000003";
+const RESET_TARGET_PHONE = "7000000004";
 
 let agencyId: string;
 
@@ -21,26 +22,36 @@ beforeAll(async () => {
   agencyId = agency.rows[0].id;
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Test Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Test Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, 'Test Agent', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'Test Agent', $2, $3, true, 'field_agent')`,
     [agencyId, AGENT_PHONE, hash],
   );
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller)
-     VALUES ($1, 'Lockout Target', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, designation)
+     VALUES ($1, 'Lockout Target', $2, $3, true, 'telecaller')`,
     [agencyId, LOCKOUT_PHONE, hash],
+  );
+  await pool.query(
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'Reset Target', $2, $3, true, 'field_agent')`,
+    [agencyId, RESET_TARGET_PHONE, hash],
   );
 });
 
 afterAll(async () => {
+  // The reset-password test records an audit log entry (actor_id -> the
+  // admin test user); audit_logs.actor_id has no ON DELETE CASCADE, so it
+  // must go before the users delete below or this agency's users become
+  // undeletable.
+  await pool.query("DELETE FROM audit_logs WHERE agency_id = $1", [agencyId]);
   await pool.query(
-    "DELETE FROM users WHERE phone IN ($1, $2, $3)",
-    [ADMIN_PHONE, AGENT_PHONE, LOCKOUT_PHONE],
+    "DELETE FROM users WHERE phone IN ($1, $2, $3, $4)",
+    [ADMIN_PHONE, AGENT_PHONE, LOCKOUT_PHONE, RESET_TARGET_PHONE],
   );
   await pool.query("DELETE FROM agencies WHERE id = $1", [agencyId]);
   await pool.end();
@@ -102,6 +113,34 @@ describe("POST /api/auth/login", () => {
       .post("/api/auth/refresh")
       .send({ refresh_token: first.body.refresh_token });
     expect(res.status).toBe(401);
+  });
+
+  it("mobile login preserves an existing web session (A1/X5)", async () => {
+    // Web never sends device_id. Before the fix, `device_id IS DISTINCT
+    // FROM $2` revoked this NULL-device web session on the very next mobile
+    // login for the same user (NULL IS DISTINCT FROM 'abc' is true in SQL),
+    // and the web tab's subsequent refresh() then looked like a replayed
+    // token and revoked every session for the user -- including the mobile
+    // one that had just logged in. Neither should happen.
+    const web = await request(app)
+      .post("/api/auth/login")
+      .send({ phone: RESET_TARGET_PHONE, password: PASSWORD });
+    expect(web.status).toBe(200);
+
+    const mobile = await request(app)
+      .post("/api/auth/login")
+      .send({ phone: RESET_TARGET_PHONE, password: PASSWORD, device_id: "mobile-device-X1" });
+    expect(mobile.status).toBe(200);
+
+    const webRefresh = await request(app)
+      .post("/api/auth/refresh")
+      .send({ refresh_token: web.body.refresh_token });
+    expect(webRefresh.status).toBe(200);
+
+    const mobileRefresh = await request(app)
+      .post("/api/auth/refresh")
+      .send({ refresh_token: mobile.body.refresh_token });
+    expect(mobileRefresh.status).toBe(200);
   });
 });
 
@@ -197,5 +236,54 @@ describe("OTP password reset", () => {
       .send({ phone: AGENT_PHONE, otp: "000000", new_password: "Whatever@123" });
     // 400 either way (incorrect OTP), never a success with a guessed code
     expect(bad.status).toBe(400);
+  });
+});
+
+describe("POST /api/employees/:id/reset-password", () => {
+  it("revokes the target's web session but leaves an active mobile session untouched (A5/O4)", async () => {
+    const target = await pool.query("SELECT id FROM users WHERE phone = $1", [
+      RESET_TARGET_PHONE,
+    ]);
+    const targetId = target.rows[0].id;
+
+    const web = await request(app)
+      .post("/api/auth/login")
+      .send({ phone: RESET_TARGET_PHONE, password: PASSWORD });
+    expect(web.status).toBe(200);
+
+    const mobile = await request(app)
+      .post("/api/auth/login")
+      .send({ phone: RESET_TARGET_PHONE, password: PASSWORD, device_id: "reset-test-device" });
+    expect(mobile.status).toBe(200);
+
+    const adminLogin = await request(app)
+      .post("/api/auth/login")
+      .send({ phone: ADMIN_PHONE, password: PASSWORD });
+    const adminToken = adminLogin.body.access_token;
+
+    // A4: this reset exists for the mobile-forgot-password flow -- the
+    // point is the requester's live mobile session survives it. O4: web
+    // sessions are revoked (device_id IS NULL), mobile sessions are not.
+    const reset = await request(app)
+      .post(`/api/employees/${targetId}/reset-password`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ new_password: "BrandNew@789" });
+    expect(reset.status).toBe(200);
+
+    const webRefresh = await request(app)
+      .post("/api/auth/refresh")
+      .send({ refresh_token: web.body.refresh_token });
+    expect(webRefresh.status).toBe(401);
+
+    // Not just "the mobile token still passes its own check" -- the whole
+    // point of tagging revokes with revoked_reason is that the web client's
+    // ordinary refresh attempt above, using a token that was correctly
+    // revoked by the reset, must not cascade into revoking the mobile
+    // session too (see refresh()'s "replay" branch). This assertion is
+    // exactly what would fail if that cascade fired.
+    const mobileRefresh = await request(app)
+      .post("/api/auth/refresh")
+      .send({ refresh_token: mobile.body.refresh_token });
+    expect(mobileRefresh.status).toBe(200);
   });
 });

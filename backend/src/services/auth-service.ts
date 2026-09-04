@@ -70,11 +70,20 @@ export async function login(phone: string, password: string, deviceId?: string) 
   }
 
   // Device binding (build brief Section 10): a login carrying a device_id
-  // becomes the single active device — sessions on other devices are revoked.
+  // becomes the single active device — sessions on OTHER devices are
+  // revoked. A web session never supplies a device_id (device_id IS NULL),
+  // so it must never be caught by this (X5 / A1): `NULL IS DISTINCT FROM
+  // 'abc'` is true in SQL, so the original `device_id IS DISTINCT FROM $2`
+  // revoked the web session on every mobile login, which then made the
+  // web tab's next refresh() look like a replayed token and revoke every
+  // session for the user (see the "revoked_at" branch below). Requiring
+  // device_id IS NOT NULL keeps this scoped to superseding another mobile
+  // device, never a web session.
   if (deviceId) {
     await pool.query(
-      `UPDATE refresh_tokens SET revoked_at = now()
-       WHERE user_id = $1 AND revoked_at IS NULL AND device_id IS DISTINCT FROM $2`,
+      `UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'device_superseded'
+       WHERE user_id = $1 AND revoked_at IS NULL
+         AND device_id IS NOT NULL AND device_id IS DISTINCT FROM $2`,
       [user.id, deviceId],
     );
     await pool.query(
@@ -106,17 +115,29 @@ export async function refresh(refreshToken: string) {
   if (!row) throw new HttpError(401, "Invalid or expired refresh token");
 
   if (row.revoked_at) {
-    // Refresh tokens are single-use (rotated below on every successful
-    // refresh) -- a revoked token being presented again means either a
-    // client bug or, more likely, a stolen-but-since-rotated token being
-    // replayed. Either way, don't just 401 this one request: revoke every
-    // active session for the user so a leaked token can't keep riding
-    // along after the legitimate client has already moved to the next one.
-    logger.warn({ userId: row.user_id }, "Revoked refresh token reused -- revoking all sessions for user");
-    await pool.query(
-      "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
-      [row.user_id],
-    );
+    if (row.revoked_reason === "rotated" || !row.revoked_reason) {
+      // Refresh tokens are single-use (rotated below on every successful
+      // refresh) -- a *rotated* token being presented again means either a
+      // client bug or, more likely, a stolen-but-since-rotated token being
+      // replayed. Don't just 401 this one request: revoke every active
+      // session for the user so a leaked token can't keep riding along
+      // after the legitimate client has already moved to the next one.
+      // A NULL reason means an older revoke predates this column and is
+      // treated the same conservative way.
+      logger.warn({ userId: row.user_id }, "Revoked refresh token reused -- revoking all sessions for user");
+      await pool.query(
+        "UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'rotated' WHERE user_id = $1 AND revoked_at IS NULL",
+        [row.user_id],
+      );
+    }
+    // Any other reason (device_superseded, admin_reset, deactivated,
+    // self_password_reset, logout) is an intentional, out-of-band session
+    // end -- the client just hasn't been told yet. Presenting that token
+    // again isn't suspicious, so it gets a plain 401 with no cascade. Not
+    // cascading here is exactly what makes A5/O4 hold up in practice: an
+    // admin password reset that revoked only the web session must not be
+    // undone by the web client's next ordinary (and entirely expected)
+    // refresh attempt.
     throw new HttpError(401, "Session revoked -- please log in again");
   }
 
@@ -130,7 +151,10 @@ export async function refresh(refreshToken: string) {
   }
 
   // Rotate: the presented token is single-use.
-  await pool.query("UPDATE refresh_tokens SET revoked_at = now() WHERE id = $1", [row.rt_id]);
+  await pool.query(
+    "UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'rotated' WHERE id = $1",
+    [row.rt_id],
+  );
 
   const user = row as UserRow;
   const accessToken = signAccessToken(user);
@@ -139,9 +163,10 @@ export async function refresh(refreshToken: string) {
 }
 
 export async function logout(refreshToken: string): Promise<void> {
-  await pool.query("UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1", [
-    sha256(refreshToken),
-  ]);
+  await pool.query(
+    "UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'logout' WHERE token_hash = $1",
+    [sha256(refreshToken)],
+  );
 }
 
 export async function requestPasswordOtp(phone: string): Promise<{ devOtp?: string }> {
@@ -212,11 +237,53 @@ export async function resetPasswordWithOtp(
   );
   // Password changed: kill every existing session.
   await pool.query(
-    "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+    "UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'self_password_reset' WHERE user_id = $1 AND revoked_at IS NULL",
     [pending.user_id],
   );
 }
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
+}
+
+// Phase 2 (A4, S1-S3): mobile password recovery is a request to an admin,
+// not self-service -- the user can't log in to trigger anything themselves,
+// so both of these are unauthenticated and, like the OTP flow, must behave
+// identically whether or not the phone exists (no account-enumeration
+// signal, matching requestPasswordOtp's convention above).
+export async function submitPasswordResetRequest(phone: string, message: string): Promise<void> {
+  const { rows } = await pool.query<UserRow>(
+    "SELECT id, agency_id FROM users WHERE phone = $1 AND is_active = true",
+    [phone],
+  );
+  const user = rows[0];
+  if (!user) return;
+  // S3: one open request per user -- a second submission collapses onto the
+  // existing pending row (relies on uq_prr_open, the partial unique index
+  // on user_id WHERE status = 'pending') instead of creating a duplicate.
+  await pool.query(
+    `INSERT INTO password_reset_requests (agency_id, user_id, message, status)
+     VALUES ($1, $2, $3, 'pending')
+     ON CONFLICT (user_id) WHERE status = 'pending'
+       DO UPDATE SET message = EXCLUDED.message, created_at = now()`,
+    [user.agency_id, user.id, message],
+  );
+}
+
+// S2: the mobile login screen polls this to show "Request sent -- waiting
+// on your manager". 'none' covers both "no account" and "account exists,
+// no request yet" identically -- same no-enumeration guarantee as above.
+export async function passwordResetRequestStatus(
+  phone: string,
+): Promise<"none" | "pending" | "resolved" | "rejected"> {
+  const { rows } = await pool.query<{ status: string }>(
+    `SELECT prr.status
+       FROM password_reset_requests prr
+       JOIN users u ON u.id = prr.user_id
+      WHERE u.phone = $1
+      ORDER BY prr.created_at DESC
+      LIMIT 1`,
+    [phone],
+  );
+  return (rows[0]?.status as "pending" | "resolved" | "rejected" | undefined) ?? "none";
 }

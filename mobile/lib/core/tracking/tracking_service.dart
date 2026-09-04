@@ -50,6 +50,21 @@ class TrackingService {
   /// geolocator directly -- kept consistent with the rest of this class.
   static Future<void> openAppSettings() => Geolocator.openAppSettings();
 
+  /// X2: without this, MIUI/ColorOS/FuntouchOS/One UI throttle or kill the
+  /// tracking foreground service in the background. Best-effort -- the OS
+  /// dialog can be dismissed, and older/other OEMs may not show it at all,
+  /// so this never blocks punch-in on the outcome.
+  static Future<void> requestIgnoreBatteryOptimization() async {
+    try {
+      if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      }
+    } catch (_) {
+      // Not fatal to punch-in -- tracking still runs, just less reliably
+      // backgrounded on OEMs that aggressively throttle it.
+    }
+  }
+
   /// Null means no fix could be obtained at all (fresh or cached) -- callers
   /// (punch-in/out) should proceed without coordinates rather than block,
   /// matching field_visit_screen.dart's existing fallback pattern. Without

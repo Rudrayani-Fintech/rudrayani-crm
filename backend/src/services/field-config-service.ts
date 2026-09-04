@@ -48,6 +48,10 @@ const DEFAULT_REQUIRED_CORE_FIELDS = [
   "pos",
   "emi",
   "agent_phone",
+  // Phase 5 (N1, N2, §4.3): address is now a real column, and is required
+  // at the import column-mapping step -- a lender file with no address
+  // column is rejected at import (loud, intentional).
+  "address",
 ];
 
 /**
@@ -71,7 +75,7 @@ const CORE_FIELD_DEFINITIONS_SQL = `(VALUES
   ('emi',           'EMI Amount',                   'emi',           'numeric',  true,  7),
   ('emi_due_date',  'EMI Due Date',                 'due_date',      'date',     true,  8),
   ('agent_phone',   'Agent Phone',                  NULL,            'resolver', true,  9),
-  ('address',       'Address',                      NULL,            'text',     false, 10)
+  ('address',       'Address',                      'address',       'text',     true,  10)
 ) AS f(field_key, label, storage_column, field_type, is_core, sort_order)`;
 
 /**

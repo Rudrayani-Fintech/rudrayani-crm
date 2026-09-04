@@ -138,7 +138,7 @@ router.get(
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
-              c.next_action_date, c.dpd,
+              c.next_action_date, c.dpd, c.address,
               co.name AS company_name,
               COALESCE(b.name, NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name,
               (c.assigned_agent_id = $1) AS is_primary_for_me,
@@ -277,7 +277,7 @@ router.get(
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
-              c.next_action_date, c.dpd,
+              c.next_action_date, c.dpd, c.address,
               co.name AS company_name,
               COALESCE(b.name, NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name,
               (c.assigned_agent_id = $1) AS is_primary_for_me,

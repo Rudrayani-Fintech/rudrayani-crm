@@ -87,7 +87,7 @@ afterAll(async () => {
 });
 
 describe("agency master catalog (system_field_definitions)", () => {
-  it("self-seeds the 10 core fields + address on first access, in order", async () => {
+  it("self-seeds the 11 core fields (address included, Phase 5) on first access, in order", async () => {
     const res = await request(app)
       .get("/api/field-config/definitions")
       .set("Authorization", `Bearer ${adminToken}`);
@@ -107,12 +107,17 @@ describe("agency master catalog (system_field_definitions)", () => {
       "address",
     ]);
     const core = res.body.definitions.filter((d: { is_core: boolean }) => d.is_core);
-    expect(core).toHaveLength(10);
+    expect(core).toHaveLength(11);
     const agentPhone = res.body.definitions.find((d: { field_key: string }) => d.field_key === "agent_phone");
     expect(agentPhone.field_type).toBe("resolver");
     expect(agentPhone.storage_column).toBeNull();
     const emiDueDate = res.body.definitions.find((d: { field_key: string }) => d.field_key === "emi_due_date");
     expect(emiDueDate.storage_column).toBe("due_date");
+    // Phase 5 (N1, N2, §4.3): address is now a real column and core, not a
+    // mappable-but-optional custom field.
+    const address = res.body.definitions.find((d: { field_key: string }) => d.field_key === "address");
+    expect(address.storage_column).toBe("address");
+    expect(address.is_core).toBe(true);
   });
 
   it("an agency admin can add a custom field to the catalog", async () => {
@@ -187,15 +192,15 @@ describe("per-company catalog resolution (company_field_settings)", () => {
       "pos",
       "emi",
       "agent_phone",
+      // Phase 5 (N1, N2, §4.3): address is now core and required, same
+      // fallback behavior as every other field in this list.
+      "address",
     ]) {
       expect(byKey[key].is_enabled, `${key} enabled`).toBe(true);
       expect(byKey[key].is_required, `${key} required`).toBe(true);
     }
     expect(byKey.emi_due_date.is_enabled).toBe(true);
     expect(byKey.emi_due_date.is_required).toBe(false);
-    // address is non-core and this company was never explicitly seeded --
-    // defaults to disabled until an admin opts it in.
-    expect(byKey.address.is_enabled).toBe(false);
   });
 
   it("a company created via POST /companies gets explicit all-enabled settings", async () => {
@@ -283,6 +288,9 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
     "EMI Amt": "emi",
     "Due Date": "emi_due_date",
     "Agent Ph": "agent_phone",
+    // Phase 5 (N1, N2, §4.3): address is now required by default -- kept
+    // last so every dataRow below only needs one appended value.
+    Address: "address",
   };
 
   async function buildSheet(mapping: Record<string, string>, dataRow: (string | number)[]): Promise<Buffer> {
@@ -297,7 +305,7 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
     const missingPos = Object.fromEntries(
       Object.entries(FULL_MAPPING).filter(([, field]) => field !== "pos"),
     );
-    const buffer = await buildSheet(missingPos, ["FC001", "Runtime Required", "9810000001", "HL", "B1", "5000", 500, "2026-01-08", ""]);
+    const buffer = await buildSheet(missingPos, ["FC001", "Runtime Required", "9810000001", "HL", "B1", "5000", 500, "2026-01-08", "", "1 Test Rd"]);
     const upload = await request(app)
       .post("/api/imports/upload")
       .set("Authorization", `Bearer ${adminToken}`)
@@ -312,7 +320,7 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
   });
 
   it("commit accepts a mapping with every runtime-enabled field mapped", async () => {
-    const buffer = await buildSheet(FULL_MAPPING, ["FC002", "Runtime Full", "9810000002", "HL", "B1", "5000", "125000", 500, "2026-01-08", ""]);
+    const buffer = await buildSheet(FULL_MAPPING, ["FC002", "Runtime Full", "9810000002", "HL", "B1", "5000", "125000", 500, "2026-01-08", "", "1 Test Rd"]);
     const upload = await request(app)
       .post("/api/imports/upload")
       .set("Authorization", `Bearer ${adminToken}`)
@@ -340,7 +348,7 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ company_id: apiCompanyId, field_key: "pos", is_enabled: false, is_required: false });
 
-    const buffer = await buildSheet(FULL_MAPPING, ["FC003", "Disabled Pos", "9810000003", "HL", "B1", "5000", "125000", 500, "2026-01-08", ""]);
+    const buffer = await buildSheet(FULL_MAPPING, ["FC003", "Disabled Pos", "9810000003", "HL", "B1", "5000", "125000", 500, "2026-01-08", "", "1 Test Rd"]);
     const upload = await request(app)
       .post("/api/imports/upload")
       .set("Authorization", `Bearer ${adminToken}`)
@@ -361,12 +369,18 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
   });
 
   it("upload with ?company_id= returns that company's enabled catalog, not the whole agency's", async () => {
-    await request(app)
+    // Phase 5 (N1, N2, §4.3): address is required by default for a
+    // POST-/companies-created company (seedCompanyFieldSettings), so
+    // disabling it needs is_required: false in the same call too -- same
+    // "required field must also be enabled" rule already exercised above
+    // for pos.
+    const disable = await request(app)
       .patch("/api/field-config/settings")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ company_id: apiCompanyId, field_key: "address", is_enabled: false });
+      .send({ company_id: apiCompanyId, field_key: "address", is_enabled: false, is_required: false });
+    expect(disable.status).toBe(200);
 
-    const buffer = await buildSheet(FULL_MAPPING, ["FC004", "Scoped Catalog", "9810000004", "HL", "B1", "5000", "125000", 500, "2026-01-08", ""]);
+    const buffer = await buildSheet(FULL_MAPPING, ["FC004", "Scoped Catalog", "9810000004", "HL", "B1", "5000", "125000", 500, "2026-01-08", "", "1 Test Rd"]);
     const res = await request(app)
       .post(`/api/imports/upload?company_id=${apiCompanyId}`)
       .set("Authorization", `Bearer ${adminToken}`)
@@ -379,10 +393,10 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
     await request(app)
       .patch("/api/field-config/settings")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ company_id: apiCompanyId, field_key: "address", is_enabled: true });
+      .send({ company_id: apiCompanyId, field_key: "address", is_enabled: true, is_required: true });
   });
 
-  it("a custom admin-added field routes into custom_fields, same as address always did", async () => {
+  it("a custom admin-added field routes into custom_fields, same as address did before Phase 5", async () => {
     await request(app)
       .post("/api/field-config/definitions")
       .set("Authorization", `Bearer ${adminToken}`)
@@ -394,7 +408,7 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
 
     const mappingWithCustom = { ...FULL_MAPPING, "Vehicle No": "vehicle_no" };
     const buffer = await buildSheet(mappingWithCustom, [
-      "FC005", "Custom Field", "9810000005", "HL", "B1", "5000", "125000", 500, "2026-01-08", "", "MH12ZZ9999",
+      "FC005", "Custom Field", "9810000005", "HL", "B1", "5000", "125000", 500, "2026-01-08", "", "1 Test Rd", "MH12ZZ9999",
     ]);
     const upload = await request(app)
       .post("/api/imports/upload")
@@ -421,7 +435,7 @@ describe("import pipeline reads the runtime catalog (re-run of Phase 2 required-
   });
 });
 
-describe("backwards compatibility: pre-existing import_templates still validate unchanged", () => {
+describe("backwards compatibility: pre-existing import_templates (except the new address requirement, Phase 5)", () => {
   const LEGACY_MAPPING = {
     "Loan No": "loan_number",
     "Cust Name": "customer_name",
@@ -461,8 +475,11 @@ describe("backwards compatibility: pre-existing import_templates still validate 
       .post("/api/imports/preview")
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ upload_key: upload.body.upload_key, company_id: companyId, template_id: legacyTemplateId });
-    expect(preview.status).toBe(200);
-    expect(preview.body.valid_rows).toBe(1);
-    expect(preview.body.error_rows).toBe(0);
+    // Phase 5 (N1, N2, §4.3) intentionally breaks this guarantee for address
+    // specifically -- the spec's own operational warning: "a lender file
+    // with no address column will now be rejected at import." A legacy
+    // template that predates the address requirement is exactly that case.
+    expect(preview.status).toBe(400);
+    expect(preview.body.error).toContain('must map a column to "address"');
   });
 });

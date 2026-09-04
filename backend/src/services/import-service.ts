@@ -60,6 +60,7 @@ export interface MappedRow {
   emi_due_date: string | null; // 'YYYY-MM-DD'
   agent_phone: string | null;
   customer_branch: string | null; // Branch name/code to resolve to branch_id
+  address: string | null; // Phase 5 (N1, N2): lender-sourced, read-only
   custom_fields: Record<string, string>;
 }
 
@@ -653,9 +654,10 @@ export async function commitImport(params: {
       const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, branch_id, import_run_id, dpd)
+            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, branch_id, import_run_id, dpd, address)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-           CASE WHEN $10::date IS NULL THEN NULL ELSE GREATEST((now() AT TIME ZONE 'Asia/Kolkata')::date - $10::date, 0) END)
+           CASE WHEN $10::date IS NULL THEN NULL ELSE GREATEST((now() AT TIME ZONE 'Asia/Kolkata')::date - $10::date, 0) END,
+           $16)
          ON CONFLICT (company_id, loan_number) DO NOTHING
          RETURNING id`,
         [
@@ -674,6 +676,7 @@ export async function commitImport(params: {
           agent?.team_id ?? null,
           branch ?? null,
           mode === "new" ? runId : null,
+          row.address,
         ],
       );
       if (inserted.rows[0]) {
@@ -746,6 +749,7 @@ export async function commitImport(params: {
                 assigned_agent_id = COALESCE($11, assigned_agent_id),
                 assigned_team_id  = COALESCE($12, assigned_team_id),
                 branch_id       = COALESCE($13, branch_id),
+                address         = COALESCE($14, address),
                 dpd             = CASE WHEN COALESCE($9, due_date) IS NULL THEN NULL
                                        ELSE GREATEST((now() AT TIME ZONE 'Asia/Kolkata')::date - COALESCE($9, due_date), 0) END
           WHERE id = $1`,
@@ -763,6 +767,7 @@ export async function commitImport(params: {
           agent?.id ?? null,
           agent?.team_id ?? null,
           branch ?? null,
+          row.address,
         ],
       );
       snapshotIds.push(cust.id as string);

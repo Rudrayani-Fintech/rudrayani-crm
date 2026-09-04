@@ -48,19 +48,19 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Deposits Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Deposits Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   const agent = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, 'Deposits Agent', $2, $3, true) RETURNING id`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'Deposits Agent', $2, $3, true, 'field_agent') RETURNING id`,
     [agencyId, AGENT_PHONE, hash],
   );
   agentId = agent.rows[0].id;
   const foreignAgent = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, 'Foreign Agent', '7940000012', $2, true) RETURNING id`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'Foreign Agent', '7940000012', $2, true, 'field_agent') RETURNING id`,
     [otherAgencyId, hash],
   );
 
@@ -110,6 +110,9 @@ afterAll(async () => {
     agencyId,
     otherAgencyId,
   ]);
+  // audit_logs.actor_id has no ON DELETE CASCADE -- clear it before deleting
+  // the users it references.
+  await pool.query("DELETE FROM audit_logs WHERE agency_id IN ($1, $2)", [agencyId, otherAgencyId]);
   await pool.query("DELETE FROM users WHERE agency_id IN ($1, $2)", [agencyId, otherAgencyId]);
   await pool.query("DELETE FROM agencies WHERE id IN ($1, $2)", [agencyId, otherAgencyId]);
   await pool.end();

@@ -39,8 +39,8 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   const agent = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, 'Idem Agent', $2, $3, true) RETURNING id`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'Idem Agent', $2, $3, true, 'field_agent') RETURNING id`,
     [agencyId, AGENT_PHONE, hash],
   );
   agentId = agent.rows[0].id;

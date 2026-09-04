@@ -23,14 +23,14 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Disp Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Disp Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   // Field agent — has customers.view but NOT dispositions.manage
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent)
-     VALUES ($1, 'Disp Agent', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'Disp Agent', $2, $3, true, 'field_agent')`,
     [agencyId, AGENT_PHONE, hash],
   );
 

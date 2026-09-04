@@ -97,13 +97,13 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Alloc Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Alloc Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   const agent = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, team_id)
-     VALUES ($1, 'Alloc Agent', $2, $3, true, $4) RETURNING id`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, team_id, designation)
+     VALUES ($1, 'Alloc Agent', $2, $3, true, $4, 'field_agent') RETURNING id`,
     [agencyId, AGENT_PHONE, hash, teamId],
   );
   agentId = agent.rows[0].id;
@@ -622,23 +622,23 @@ describe("GET /customers - branch_id / team_id filtering", () => {
 
     const hash = await hashPassword(PASSWORD_2);
     await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-       VALUES ($1, 'Branch Filter Admin', $2, $3, true)`,
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+       VALUES ($1, 'Branch Filter Admin', $2, $3, true, 'agency_admin')`,
       [agencyId2, ADMIN_PHONE_2, hash],
     );
     const agentA1 = await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
-       VALUES ($1, 'Agent A1', '7920000091', $2, true, $3) RETURNING id`,
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id, designation)
+       VALUES ($1, 'Agent A1', '7920000091', $2, true, $3, 'telecaller') RETURNING id`,
       [agencyId2, hash, teamA1],
     );
     const agentA2 = await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
-       VALUES ($1, 'Agent A2', '7920000092', $2, true, $3) RETURNING id`,
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id, designation)
+       VALUES ($1, 'Agent A2', '7920000092', $2, true, $3, 'telecaller') RETURNING id`,
       [agencyId2, hash, teamA2],
     );
     const agentB1 = await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id)
-       VALUES ($1, 'Agent B1', '7920000093', $2, true, $3) RETURNING id`,
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, team_id, designation)
+       VALUES ($1, 'Agent B1', '7920000093', $2, true, $3, 'telecaller') RETURNING id`,
       [agencyId2, hash, teamB1],
     );
 

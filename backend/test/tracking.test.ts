@@ -97,10 +97,18 @@ beforeAll(async () => {
     teamId: string | null,
     branchId: string | null,
   ) => {
+    const designation =
+      flags === "is_agency_admin"
+        ? "agency_admin"
+        : flags === "is_operations_manager"
+          ? "operations_manager"
+          : flags === "is_telecaller"
+            ? "telecaller"
+            : "field_agent";
     const { rows } = await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, team_id, branch_id, ${flags})
-       VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id`,
-      [agency, `Track ${key}`, PHONES[key], hash, teamId, branchId],
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, team_id, branch_id, ${flags}, designation)
+       VALUES ($1, $2, $3, $4, $5, $6, true, $7) RETURNING id`,
+      [agency, `Track ${key}`, PHONES[key], hash, teamId, branchId, designation],
     );
     userIds[key] = rows[0].id;
     tokens[key] = await login(PHONES[key]);
@@ -130,6 +138,9 @@ afterAll(async () => {
   const ids = Object.values(userIds);
   await pool.query("DELETE FROM location_pings WHERE user_id = ANY($1)", [ids]);
   await pool.query("DELETE FROM attendance WHERE user_id = ANY($1)", [ids]);
+  // branches.branch_manager_id FKs to users -- clear it before deleting the
+  // branch_manager row, or this delete throws on the FK constraint.
+  await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM users WHERE id = ANY($1)", [ids]);
   await pool.query("DELETE FROM teams WHERE id = ANY($1)", [[teamAId, teamBId]]);
   await pool.query("DELETE FROM branches WHERE agency_id = $1", [agencyId]);

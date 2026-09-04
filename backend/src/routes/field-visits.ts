@@ -5,6 +5,7 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { refreshNextActionDate } from "../services/ptp-service";
 import { customerWriteScopeClamp } from "../services/scope";
 import { getStorage } from "../services/storage/storage-provider";
 
@@ -116,6 +117,11 @@ router.post(
           body.client_key ?? null,
         ],
       );
+      // Phase 4 (§4.2): a field visit counts toward the daily attempt cap
+      // and can still resurface the customer via a pending PTP/reminder,
+      // even though it can't drive the disposition-cadence source itself
+      // yet (field_visits has no disposition_code_id column).
+      await refreshNextActionDate(pool, body.customer_id);
       res.status(201).json({ field_visit: rows[0] });
     } catch (err) {
       // The photo/signature were already written to storage before this

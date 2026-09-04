@@ -2,7 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate } from "../middleware/authenticate";
-import { loginRateLimiter, otpRequestRateLimiter } from "../middleware/rate-limit";
+import {
+  loginRateLimiter,
+  otpRequestRateLimiter,
+  passwordResetRequestRateLimiter,
+} from "../middleware/rate-limit";
 import * as authService from "../services/auth-service";
 import { permissionsFor } from "../services/permission-service";
 import { capabilitiesOf, publicUser } from "../types/user";
@@ -71,6 +75,33 @@ router.post(
     const body = otpVerifySchema.parse(req.body);
     await authService.resetPasswordWithOtp(body.phone, body.otp, body.new_password);
     res.json({ ok: true, message: "Password reset. Log in with your new password." });
+  }),
+);
+
+const passwordResetRequestSchema = z.object({
+  phone: phoneSchema,
+  message: z.string().trim().min(1).max(500),
+});
+
+router.post(
+  "/password-reset-request",
+  passwordResetRequestRateLimiter,
+  asyncHandler(async (req, res) => {
+    const body = passwordResetRequestSchema.parse(req.body);
+    await authService.submitPasswordResetRequest(body.phone, body.message);
+    // Deliberately identical response whether or not the phone exists.
+    res.json({ ok: true, message: "If the number is registered, your request has been received." });
+  }),
+);
+
+router.get(
+  "/password-reset-request",
+  asyncHandler(async (req, res) => {
+    const phone = phoneSchema.parse(req.query.phone);
+    const status = await authService.passwordResetRequestStatus(phone);
+    // S2: only ever { status } -- never user details, matching the
+    // no-enumeration guarantee of the POST above.
+    res.json({ status });
   }),
 );
 

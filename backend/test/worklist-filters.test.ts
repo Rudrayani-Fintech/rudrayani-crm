@@ -151,3 +151,149 @@ describe("worklist multi-value filters + filter-options", () => {
     expect(res.body.customers.some((c: { loan_number: string }) => c.loan_number === "WLF-003")).toBe(true);
   });
 });
+
+// Phase 3 (N5, P6, P7, P8, P10): pagination, worked_today/collected_today,
+// worked-state-first sort. Own isolated agency/agent/customers rather than
+// reusing the fixtures above, so page/limit math and worked-row sorting
+// stay exact and don't interact with the bucket/branch filters those tests
+// already assert on.
+describe("worklist pagination and worked state (Phase 3)", () => {
+  const PAGE_PHONE = "7980100001";
+  let pageAgencyId: string;
+  let pageCompanyId: string;
+  let pageAgentId: string;
+  let pageAgentToken: string;
+  let workedCustomerId: string;
+  const customerIds: string[] = [];
+
+  beforeAll(async () => {
+    const agency = await pool.query(
+      "INSERT INTO agencies (name) VALUES ('WL Pagination Agency') RETURNING id",
+    );
+    pageAgencyId = agency.rows[0].id;
+    const company = await pool.query(
+      "INSERT INTO companies (agency_id, name) VALUES ($1, 'WL Pagination NBFC') RETURNING id",
+      [pageAgencyId],
+    );
+    pageCompanyId = company.rows[0].id;
+    const hash = await hashPassword(PASSWORD);
+    const agent = await pool.query(
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_telecaller, designation)
+       VALUES ($1, 'WL Pagination Agent', $2, $3, true, 'telecaller') RETURNING id`,
+      [pageAgencyId, PAGE_PHONE, hash],
+    );
+    pageAgentId = agent.rows[0].id;
+
+    // 5 customers, all assigned to pageAgentId -- enough to prove page 1 and
+    // page 2 return disjoint rows under a small limit without needing 50+
+    // fixture rows to exercise the same LIMIT/OFFSET math the real 50-row
+    // default would use.
+    for (let i = 1; i <= 5; i++) {
+      const c = await pool.query(
+        `INSERT INTO customers
+           (company_id, loan_number, customer_name, mobile_number, due_amount, bucket, assigned_agent_id)
+         VALUES ($1, $2, $3, $4, $5, 'PAGINATION-TEST', $6) RETURNING id`,
+        [pageCompanyId, `WLP-00${i}`, `Pagination Cust ${i}`, `98100000${i}0`, 1000 - i, pageAgentId],
+      );
+      customerIds.push(c.rows[0].id);
+    }
+    workedCustomerId = customerIds[0];
+
+    pageAgentToken = await login(PAGE_PHONE);
+  });
+
+  afterAll(async () => {
+    await pool.query("DELETE FROM payments WHERE customer_id = ANY($1)", [customerIds]);
+    await pool.query("DELETE FROM call_logs WHERE customer_id = ANY($1)", [customerIds]);
+    await pool.query("DELETE FROM customers WHERE company_id = $1", [pageCompanyId]);
+    await pool.query("DELETE FROM users WHERE agency_id = $1", [pageAgencyId]);
+    await pool.query("DELETE FROM companies WHERE id = $1", [pageCompanyId]);
+    await pool.query("DELETE FROM agencies WHERE id = $1", [pageAgencyId]);
+  });
+
+  it("total reflects every matching row, not just the page returned", async () => {
+    const res = await request(app)
+      .get("/api/worklist?limit=2&page=1")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers).toHaveLength(2);
+    expect(res.body.total).toBe(5);
+    expect(res.body.page).toBe(1);
+    expect(res.body.limit).toBe(2);
+  });
+
+  it("pagination boundaries: page 2 and page 3 return the remaining, disjoint rows", async () => {
+    const page1 = await request(app)
+      .get("/api/worklist?limit=2&page=1")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+    const page2 = await request(app)
+      .get("/api/worklist?limit=2&page=2")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+    const page3 = await request(app)
+      .get("/api/worklist?limit=2&page=3")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+
+    expect(page2.body.customers).toHaveLength(2);
+    expect(page3.body.customers).toHaveLength(1); // 5 rows, limit 2 -> last page has 1
+
+    const ids1 = page1.body.customers.map((c: { id: string }) => c.id);
+    const ids2 = page2.body.customers.map((c: { id: string }) => c.id);
+    const ids3 = page3.body.customers.map((c: { id: string }) => c.id);
+    const allIds = [...ids1, ...ids2, ...ids3];
+    expect(new Set(allIds).size).toBe(5); // every row appears exactly once across all 3 pages
+  });
+
+  it("worked_today toggles true after a call log, and the row sorts to the bottom", async () => {
+    const before = await request(app)
+      .get("/api/worklist?limit=10")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+    const beforeRow = before.body.customers.find((c: { id: string }) => c.id === workedCustomerId);
+    expect(beforeRow.worked_today).toBe(false);
+
+    await pool.query(
+      `INSERT INTO call_logs (customer_id, agent_id, remark, created_at) VALUES ($1, $2, 'Called today', now())`,
+      [workedCustomerId, pageAgentId],
+    );
+
+    const after = await request(app)
+      .get("/api/worklist?limit=10")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+    const rows = after.body.customers as { id: string; worked_today: boolean }[];
+    const afterRow = rows.find((c) => c.id === workedCustomerId);
+    expect(afterRow!.worked_today).toBe(true);
+
+    // P8: worked rows sink to the bottom -- this is now the only worked
+    // row among the 5, so it must be last.
+    expect(rows[rows.length - 1].id).toBe(workedCustomerId);
+    expect(rows.slice(0, 4).every((c) => c.worked_today === false)).toBe(true);
+  });
+
+  it("collected_today reflects only this agent's payments against this customer, today", async () => {
+    await pool.query(
+      `INSERT INTO payments (customer_id, collected_by_user_id, amount, paid_at) VALUES ($1, $2, 250, now())`,
+      [workedCustomerId, pageAgentId],
+    );
+
+    const res = await request(app)
+      .get("/api/worklist?limit=10")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+    const rows = res.body.customers as { id: string; collected_today: string }[];
+    const row = rows.find((c) => c.id === workedCustomerId);
+    expect(Number(row!.collected_today)).toBe(250);
+
+    const otherRow = rows.find((c) => c.id === customerIds[1]);
+    expect(Number(otherRow!.collected_today)).toBe(0);
+  });
+
+  it("?customer_branch= filters server-side, not just client-side", async () => {
+    // None of this fixture's customers have a branch set, so a real branch
+    // filter narrows the result to zero -- proves the filter runs in the
+    // query (server-side), not merely accepted and ignored.
+    const res = await request(app)
+      .get("/api/worklist?customer_branch=Some Other Branch")
+      .set("Authorization", `Bearer ${pageAgentToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.customers).toHaveLength(0);
+    expect(res.body.total).toBe(0);
+  });
+});

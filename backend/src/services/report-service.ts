@@ -1261,7 +1261,7 @@ export async function overview(
   if (months !== "all") {
     params.push(months);
     monthLimit = `AND p.paid_at >= ((date_trunc('month', (now() AT TIME ZONE 'Asia/Kolkata'))
-                    - make_interval(months => $${params.length}::int - 1))::timestamp AT TIME ZONE 'Asia/Kolkata')`;
+                    - interval '1 month' * ($${params.length}::int - 1))::timestamp AT TIME ZONE 'Asia/Kolkata')`;
   }
   const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(

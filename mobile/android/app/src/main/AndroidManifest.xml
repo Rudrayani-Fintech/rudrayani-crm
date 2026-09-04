@@ -12,6 +12,11 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+    <!-- X2: on MIUI/ColorOS/FuntouchOS/One UI (most of the Indian budget-Android
+         market), the tracking foreground service gets throttled or killed without
+         this exemption, even though the location-type foreground service and
+         while-in-use permission are otherwise sufficient. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- Reminder notifications (Android 13+ requires this runtime grant;
          requested from NotificationService.requestPermission()). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>

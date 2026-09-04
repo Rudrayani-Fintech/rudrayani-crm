@@ -128,10 +128,13 @@ router.post(
           ],
         );
         ptp = ptpRes.rows[0];
-        // A fresh PTP's promised_date may now be the earliest known
-        // follow-up for this customer.
-        await refreshNextActionDate(client, body.customer_id);
       }
+      // Phase 4 (§4.2): every call log can move next_action_date, not just
+      // PTP-creating ones -- this is the disposition-cadence engine's only
+      // hook. A fresh PTP's promised_date wins over the code's own cadence
+      // (refreshNextActionDate takes the MIN across all three sources), so
+      // calling this unconditionally is correct either way.
+      await refreshNextActionDate(client, body.customer_id);
 
       await client.query("COMMIT");
       res.status(201).json({ call_log: callLog.rows[0], ptp });

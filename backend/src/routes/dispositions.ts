@@ -16,7 +16,8 @@ router.get(
     const { rows } = await pool.query(
       `SELECT id, action_code, category, result_code, description, remark_template,
               needs_amount, needs_date, needs_time, needs_mode, needs_reason,
-              needs_name_relation, is_active, channel
+              needs_name_relation, is_active, channel,
+              followup_after_hours, exits_agent_queue, routes_to
          FROM disposition_codes
         WHERE agency_id = $1
           ${includeInactive ? "" : "AND is_active = true"}
@@ -40,6 +41,14 @@ const dispositionBody = z.object({
   needs_mode: z.boolean().default(false),
   needs_reason: z.boolean().default(false),
   needs_name_relation: z.boolean().default(false),
+  // Phase 4 (§4.2): disposition cadence. followup_after_hours is nullable
+  // (NULL = no automatic follow-up, e.g. Promise to Pay/Call Back already
+  // resurface via their own date). routes_to is only meaningful alongside
+  // exits_agent_queue = true, but isn't required to be -- an admin may set
+  // it ahead of flipping the flag.
+  followup_after_hours: z.number().int().positive().nullable().optional(),
+  exits_agent_queue: z.boolean().default(false),
+  routes_to: z.enum(["field", "manager", "data_correction", "closed"]).nullable().optional(),
 });
 
 router.post(
@@ -50,8 +59,9 @@ router.post(
     const { rows } = await pool.query(
       `INSERT INTO disposition_codes
          (agency_id, action_code, category, result_code, description, remark_template, channel,
-          needs_amount, needs_date, needs_time, needs_mode, needs_reason, needs_name_relation)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          needs_amount, needs_date, needs_time, needs_mode, needs_reason, needs_name_relation,
+          followup_after_hours, exits_agent_queue, routes_to)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [
         req.user!.agency_id,
@@ -67,6 +77,9 @@ router.post(
         body.needs_mode,
         body.needs_reason,
         body.needs_name_relation,
+        body.followup_after_hours ?? null,
+        body.exits_agent_queue,
+        body.routes_to ?? null,
       ],
     );
     res.status(201).json({ disposition_code: rows[0] });
@@ -108,6 +121,9 @@ router.patch(
       "needs_reason",
       "needs_name_relation",
       "is_active",
+      "followup_after_hours",
+      "exits_agent_queue",
+      "routes_to",
     ]) {
       if (updatable[field] !== undefined) {
         params.push(updatable[field]);

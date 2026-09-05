@@ -35,7 +35,6 @@ import reallocationRequestRoutes from "./routes/reallocation-requests";
 import reminderRoutes from "./routes/reminders";
 import reportRoutes from "./routes/reports";
 import setupStatusRoutes from "./routes/setup-status";
-import targetRoutes from "./routes/targets";
 import teamRoutes from "./routes/teams";
 import trackingRoutes from "./routes/tracking";
 import worklistRoutes from "./routes/worklist";
@@ -110,7 +109,6 @@ export function createApp() {
   app.use("/api/reminders", reminderRoutes);
   app.use("/api/buckets", bucketRoutes);
   app.use("/api/field-config", fieldConfigRoutes);
-  app.use("/api/targets", targetRoutes);
   app.use("/api/reports", reportRoutes);
   app.use("/api/setup-status", setupStatusRoutes);
   app.use("/api/dashboard-preferences", dashboardPreferencesRoutes);

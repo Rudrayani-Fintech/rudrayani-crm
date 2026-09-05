@@ -204,15 +204,16 @@ describe("live view scoping", () => {
     for (let m = 28; m >= 0; m -= 4) await ping(userIds.tele, m, 5000 + (m % 3));
   });
 
-  // Phase 12: agentA (field_agent) now holds tracking.view, but is clamped to
-  // self only -- sees their own live ping, never the rest of the team.
-  it("an agent sees only themselves, never the rest of the team", async () => {
+  // Phase 7 (§4.8, S5): tracking.view no longer opens the live map for an
+  // individual agent at all -- the live map (this route) is now gated
+  // entirely on tracking.view_team, which telecaller/field_agent never
+  // hold. An agent's own attendance/location still surfaces through
+  // /tracking/team-day (self-scoped, tracking.view) instead.
+  it("an agent is 403'd from the live map -- it is manager-only now", async () => {
     const res = await request(app)
       .get("/api/tracking/live")
       .set("Authorization", `Bearer ${tokens.agentA}`);
-    expect(res.status).toBe(200);
-    const ids = res.body.agents.map((a: { user_id: string }) => a.user_id);
-    expect(ids).toEqual([userIds.agentA]);
+    expect(res.status).toBe(403);
   });
 
   it("admin sees all on-duty agents of the agency, never other agencies", async () => {

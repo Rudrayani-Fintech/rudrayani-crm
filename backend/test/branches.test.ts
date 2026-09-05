@@ -6,7 +6,7 @@ import { hashPassword } from "../src/services/auth-service";
 
 /**
  * Phase 9: Branches drill-down detail view -- GET /branches/:id aggregates
- * team details, targets and deposits for a single branch, agency-scoped
+ * team details and deposits for a single branch, agency-scoped
  * (never leaks another branch's or another agency's data).
  */
 const app = createApp();
@@ -173,23 +173,7 @@ beforeAll(async () => {
   // Branch B payment -- must NOT leak into branch A's deposit numbers.
   await pay(customerB.rows[0].id, 9000, agentBId, "2026-07-06", false);
 
-  // Branch-scoped collection target for MONTH.
   adminToken = await login(ADMIN_PHONE);
-  await request(app)
-    .put("/api/targets/bulk")
-    .set("Authorization", `Bearer ${adminToken}`)
-    .send({
-      month: MONTH,
-      rows: [
-        {
-          metric: "collection",
-          scope_type: "branch",
-          scope_id: branchAId,
-          target_amount: 100000,
-        },
-      ],
-    });
-
   telecallerToken = await login(TELECALLER_PHONE);
   bmAToken = await login(BM_A_PHONE);
   bmBToken = await login(BM_B_PHONE);
@@ -202,7 +186,6 @@ afterAll(async () => {
     [companyId],
   );
   await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId]);
-  await pool.query("DELETE FROM targets WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM companies WHERE agency_id = $1", [agencyId]);
   // branches.branch_manager_id FKs to users -- clear it before deleting the
   // branch_manager row, or the delete below violates the FK (pre-existing
@@ -216,7 +199,7 @@ afterAll(async () => {
 });
 
 describe("GET /branches/:id (Phase 9 drill-down)", () => {
-  it("aggregates team details, targets and deposits for the branch, scoped correctly", async () => {
+  it("aggregates team details and deposits for the branch, scoped correctly", async () => {
     const res = await request(app)
       .get(`/api/branches/${branchAId}?month=${MONTH}`)
       .set("Authorization", `Bearer ${adminToken}`);
@@ -242,11 +225,6 @@ describe("GET /branches/:id (Phase 9 drill-down)", () => {
     // branch manager has no branch_id of their own either (Phase 2).
     expect(res.body.agent_count).toBe(2);
 
-    // Targets: branch-scoped collection target for the month.
-    expect(res.body.targets).toHaveLength(1);
-    expect(res.body.targets[0].metric).toBe("collection");
-    expect(Number(res.body.targets[0].target_amount)).toBe(100000);
-
     // Deposits: only branch-A payments counted (5000 deposited + 3000 pending).
     expect(res.body.deposits.collected).toBe(8000);
     expect(res.body.deposits.deposited).toBe(5000);
@@ -258,7 +236,7 @@ describe("GET /branches/:id (Phase 9 drill-down)", () => {
     expect(collectedByNames.every((n: string) => n === "Sangli Agent 1")).toBe(true);
   });
 
-  it("defaults deposits/targets to the current month when none is given", async () => {
+  it("defaults deposits to the current month when none is given", async () => {
     const res = await request(app)
       .get(`/api/branches/${branchAId}`)
       .set("Authorization", `Bearer ${adminToken}`);

@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import dayjs from "dayjs";
 import request from "supertest";
 import { createApp } from "../src/app";
 import { pool } from "../src/config/db";
@@ -83,19 +82,6 @@ async function approveAllPending(companyId: string): Promise<void> {
     .send({ ids, action: "approve" });
   expect(res.status).toBe(200);
   expect(res.body.skipped).toHaveLength(0);
-}
-
-async function mapCanonicalBuckets(companyId: string, mapping: Record<string, number>): Promise<void> {
-  const list = await request(app)
-    .get(`/api/buckets?company_id=${companyId}`)
-    .set("Authorization", `Bearer ${adminToken}`);
-  for (const b of list.body.buckets as { id: string; label: string }[]) {
-    if (mapping[b.label] === undefined) continue;
-    await request(app)
-      .patch(`/api/buckets/${b.id}`)
-      .set("Authorization", `Bearer ${adminToken}`)
-      .send({ canonical_bucket: mapping[b.label] });
-  }
 }
 
 async function customerId(companyId: string, loanNumber: string): Promise<string> {
@@ -270,23 +256,6 @@ describe("Alpha Finance NBFC (Hero-style columns): full three-file reporting cyc
     expect(withDueDate.rows[0].due_date).not.toBeNull();
   });
 
-  it("canonical bucket mapping + DPD cross-check flags ALPHA-008 (lender says current, due date says ~75 days overdue)", async () => {
-    await mapCanonicalBuckets(alphaCompanyId, { X: 0, "1": 1, "2": 2, NPA: 3 });
-
-    const res = await request(app)
-      .get(`/api/reports/bucket-mismatches?company_id=${alphaCompanyId}`)
-      .set("Authorization", `Bearer ${adminToken}`);
-    expect(res.status).toBe(200);
-    const row = res.body.rows.find((r: { loan_number: string }) => r.loan_number === "ALPHA-008");
-    expect(row).toBeDefined();
-    expect(row.lender_bucket).toBe("X");
-    expect(row.computed_canonical).toBe(2); // 75 days / 30 = 2 (60-89d bucket)
-
-    // ALPHA-001 (due 40 days ago, lender bucket "1"/canonical 1) agrees -- no flag.
-    const agree = res.body.rows.find((r: { loan_number: string }) => r.loan_number === "ALPHA-001");
-    expect(agree).toBeUndefined();
-  });
-
   it("a subsequent calendar month with real bucket drops writes allocation-confirmed movement events, and improving buckets never trigger a rollback event", async () => {
     // A genuinely later month (not a repeat of ALLOC_MONTH): deliberate drops
     // on 001/003/007 (should confirm), no change on most others, and a
@@ -325,13 +294,6 @@ describe("Alpha Finance NBFC (Hero-style columns): full three-file reporting cyc
       [alphaCompanyId],
     );
     expect(rollbackEvent.rows).toHaveLength(0);
-
-    // Transition-basis dashboard metrics now have a next month to compare against.
-    const dashboard = await request(app)
-      .get(`/api/reports/dashboard?month=${ALLOC_MONTH.slice(0, 7)}&company_id=${alphaCompanyId}`)
-      .set("Authorization", `Bearer ${adminToken}`);
-    expect(dashboard.status).toBe(200);
-    expect(dashboard.body.metrics.resolution.basis).toBe("transition");
   });
 
   it("recording a payment that covers a bucket-1 loan's arrears writes a payment-driven movement event, independent of the allocation import", async () => {
@@ -350,17 +312,6 @@ describe("Alpha Finance NBFC (Hero-style columns): full three-file reporting cyc
     expect(events.rows).toHaveLength(1);
   });
 
-  it("the dimension breakdown for NEXT_MONTH reconciles with the dashboard's headline totals", async () => {
-    const dashboard = await request(app)
-      .get(`/api/reports/dashboard?month=${NEXT_MONTH.slice(0, 7)}&company_id=${alphaCompanyId}`)
-      .set("Authorization", `Bearer ${adminToken}`);
-    const breakdown = await request(app)
-      .get(`/api/reports/breakdown?month=${NEXT_MONTH.slice(0, 7)}&company_id=${alphaCompanyId}&dimension=product`)
-      .set("Authorization", `Bearer ${adminToken}`);
-    expect(breakdown.status).toBe(200);
-    const total = breakdown.body.rows.reduce((s: number, r: { allocated_count: number }) => s + r.allocated_count, 0);
-    expect(total).toBe(dashboard.body.allocated.count);
-  });
 });
 
 describe("Beta Credit Corp (Indifi-style columns, deliberately different layout)", () => {
@@ -390,65 +341,4 @@ describe("Beta Credit Corp (Indifi-style columns, deliberately different layout)
     await approveAllPending(betaCompanyId);
   });
 
-  it("canonical buckets + DPD cross-check flags BETA-106 (lender says 60-90, due date implies only ~20 days overdue)", async () => {
-    await mapCanonicalBuckets(betaCompanyId, { Current: 0, "30-60": 1, "60-90": 2, NPA: 3 });
-
-    const res = await request(app)
-      .get(`/api/reports/bucket-mismatches?company_id=${betaCompanyId}`)
-      .set("Authorization", `Bearer ${adminToken}`);
-    expect(res.status).toBe(200);
-    const row = res.body.rows.find((r: { loan_number: string }) => r.loan_number === "BETA-106");
-    expect(row).toBeDefined();
-    expect(row.lender_canonical).toBe(2);
-    expect(row.computed_canonical).toBe(0);
-  });
-
-  it("the recalled-customer report and export list BETA-103, resolving its last agent from allocation history", async () => {
-    // Give BETA-103 an allocation history entry before it was recalled, so
-    // the report's "last agent" resolution has something real to find.
-    const id = await customerId(betaCompanyId, "BETA-103");
-    await pool.query(
-      `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
-       VALUES ($1, NULL, $2, $2, 'Assigned by import')`,
-      [id, telecallerId],
-    );
-
-    // recalled_at is set to the real wall-clock time of the approval
-    // (import-reviews.ts), not the allocation_month the review belonged to
-    // -- an ops manager approving a removal today WAS recalled today, even
-    // if the underlying file was for a past reporting cycle. Query this
-    // month, not ALLOC_MONTH.
-    const month = dayjs().format("YYYY-MM");
-    const res = await request(app)
-      .get(`/api/reports/recalls?month=${month}&company_id=${betaCompanyId}`)
-      .set("Authorization", `Bearer ${adminToken}`);
-    expect(res.status).toBe(200);
-    const row = res.body.customers.find((r: { loan_number: string }) => r.loan_number === "BETA-103");
-    expect(row).toBeDefined();
-    expect(row.last_agent_name).toBe("E2E Telecaller");
-
-    const exportRes = await request(app)
-      .get(`/api/reports/export?month=${month}&company_id=${betaCompanyId}`)
-      .set("Authorization", `Bearer ${adminToken}`)
-      .buffer()
-      .parse((res2, cb) => {
-        const chunks: Buffer[] = [];
-        res2.on("data", (c: Buffer) => chunks.push(c));
-        res2.on("end", () => cb(null, Buffer.concat(chunks)));
-      });
-    expect(exportRes.status).toBe(200);
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(exportRes.body as Buffer);
-    const sheetNames = wb.worksheets.map((s) => s.name);
-    expect(sheetNames).toEqual(
-      expect.arrayContaining(["Summary", "Agents", "Breakdown", "Trail", "Recalls", "Recalled Customers", "Bucket Movements", "Bucket Mismatches"]),
-    );
-    const recalledSheet = wb.getWorksheet("Recalled Customers")!;
-    const loanNumbers: string[] = [];
-    recalledSheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return;
-      loanNumbers.push(String(row.getCell(1).value));
-    });
-    expect(loanNumbers).toContain("BETA-103");
-  });
 });

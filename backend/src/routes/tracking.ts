@@ -4,10 +4,18 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { capabilitiesHavePermission } from "../services/permission-service";
 import { scopeFilter } from "../services/scope";
+import { capabilitiesOf } from "../types/user";
 import { istToday } from "../utils/ist";
 
 const router = Router();
+// Phase 7 (§4.8, S5): tracking.view alone is enough for every route here --
+// a telecaller/field_agent holds it too, but scopeFilter() already confines
+// them to their own row, so it's self-service by construction, not by a
+// permission gate. tracking.view_team (added per-route below) is the actual
+// gate for seeing anyone ELSE's location: the live team map always, and
+// route replay when the requested user_id isn't the caller's own.
 router.use(authenticate, requirePermission("tracking.view"));
 
 // "Single location for more than 20 minutes" alert. Radius absorbs normal
@@ -48,6 +56,7 @@ async function agencyThresholds(agencyId: string): Promise<{ minutes: number; ra
  */
 router.get(
   "/live",
+  requirePermission("tracking.view_team"),
   asyncHandler(async (req, res) => {
     const me = req.user!;
     const scope = await scopeFilter(me);
@@ -164,6 +173,15 @@ router.get(
         date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
       })
       .parse(req.query);
+
+    // Phase 7 (§4.8): replaying your OWN day is the mobile self-service use
+    // (Phase 12's Field Executive/Telecaller dashboards) and only needs
+    // tracking.view, already required above. Replaying anyone ELSE's route
+    // is the manager "route replay" feature §4.8 actually means to gate.
+    if (q.user_id !== me.id) {
+      const canViewTeam = await capabilitiesHavePermission(capabilitiesOf(me), "tracking.view_team");
+      if (!canViewTeam) throw new HttpError(403, "Missing permission: tracking.view_team");
+    }
 
     const scope = await scopeFilter(me);
     const targetParams: unknown[] = [q.user_id, me.agency_id];

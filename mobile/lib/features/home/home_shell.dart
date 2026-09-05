@@ -21,8 +21,8 @@ import '../account/account_screen.dart';
 /// branch_manager dashboard tab too (agency-wide scope resolves the same
 /// way server-side). A branch_manager who ALSO carries collections work
 /// (agent_type set) still gets their own personal worklist "for free" --
-/// WorklistScreen is unconditionally present in HomeShell's screens list
-/// below regardless of role, so there's no separate dual-capability branch
+/// WorklistScreen is unconditionally present in HomeShell's tab list below
+/// regardless of role, so there's no separate dual-capability branch
 /// needed here; only the management-tier dashboard tab is role-exclusive.
 /// Extracted as a pure function (rather than inlined in build()) so the
 /// branching itself has a fast, deterministic unit test independent of the
@@ -42,6 +42,22 @@ DashboardRole? resolveDashboardRole(List<String> capabilities) {
   return null;
 }
 
+/// Named tab identity (§7.5) -- replaces a bare `int` index into a
+/// conditionally-built list, which broke down as soon as that list's
+/// membership could change (it always could: the dashboard tab is
+/// role-conditional). `dashboard` covers whichever ONE of the three
+/// role-specific dashboards is present -- the role checks are mutually
+/// exclusive, so there's never ambiguity about which screen it means for a
+/// given user.
+enum HomeTab { worklist, dashboard, performance, account }
+
+class _HomeTabEntry {
+  final HomeTab tab;
+  final NavigationDestination destination;
+  final WidgetBuilder builder;
+  const _HomeTabEntry({required this.tab, required this.destination, required this.builder});
+}
+
 /// Role-aware landing (brief §3, §10; Phase 12: role-based dashboards).
 /// Every role gets My Worklist / My Performance; a branch_manager
 /// additionally gets a Branch Dashboard (covering every team in their
@@ -55,7 +71,7 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
-  int _tab = 0;
+  HomeTab _tab = HomeTab.worklist;
 
   @override
   Widget build(BuildContext context) {
@@ -65,56 +81,82 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     final isTelecaller = role == DashboardRole.telecaller;
     final isFieldAgent = role == DashboardRole.fieldAgent;
 
-    final screens = [
-      const WorklistScreen(),
-      if (isBranchManager) const BranchManagerDashboardScreen(),
-      if (isTelecaller) const TelecallerDashboardScreen(),
-      if (isFieldAgent) const FieldExecutiveDashboardScreen(),
-      const PerformanceScreen(),
-      const AccountScreen(),
-    ];
-    final destinations = [
-      const NavigationDestination(
-        icon: Icon(Icons.list_alt),
-        label: 'My Worklist',
+    final entries = <_HomeTabEntry>[
+      _HomeTabEntry(
+        tab: HomeTab.worklist,
+        destination: const NavigationDestination(
+          icon: Icon(Icons.list_alt),
+          label: 'My Worklist',
+        ),
+        builder: (_) => const WorklistScreen(),
       ),
       if (isBranchManager)
-        const NavigationDestination(
-          icon: Icon(Icons.apartment),
-          label: 'Branch Dashboard',
+        _HomeTabEntry(
+          tab: HomeTab.dashboard,
+          destination: const NavigationDestination(
+            icon: Icon(Icons.apartment),
+            label: 'Branch Dashboard',
+          ),
+          builder: (_) => const BranchManagerDashboardScreen(),
         ),
       if (isTelecaller)
-        const NavigationDestination(
-          icon: Icon(Icons.dashboard),
-          label: 'Dashboard',
+        _HomeTabEntry(
+          tab: HomeTab.dashboard,
+          destination: const NavigationDestination(
+            icon: Icon(Icons.dashboard),
+            label: 'Dashboard',
+          ),
+          builder: (_) => const TelecallerDashboardScreen(),
         ),
       if (isFieldAgent)
-        const NavigationDestination(
-          icon: Icon(Icons.dashboard),
-          label: 'Dashboard',
+        _HomeTabEntry(
+          tab: HomeTab.dashboard,
+          destination: const NavigationDestination(
+            icon: Icon(Icons.dashboard),
+            label: 'Dashboard',
+          ),
+          builder: (_) => const FieldExecutiveDashboardScreen(),
         ),
-      const NavigationDestination(
-        icon: Icon(Icons.insights),
-        label: 'My Performance',
+      _HomeTabEntry(
+        tab: HomeTab.performance,
+        destination: const NavigationDestination(
+          icon: Icon(Icons.insights),
+          label: 'My Performance',
+        ),
+        builder: (_) => const PerformanceScreen(),
       ),
-      const NavigationDestination(
-        icon: Icon(Icons.person),
-        label: 'Account',
+      _HomeTabEntry(
+        tab: HomeTab.account,
+        destination: const NavigationDestination(
+          icon: Icon(Icons.person),
+          label: 'Account',
+        ),
+        builder: (_) => const AccountScreen(),
       ),
     ];
+
+    final activeIndex = entries.indexWhere((e) => e.tab == _tab);
+    final active = activeIndex >= 0 ? entries[activeIndex] : entries.first;
 
     return Scaffold(
       body: Column(
         children: [
           const SyncBanner(),
-          Expanded(child: IndexedStack(index: _tab, children: screens)),
+          // Phase 9 (§7.4): previously an IndexedStack built every tab's
+          // screen at once -- the documented cause of a 6-8 parallel-request
+          // burst at login (every tab's providers fired immediately, even
+          // for tabs the agent never opened). Only the selected tab's
+          // screen is built now; switching tabs rebuilds fresh each time
+          // (no scroll-position retention across tabs -- an accepted
+          // trade-off for the fix, not itself part of this phase's brief).
+          Expanded(child: active.builder(context)),
         ],
       ),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        selectedIndex: activeIndex >= 0 ? activeIndex : 0,
+        onDestinationSelected: (i) => setState(() => _tab = entries[i].tab),
         indicatorColor: AppColors.primary.withValues(alpha: 0.15),
-        destinations: destinations,
+        destinations: [for (final e in entries) e.destination],
       ),
     );
   }

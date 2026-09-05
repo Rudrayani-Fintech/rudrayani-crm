@@ -233,8 +233,16 @@ class _CustomerDetailBody extends ConsumerWidget {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: () async =>
-            ref.invalidate(customerDetailProvider(customer.id)),
+        // X4 fix: this used to invalidate only customerDetailProvider (the
+        // History timeline's customer-360 fetch), while the header/loan
+        // details/PTP cards above render from customerByIdProvider -- pull
+        // to refresh looked like it worked (the spinner ran) but the header
+        // never actually updated. Invalidate both, so refresh does what it
+        // visibly promises.
+        onRefresh: () async {
+          ref.invalidate(customerByIdProvider(customer.id));
+          ref.invalidate(customerDetailProvider(customer.id));
+        },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(16),

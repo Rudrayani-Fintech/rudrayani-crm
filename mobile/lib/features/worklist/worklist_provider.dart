@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/api/api_client.dart';
+import '../../core/data/account_repository.dart';
 import '../../core/models/customer.dart';
 import '../../core/offline/read_cache.dart';
 import '../../core/offline/worklist_filter_store.dart';
+
+export '../../core/data/account_repository.dart' show worklistIsStaleProvider;
 
 /// Personal (own allocations) vs Team (every allocation in the branch a
 /// branch_manager manages) -- the web equivalent is MyWorklistPage.tsx's
@@ -32,17 +35,29 @@ final worklistFilterOptionsProvider = FutureProvider<({List<String> branches, Li
   );
 });
 
-/// Whether the data currently shown by worklistProvider/customerByIdProvider
-/// came from the offline cache rather than a fresh network response --
-/// worklist_screen.dart uses this to show "offline — showing cached data"
-/// instead of presenting a stale list as live.
-final worklistIsStaleProvider = StateProvider<bool>((ref) => false);
+/// Phase 9 (§7.2): the assigned-accounts list and single-account lookup now
+/// live on `AccountRepository` (cache-fallback + cache-key logic
+/// consolidated there). `worklistProvider`/`customerByIdProvider` stay as
+/// thin re-exports of that so every existing consumer (WorklistScreen,
+/// CustomerDetailScreen, call log/payment/PTP/field-visit screens) keeps
+/// watching the same provider names unchanged.
+final worklistProvider = FutureProvider<List<Customer>>((ref) {
+  final repo = ref.watch(accountRepositoryProvider);
+  final scope = ref.watch(worklistScopeProvider);
+  final filters = ref.watch(worklistFiltersProvider);
+  return repo.fetchWorklist(scope: scope, filters: filters);
+});
+
+final customerByIdProvider = FutureProvider.family<Customer, String>((ref, id) {
+  final repo = ref.watch(accountRepositoryProvider);
+  return repo.fetchById(id);
+});
 
 /// Falls back to the last cached response on any failure, rather than
-/// throwing straight to ErrorState -- without a cache, offline meant the
-/// worklist (and everything downstream of it: call logs, payments, PTPs)
-/// was completely unreachable, even though the offline queue exists
-/// specifically to let those actions be recorded without connectivity.
+/// throwing straight to ErrorState -- without a cache, offline meant
+/// reference data (disposition codes) was completely unreachable. Kept
+/// local (rather than moved onto AccountRepository) since disposition codes
+/// aren't Account data.
 Future<List<Map<String, dynamic>>> _fetchWithCacheFallback(
   Ref ref,
   String cacheKey,
@@ -60,67 +75,6 @@ Future<List<Map<String, dynamic>>> _fetchWithCacheFallback(
     return (cached as List).cast<Map<String, dynamic>>();
   }
 }
-
-/// Builds an unambiguous offline-read-cache key for a given scope + filter
-/// selection. A naive `list.join('_')` let two different selections
-/// collide onto the same key whenever a branch/bucket name itself
-/// contained an underscore (e.g. branches: ["A","B"] and branches: ["A_B"]
-/// both joined to "A_B") -- on the offline-fallback path that could
-/// silently serve a cached list for the wrong filter combination. `\u0001`
-/// separates names *within* a branch/bucket list; `\u0002` separates the
-/// three top-level segments (scope, branches, buckets). Both are control
-/// characters that can never appear in a real branch/bucket name, and using
-/// two *distinct* separators (rather than one) also rules out the boundary
-/// shifting between segments -- e.g. branches: ["A","B"], buckets: ["C"]
-/// vs. branches: ["A"], buckets: ["B","C"] would still collide if `\u0001`
-/// alone separated everything flat, since both reduce to the same token
-/// stream "A\u0001B\u0001C" with no marker for where the branches group
-/// ends and the buckets group begins.
-String _worklistCacheKey(String scope, WorklistFilterSelection filters) {
-  const itemSep = '\u0001';
-  const groupSep = '\u0002';
-  final segments = [scope, filters.branches.join(itemSep), filters.buckets.join(itemSep)];
-  return 'worklist_${segments.join(groupSep)}';
-}
-
-final worklistProvider = FutureProvider<List<Customer>>((ref) async {
-  final api = ref.watch(apiClientProvider);
-  final scope = ref.watch(worklistScopeProvider);
-  final filters = ref.watch(worklistFiltersProvider);
-  final query = <String, dynamic>{};
-  if (scope == 'team') query['scope'] = 'team';
-  if (filters.branches.isNotEmpty) query['customer_branch'] = filters.branches.join(',');
-  if (filters.buckets.isNotEmpty) query['bucket'] = filters.buckets.join(',');
-  final cacheKey = _worklistCacheKey(scope, filters);
-  final list = await _fetchWithCacheFallback(ref, cacheKey, () async {
-    final res = await api.get<Map<String, dynamic>>(
-      '/worklist',
-      query: query.isEmpty ? null : query,
-    );
-    return (res.data!['customers'] as List).cast<Map<String, dynamic>>();
-  });
-  return list.map(Customer.fromJson).toList();
-});
-
-/// Resolves a single assigned customer by id — backs the detail screen and
-/// its children (call log / payment / PTPs / field visit), which navigate
-/// by id rather than carrying the Customer object across routes (go_router's
-/// `extra` doesn't survive an app restart or a cold deep link).
-final customerByIdProvider =
-    FutureProvider.family<Customer, String>((ref, id) async {
-  final api = ref.watch(apiClientProvider);
-  final cacheKey = 'customer_$id';
-  try {
-    final res = await api.get<Map<String, dynamic>>('/worklist/$id');
-    final json = res.data!['customer'] as Map<String, dynamic>;
-    await ReadCache.put(cacheKey, json);
-    return Customer.fromJson(json);
-  } catch (e) {
-    final cached = await ReadCache.get(cacheKey);
-    if (cached == null) rethrow;
-    return Customer.fromJson((cached as Map).cast<String, dynamic>());
-  }
-});
 
 final dispositionCodesProvider = FutureProvider((ref) async {
   final api = ref.watch(apiClientProvider);

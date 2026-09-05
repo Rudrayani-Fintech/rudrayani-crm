@@ -35,11 +35,6 @@ dependencies:
   uuid: ^4.5.3
   path_provider: ^2.1.6
 
-  # Reminders: local (on-device) scheduled notifications, no Firebase
-  flutter_local_notifications: ^18.0.1
-  timezone: ^0.9.4
-  flutter_timezone: ^3.0.1
-
   # Supporting documents: PDF picking (photos reuse image_picker already above)
   file_picker: ^8.1.6
 

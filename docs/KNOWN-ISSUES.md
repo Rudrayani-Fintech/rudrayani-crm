@@ -2,7 +2,7 @@
 
 Live checklist, not a chronological log (see `docs/mobile-revamp-decisions.md` for the append-only
 decision history behind each of these). Update in place as items are fixed or new ones are found.
-Last updated: 2026-09-05, after Phase 11.
+Last updated: 2026-09-05, after Phase 13.
 
 ## Why this file exists
 
@@ -159,7 +159,32 @@ The standalone `POST /payments` `close_customer` path is unchanged and still use
 replay -- there's simply no mobile screen driving it directly. Revisit only if closing a customer
 from the field turns out to be a real workflow need.
 
-## 6. Format for adding new entries
+## 6. Mobile: Phase 12-13 scope notes
+
+### 7a. My Day's "this month" figures are a composition of two endpoints, not one
+`/tracking/team-day` only accepts a single `date`; `/reports/agent-activity` has no date-range
+filter. My Day's month view therefore calls `/reports/trail` (contacted, PTPs set) and
+`/reports/overview` (collected) separately and shows them together. Functionally correct, but two
+requests instead of one, and there's no "Visits this month" figure at all (no kept endpoint gives
+a month-range field-visit count, and it's a shrinking metric now that Phase 11 routes field-agent
+interactions through `/call-logs` instead of `/field-visits` anyway). A dedicated aggregate
+endpoint would be cleaner if a future phase revisits reporting.
+
+### 7b. Branch's "tap through to an agent's day" is a bottom sheet, not a separate screen
+§5.1 says "tapping through to that agent's day" without specifying the UI shape. The row already
+carries everything (`GET /tracking/team-day` returns the full day's numbers per agent), so a
+bottom sheet was the simplest option consistent with the rest of the spec (§0.1) rather than
+building a new route/screen and a second request for data already in hand. Revisit only if a
+branch manager wants something more persistent (e.g. comparing two agents side by side).
+
+### 7c. `rawFields` on history-timeline entries is now write-only
+`history_timeline.dart`'s `_HistoryEntry.rawFields` was populated for the correction-request
+dialog (Phase 13 deleted the dialog and its call site, mobile-only per P1 — web keeps its own
+correction-request UI). The field itself was left in place rather than threading its removal
+through every construction site for zero behavioural gain; it's simply unread now. Harmless, but
+worth deleting outright if `history_timeline.dart` gets touched again for another reason.
+
+## 7. Format for adding new entries
 
 When a new phase surfaces a defect that isn't blocking that phase's own verification, add a dated
 subsection under the relevant number above (or a new `## N.` section for a new category) with:

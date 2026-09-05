@@ -5,10 +5,10 @@ import '../../core/api/api_client.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Same-day (rolling 24h) owner-only remark edit -- mobile counterpart to
-/// web's EditRemarkModal. Distinct from correction_request_dialog.dart's
-/// "Report an error" (manager-approved, no time limit); for a call_log this
-/// edits only the free-text tail (extra_remark), never the disposition or
-/// structured fields.
+/// web's EditRemarkModal. Distinct from web's correction-request flow
+/// (manager-approved, no time limit -- mobile dropped its own copy of this
+/// UI in Phase 13, P1: web only); for a call_log this edits only the
+/// free-text tail (extra_remark), never the disposition or structured fields.
 Future<void> showEditRemarkDialog(
   BuildContext context,
   WidgetRef ref, {

@@ -17,13 +17,13 @@
          this exemption, even though the location-type foreground service and
          while-in-use permission are otherwise sufficient. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
-    <!-- Reminder notifications (Android 13+ requires this runtime grant;
-         requested from NotificationService.requestPermission()). -->
+    <!-- The tracking foreground service's persistent "On duty" notification
+         (Android 13+ requires this runtime grant; requested from
+         TrackingService via FlutterForegroundTask.requestNotificationPermission()).
+         Phase 13 removed the separate reminder-notification feature this
+         permission used to also serve (flutter_local_notifications) -- this
+         declaration stays for the tracking notification, which is unrelated. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <!-- flutter_local_notifications: exact alarms are NOT requested (we use
-         inexactAllowWhileIdle), but these two let a scheduled notification
-         survive a reboot / be received at all. -->
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
 
     <application

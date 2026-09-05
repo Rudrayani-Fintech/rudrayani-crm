@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'correction_request_dialog.dart';
 import 'customer_detail_provider.dart';
 import 'edit_remark_dialog.dart';
 import '../../../core/utils/parser.dart';
@@ -290,21 +289,8 @@ class HistoryTimeline extends ConsumerWidget {
                                 ),
                               );
                             }
-                            if (e.correctableRecordType != null) {
-                              return IconButton(
-                                icon: const Icon(Icons.flag_outlined, size: 18),
-                                tooltip: 'Report an error',
-                                onPressed: () => showCorrectionRequestDialog(
-                                  context,
-                                  ref,
-                                  recordType: e.correctableRecordType!,
-                                  recordId: e.recordId!,
-                                  currentValues: e.rawFields!,
-                                  onSubmitted: () =>
-                                      ref.invalidate(customerDetailProvider(customerId)),
-                                ),
-                              );
-                            }
+                            // Phase 13 (P1): correction requests are web-only
+                            // on mobile now.
                             return null;
                           }(),
                         ),

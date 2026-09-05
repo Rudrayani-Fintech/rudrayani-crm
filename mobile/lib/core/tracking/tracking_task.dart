@@ -117,7 +117,6 @@ class TrackingTaskHandler extends TaskHandler {
 
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
-    await loadServerUrlOverride();
     _dio = buildDio();
     await _openStore();
     await _capturePing();

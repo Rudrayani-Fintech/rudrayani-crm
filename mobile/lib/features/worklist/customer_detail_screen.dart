@@ -1,11 +1,9 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../../core/api/api_client.dart';
 import '../../core/models/customer.dart';
 import '../../core/utils/friendly_error.dart';
 import '../../core/utils/messaging.dart';
@@ -130,73 +128,6 @@ class _CustomerDetailBody extends ConsumerWidget {
     );
   }
 
-  Future<void> _requestReallocation(BuildContext context, WidgetRef ref) async {
-    final reasonCtrl = TextEditingController();
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Request Reallocation'),
-        content: TextField(
-          controller: reasonCtrl,
-          maxLines: 3,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Why should this customer be moved? *',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, reasonCtrl.text.trim()),
-            child: const Text('Submit'),
-          ),
-        ],
-      ),
-    );
-    if (reason == null) return; // Cancelled -- no feedback needed.
-    if (reason.length < 3) {
-      // Previously discarded silently -- the agent typed "no" or similar,
-      // tapped Submit, and the dialog just closed with nothing sent and no
-      // indication why.
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please explain why in a few more words')),
-        );
-      }
-      return;
-    }
-
-    try {
-      await ref
-          .read(apiClientProvider)
-          .post(
-            '/reallocation-requests',
-            data: {'customer_id': customer.id, 'reason': reason},
-          );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Request sent — your team leader will review it'),
-            backgroundColor: AppColors.success,
-          ),
-        );
-      }
-    } on DioException catch (e) {
-      if (context.mounted) {
-        final msg = e.response?.statusCode == 409
-            ? 'A request is already pending for this customer'
-            : friendlyError(e);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(msg), backgroundColor: AppColors.error),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
@@ -204,23 +135,6 @@ class _CustomerDetailBody extends ConsumerWidget {
         backgroundColor: AppColors.primary,
         foregroundColor: AppColors.onPrimary,
         title: Text(customer.customerName),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'realloc') _requestReallocation(context, ref);
-            },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(
-                value: 'realloc',
-                child: ListTile(
-                  leading: Icon(Icons.swap_horiz),
-                  title: Text('Request Reallocation'),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
       body: RefreshIndicator(
         // X4 fix: this used to invalidate only customerDetailProvider (the

@@ -6,7 +6,7 @@
 // back to the branch_manager tab too (agency-wide scope resolves the same
 // way server-side). The branching itself is a pure function
 // (resolveDashboardRole) precisely so it can be tested here without mounting
-// the full HomeShell widget tree -- WorklistScreen (one of the other tabs)
+// the full HomeShell widget tree -- TodayScreen (one of the other tabs)
 // pulls in Hive/connectivity_plus platform channels that aren't mocked
 // anywhere in this test suite, so a full-tree HomeShell widget test isn't
 // practical; the per-screen rendering tests (telecaller_dashboard_test.dart

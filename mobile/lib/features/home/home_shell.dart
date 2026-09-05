@@ -7,8 +7,9 @@ import '../dashboard/branch_manager_dashboard_screen.dart';
 import '../dashboard/field_executive_dashboard_screen.dart';
 import '../dashboard/telecaller_dashboard_screen.dart';
 import '../performance/performance_screen.dart';
-import '../worklist/worklist_screen.dart';
+import '../today/today_screen.dart';
 import '../account/account_screen.dart';
+import 'duty_bar_host.dart';
 
 /// Which role-specific dashboard tab (if any) a user's capability set maps
 /// to. A user can only hold one of branch_manager/telecaller/field_agent as
@@ -20,14 +21,14 @@ import '../account/account_screen.dart';
 /// now, no intermediary rank, so admin/operations_manager fall back to the
 /// branch_manager dashboard tab too (agency-wide scope resolves the same
 /// way server-side). A branch_manager who ALSO carries collections work
-/// (agent_type set) still gets their own personal worklist "for free" --
-/// WorklistScreen is unconditionally present in HomeShell's tab list below
+/// (agent_type set) still gets their own personal Today tab "for free" --
+/// TodayScreen is unconditionally present in HomeShell's tab list below
 /// regardless of role, so there's no separate dual-capability branch
 /// needed here; only the management-tier dashboard tab is role-exclusive.
 /// Extracted as a pure function (rather than inlined in build()) so the
 /// branching itself has a fast, deterministic unit test independent of the
 /// full widget tree (see test/home_shell_dashboard_role_test.dart) --
-/// HomeShell's other tabs (WorklistScreen in particular) pull in Hive/
+/// HomeShell's other tabs (TodayScreen in particular) pull in Hive/
 /// connectivity platform channels that make a full widget-tree mount
 /// impractical for a routing-only test.
 enum DashboardRole { branchManager, telecaller, fieldAgent }
@@ -49,7 +50,7 @@ DashboardRole? resolveDashboardRole(List<String> capabilities) {
 /// role-specific dashboards is present -- the role checks are mutually
 /// exclusive, so there's never ambiguity about which screen it means for a
 /// given user.
-enum HomeTab { worklist, dashboard, performance, account }
+enum HomeTab { today, dashboard, performance, account }
 
 class _HomeTabEntry {
   final HomeTab tab;
@@ -59,7 +60,7 @@ class _HomeTabEntry {
 }
 
 /// Role-aware landing (brief §3, §10; Phase 12: role-based dashboards).
-/// Every role gets My Worklist / My Performance; a branch_manager
+/// Every role gets Today / My Performance; a branch_manager
 /// additionally gets a Branch Dashboard (covering every team in their
 /// branch directly, plus reallocation approvals), and a plain telecaller/
 /// field_agent gets their own role-specific Dashboard tab.
@@ -71,7 +72,7 @@ class HomeShell extends ConsumerStatefulWidget {
 }
 
 class _HomeShellState extends ConsumerState<HomeShell> {
-  HomeTab _tab = HomeTab.worklist;
+  HomeTab _tab = HomeTab.today;
 
   @override
   Widget build(BuildContext context) {
@@ -83,12 +84,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
     final entries = <_HomeTabEntry>[
       _HomeTabEntry(
-        tab: HomeTab.worklist,
+        tab: HomeTab.today,
         destination: const NavigationDestination(
-          icon: Icon(Icons.list_alt),
-          label: 'My Worklist',
+          icon: Icon(Icons.today),
+          label: 'Today',
         ),
-        builder: (_) => const WorklistScreen(),
+        builder: (_) => const TodayScreen(),
       ),
       if (isBranchManager)
         _HomeTabEntry(
@@ -141,6 +142,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     return Scaffold(
       body: Column(
         children: [
+          // Phase 10 (§5.1, S7): persistent duty bar above every tab -- the
+          // quick-glance duty/timer/sync/offline indicator. SyncBanner stays
+          // underneath for the actionable detail view (pending list,
+          // dead-letter discard, error dismiss) that the duty bar's compact
+          // sync count doesn't attempt to duplicate.
+          const DutyBarHost(),
           const SyncBanner(),
           // Phase 9 (§7.4): previously an IndexedStack built every tab's
           // screen at once -- the documented cause of a 6-8 parallel-request

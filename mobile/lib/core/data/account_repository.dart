@@ -97,6 +97,53 @@ class AccountRepository {
     return list.map(Account.fromJson).toList();
   }
 
+  /// One page of the assigned-accounts list (Phase 10, §4.1/N5/S8): the
+  /// lazy-scrolled Today worklist, 50 rows at a time, with server-side
+  /// search (`q`) and branch/bucket filtering -- both clients must filter
+  /// server-side per §4.1, so `q` is sent to the backend rather than
+  /// `.where()`-filtering a fully-loaded list client-side the way the old
+  /// WorklistScreen did.
+  ///
+  /// Offline fallback only covers the first, unsearched page (`page == 1`,
+  /// empty `q`) -- consistent with F6 ("no pre-download, no delta sync"),
+  /// paginated/search results simply aren't cached. A page-2+ or searched
+  /// request offline surfaces its error normally rather than silently
+  /// returning wrong/incomplete cached data for a query it never ran.
+  Future<({List<Account> items, int total})> fetchWorklistPage({
+    required String scope,
+    required WorklistFilterSelection filters,
+    required int page,
+    int limit = 50,
+    String q = '',
+  }) async {
+    final query = <String, dynamic>{'page': page, 'limit': limit};
+    if (scope == 'team') query['scope'] = 'team';
+    if (filters.branches.isNotEmpty) query['customer_branch'] = filters.branches.join(',');
+    if (filters.buckets.isNotEmpty) query['bucket'] = filters.buckets.join(',');
+    if (q.isNotEmpty) query['q'] = q;
+
+    final cacheable = page == 1 && q.isEmpty;
+    Map<String, dynamic> data;
+    try {
+      final res = await _api.get<Map<String, dynamic>>('/worklist', query: query);
+      data = res.data!;
+      if (cacheable) {
+        await ReadCache.put(accountWorklistCacheKey(scope, filters), data);
+        _ref.read(worklistIsStaleProvider.notifier).state = false;
+      }
+    } catch (e) {
+      if (!cacheable) rethrow;
+      final cached = await ReadCache.get(accountWorklistCacheKey(scope, filters));
+      if (cached == null) rethrow;
+      _ref.read(worklistIsStaleProvider.notifier).state = true;
+      data = (cached as Map).cast<String, dynamic>();
+    }
+
+    final items = (data['customers'] as List).cast<Map<String, dynamic>>().map(Account.fromJson).toList();
+    final total = (data['total'] as num?)?.toInt() ?? items.length;
+    return (items: items, total: total);
+  }
+
   /// One assigned account by id (`GET /worklist/:id`) -- backs the detail
   /// screen and its children (call log / payment / PTPs / field visit),
   /// which navigate by id rather than carrying the object across routes

@@ -986,3 +986,90 @@ enforcement per I5, the PTP-vs-payment payload split per I2, grouped most-used-f
 no regressions from either phase's deletions (`worklist_screen.dart`, `call_log_screen.dart`,
 `payment_screen.dart`, and their now-orphaned `call_log_screen_test.dart`, all removed outright
 rather than left dormant, per §0.5).
+
+## Phase 12 and 13 execution (2026-09-05)
+
+Both implemented in one worktree (`worktree-phase12-13-myday-cutlist`, branched from
+`origin/revamp-integration` at `c54fe89`, immediately after Phases 10-11 landed), committed
+separately. Per the user's explicit instruction this session, work stayed on its own branch and
+was merged into `revamp-integration` only after both phases were implemented and fully verified --
+same target branch as every prior phase, `main`/production untouched either way.
+
+**Phase 12** (My Day and Branch, P4, P5, N6, Q3): deleted the three role-specific dashboards
+(`features/dashboard/*`) and My Performance (`features/performance/`) outright -- all four had
+depended on `/reports/dashboard`, deleted in Phase 7, so they had been silently 404ing since then;
+this is a like-for-like replacement of already-broken screens, not new user-facing loss. Replaced
+them with **My Day** (`features/myday/myday_screen.dart`, every role) and **Branch**
+(`features/branch/branch_screen.dart`, branch managers only), finishing the tab lineup Phase 10
+started: `HomeTab` is now `today`/`myDay`/`branch`/`account`.
+
+Both screens read `GET /tracking/team-day` (self-scoped for a plain agent, branch-scoped for a
+branch manager -- the same server-side `scopeFilter()` the old Team Leader dashboard already
+relied on) for "today": contacted (`calls`), collected (`payments_total`), PTPs set (`ptps`),
+visits (`field_visits`). My Day's "this month" section needed a second data source, since
+`/tracking/team-day` only accepts a single `date` and `/reports/agent-activity` (confirmed by
+reading `reports.ts` directly -- see Phase 10's own section above for why that mattered there too)
+has no date-range filter at all: `/reports/trail?from=<month start>&to=<today>` gives
+`total_trails` (contacted) and `ptps_created` (PTPs set) already computed server-side;
+`/reports/overview?months=1` gives the collected total. No "Visits this month" tile -- no kept
+endpoint gives a month-range field-visit count, and it's an intentionally shrinking number anyway
+now that Phase 11 routes field-agent interactions through `/call-logs` instead of `/field-visits`.
+Branch's "tap through to that agent's day" is a bottom sheet built from the row's own already-
+fetched data, not a second request to a per-agent endpoint that doesn't exist -- **DECIDE**,
+resolved for the simplest option consistent with the rest of the spec (§0.1).
+
+`isBranchManager()` replaces `resolveDashboardRole()`/`DashboardRole` (Phase 9) -- a plain
+capability check, no widest-scope-wins fallback for `agency_admin`/`operations_manager`, since
+§5.1 says "Branch (branch managers only)" literally, unlike the old three-way dashboard split.
+
+**Phase 13** (the cut list, S6, A3, A6, A4, P1): deleted `generic_list_screen.dart`,
+`employee_detail_screen.dart`, and every route into the six admin lists, plus the now-orphaned
+`/account/ptps/:status` route (its only caller was the PTP Created/Kept/Broken tiles Phase 12 just
+deleted). Rebuilt `account_screen.dart` down to name, phone, branch, and Log out -- branch *name*
+needed resolving from the user's `branch_id` (only an id is on `/auth/me`'s `publicUser()`), done
+via `GET /branches`, which is deliberately open to any authenticated user already (its own comment
+in `branches.ts` explains why: every role needs the full list for pickers) -- no new endpoint or
+permission needed. Log out moves here from the old Today-tab app bar (its only prior home); Punch
+Out drops entirely, redundant with the duty bar every tab has carried since Phase 10.
+
+Deleted reallocation (`customer_detail_screen.dart`'s popup menu) and correction-request UI
+(`history_timeline.dart`'s flag icon, `correction_request_dialog.dart` outright) from mobile --
+web keeps its own copy, per P1.
+
+Removed the server-URL runtime override (`setServerUrlOverride`/`loadServerUrlOverride`, the
+secure-storage key, the login screen's gear icon and dialog) rather than just hiding the UI --
+once the only caller (the login screen) is gone, the mechanism has no path left to ever be
+invoked, so keeping it would be exactly the kind of noise this pass is meant to remove.
+`--dart-define=API_URL` is unaffected. Two other Phase 13 line items turned out to already be
+satisfied by earlier phases, confirmed rather than assumed: no device-binding copy exists anywhere
+in the actual app (A3 -- that language was only ever in the stale mockup HTML), and
+`riverpod_annotation`/`riverpod_generator`/`build_runner` were already removed in Phase 9 (§7.3,
+reconfirmed against `pubspec.yaml` before writing this off).
+
+Deleted `NotificationService` and its three dependencies (P9: no push notifications anywhere --
+a pending reminder now surfaces only via `TodaySection`, already visible on app open since Phase
+10). Kept the reminder create/mark-done CRUD itself in `reminders_provider.dart`, just dropped the
+notification-scheduling side effect and the now-purposeless `upcomingRemindersProvider`/
+`rescheduleAllReminders`. In `AndroidManifest.xml`, removed `RECEIVE_BOOT_COMPLETED` (its own
+comment already scoped it to reminder-notification survival-after-reboot, nothing else needs it)
+but deliberately kept `POST_NOTIFICATIONS`/`VIBRATE` -- confirmed by reading `tracking_service.dart`
+first that `TrackingService`'s own `FlutterForegroundTask.requestNotificationPermission()` call
+needs `POST_NOTIFICATIONS` independently, for the "On duty" persistent tracking notification. This
+is exactly the "read before deleting" discipline HANDOFF.md's git-workflow notes ask for, applied
+to a manifest permission instead of a git ref -- a wrong guess here would have silently broken a
+working, money-critical feature (GPS tracking) instead of a merely-cosmetic one.
+
+Added the password-reset request screen (A4) at `/password-reset-request`, exempted from the
+router's auth redirect (a locked-out user reaches it precisely because they can't log in) --
+`POST /auth/password-reset-request`, identical response regardless of whether the phone exists,
+per the backend's own anti-enumeration design (§4.6). `login_screen.dart` gained a "Forgot
+password?" link and a debounced status line (S2) once a valid phone is entered, calling the same
+unauthenticated `GET /auth/password-reset-request?phone=` status endpoint. Fixed X6's phone-length
+mismatch in the same pass: `phoneDigitsRegExp` (`^\d{8,15}$`) replaces the old exactly-10-digit
+check, shared between both screens.
+
+Verified: `flutter analyze` clean after both phases (0 issues beyond the same 4 pre-existing
+`ptps_screen.dart` lints, present since before Phase 10). Full `flutter test`: 94/94 passing (9
+new Phase 12 tests: Branch-tab presence gate, `findSelfRow`'s self-row lookup; 16 new Phase 13
+tests: `phoneDigitsRegExp` boundaries, two `widget_test.dart` assertions for the reduced login
+surface) -- no regressions from any of the deletions across both phases.

@@ -6,14 +6,16 @@ behind decisions already made, `docs/KNOWN-ISSUES.md` is the *what's already bro
 about* checklist. This file exists because a fresh session has none of the prior conversation
 context that produced those three documents.
 
-**Last updated:** 2026-09-05, immediately after Phase 11.
+**Last updated:** 2026-09-05, immediately after Phase 13.
 
 ---
 
 ## 1. Where things actually stand
 
-- **Phases 0-11 of 18 are done**, verified, and live on the `revamp-integration` branch (pushed to
+- **Phases 0-13 of 18 are done**, verified, and live on the `revamp-integration` branch (pushed to
   `origin`). Phase-by-phase summary: §5 below.
+- **The mobile client (Phases 8-13) is now feature-complete per this spec.** Phase 14 onward is
+  web (`frontend/`, React/TypeScript/Vite/AntD 5) — a different stack from everything done so far.
 - **`main` is NOT the integration branch for this work.** `origin/main` auto-deploys to production
   (Railway). Phase 7 deleted backend routes the current web frontend still calls (see
   `KNOWN-ISSUES.md` §2) — deploying anything from this revamp before Phase 15 ships would break
@@ -25,8 +27,9 @@ context that produced those three documents.
   directly to it (`git push origin HEAD:revamp-integration`) after merging your phase's branch
   into it locally is the simplest path. If a future session finds someone already has it checked
   out, see §4's git-workflow notes for the workaround used once already this session.
-- **The mobile app (`mobile/`) is the current focus** — Phases 8-13 are all mobile, Phases 14-16
-  are web, Phase 17 is final verification. Phases 0-7 were 100% backend and are done.
+- **The mobile app (`mobile/`) is now done** — Phases 8-13 were all mobile and are complete. The
+  web app (`frontend/`) is the new focus: Phases 14-16, then Phase 17 (final verification, both
+  clients). Phases 0-7 were 100% backend and are done.
 
 ## 2. Standing instructions from the user (do not relitigate these)
 
@@ -154,6 +157,19 @@ context that produced those three documents.
 - **`flutter analyze`/`flutter test` both work fine in this environment** and are fast enough to
   run after every meaningful change (they took 15s-30s once pub's initial fetch was warm). Prefer
   running them liberally over guessing whether something compiles.
+- **Composing existing report endpoints instead of adding one**: when a phase's file list is
+  mobile-only, a missing aggregate isn't automatically a backend gap to work around silently or a
+  reason to invent a client-side approximation — first check whether two *already-kept*,
+  range-capable endpoints answer it together (My Day, Phase 12: `/reports/trail` +
+  `/reports/overview` for "this month", since neither `/tracking/team-day` (single-day only) nor
+  `/reports/agent-activity` (no date-range filter) could alone). Read the actual route/service
+  code before concluding a real gap exists.
+- **A route with only `authenticate` and no `requirePermission` is deliberately open to the whole
+  agency**, not an oversight — check the route file's own comments before assuming a plain agent
+  needs a new permission or endpoint to read something (Account's branch-name lookup, Phase 13,
+  reuses `GET /branches` for exactly this reason: its comment explains why it's intentionally
+  ungated). Don't add a permission check "to be safe" without reading the existing gate's rationale
+  first.
 
 ## 5. Phase-by-phase status
 
@@ -171,41 +187,53 @@ context that produced those three documents.
 | **9** | **Mobile: state/navigation foundation** | **Done, with documented deferrals (§4 in KNOWN-ISSUES.md)** |
 | **10** | **Mobile: Today (day plan) + duty bar wiring** | **Done** |
 | **11** | **Mobile: Customer detail + Log Visit rebuild, delete call-log/payment screens** | **Done, with documented scope cuts (§5 in KNOWN-ISSUES.md)** |
-| 12 | Mobile: My Day + Branch views, delete dashboard/performance screens | **Not started — next up** |
-| 13 | Mobile: the cut list (delete Account admin lists, notifications, etc.) | Not started |
-| 14 | Web: worklist day-plan restructure | Not started (can run parallel to mobile phases) |
+| **12** | **Mobile: My Day + Branch views, delete dashboard/performance screens** | **Done** |
+| **13** | **Mobile: the cut list (delete Account admin lists, notifications, etc.)** | **Done, with documented scope notes (§6 in KNOWN-ISSUES.md)** |
+| 14 | Web: worklist day-plan restructure | **Not started — next up** (can run parallel to any remaining mobile work) |
 | 15 | Web: delete KPI surface, rework navigation | Not started (**this is what fixes §2 of KNOWN-ISSUES.md**) |
 | 16 | Web: admin surfaces for password-reset/address-correction | Not started |
 | 17 | Verification and regression (full suite, physical device E2E) | Not started (**this is where deferred full-regression testing happens**) |
 
-## 6. Starting Phase 12
+## 6. Starting Phase 14
 
-Read `docs/REVAMP-SPEC.md` §5.1 (mobile IA) and the Phase 12 section in full before starting.
-Quick orientation:
+Read `docs/REVAMP-SPEC.md`'s Phase 14 section (and §5.2, the web IA summary) in full before
+starting — this handoff's own author has only skimmed it (its `F` file, `frontend/src/pages/
+MyWorklistPage.tsx`, and the "same day-plan restructure as mobile, Rule R1" framing), not verified
+its full `C`/`A`/`T` text the way every mobile phase's brief above was. Quick orientation from what
+*is* confirmed:
 
-- **Delete the three role dashboards and My Performance**
-  (`features/dashboard/*`, `features/performance/performance_screen.dart`) and replace them in
-  `HomeShell` with **My Day** (every role) and **Branch** (branch managers only) — this finally
-  finishes the tab lineup Phase 10 started (`HomeTab` currently has `today`/`dashboard`/
-  `performance`/`account`; this phase is what turns it into `today`/`myDay`/`branch`/`account`
-  per §5.4's nav table).
-- **No targets, no percentages, no gauges** on either screen — same "ledger, not KPIs" rule as
-  everywhere else in this revamp (P4, P5).
+- **This is a stack switch.** Phases 0-13 were `backend/` (Node/Express/TS/pg) and `mobile/`
+  (Flutter/Riverpod/GoRouter). Phase 14 onward is `frontend/` (React 18 + TypeScript + Vite + Ant
+  Design 5) — a codebase this session has not yet read. Spend real time orienting in `frontend/src/`
+  before changing anything; none of the mobile-specific patterns in §4 above (typedef-alias
+  bridging, Riverpod providers, the Hive-backed local-store pattern, GoRouter redirects) carry over
+  directly, though the underlying *product* decisions (P4-P12, I1-I8, F1-F6, N1-N6, S1-S8) apply
+  identically to both clients — re-read §2's decision tables with fresh eyes for the web
+  implications, don't assume "already handled, mobile did this."
+- **Rule R1 ("mobile and web move together")**: Phase 14's `D` is Phase 7 (backend), not Phase
+  13 (mobile) — it's explicitly allowed to run in parallel with any remaining mobile work, not
+  gated behind it. Phases 8-13 being done doesn't mean Phase 14 was blocked waiting; it's just next
+  in spec order.
+- **Same day-plan restructure as mobile's Phase 10**, per the spec's own cross-reference: PTPs due
+  pinned/highlighted above the worklist, worked rows grey and sink, search/filter run server-side
+  (the backend contract for this, `GET /worklist`'s pagination/worked-state/filters, already
+  shipped in Phase 3 — check the web client is actually using it before assuming backend work is
+  needed here, same caution Phase 10's own brief gave for mobile).
 - **`GET /reports/agent-activity` is a row-level activity *feed* (paginated individual actions),
   not an aggregate stat endpoint** — confirmed by reading `backend/src/routes/reports.ts` directly
-  during Phase 10 (see that phase's section in `mobile-revamp-decisions.md` for why Phase 10's own
-  progress line avoided it and derived its numbers from the worklist's sort order instead). If My
-  Day needs a single "contacted: 12, collected: ₹8,400" summary rather than a scrollable feed,
-  either sum the feed client-side (fine for a bounded "today" window, less fine for "this month")
-  or check whether a dedicated summary endpoint already exists elsewhere in `report-service.ts`
-  before assuming one needs to be added — this phase's own file list is mobile-only, so a genuine
-  backend gap here would need scoping explicitly, not silently worked around.
-- `reports.view_self` is the permission that gates an agent's own numbers on this endpoint (vs.
-  `reports.view` for the full agency-wide view) — every field agent/telecaller should already hold
-  it; branch managers additionally get `scope=team` for the Branch tab's per-agent rows.
-- This is another **feature screen** phase — keep using `core/ui/*` (`AppStatTile` in particular,
-  built in Phase 8, still looking for its first real consumer beyond the gallery) rather than
-  hand-rolling stat cards.
+  during mobile Phase 10, and re-confirmed during Phase 12's My Day screen (which had to compose
+  `/reports/trail` + `/reports/overview` instead for month-range aggregates, since no single
+  endpoint gives one the way `/tracking/team-day` does for a single day). If Phase 14's ledger view
+  needs a similar aggregate, the same composition approach — or a real backend gap worth scoping
+  explicitly — likely applies; don't assume `/agent-activity` alone answers it.
+- §4.10's **"Keep" list** (`/reports/agent-activity` + export, `/trail`, `/overview`, `/trend`,
+  `/deposits-range`, `/exceptions`, `filterOptions`, `collectedToday`, `collectionByType`,
+  `collectionByChannel`, `listDeposits`, `depositTotals`) is exactly what's still live server-side
+  after Phase 7's deletions — Phase 14 (and 15, 16) build against these, not the deleted
+  `/dashboard`/`/agents`/`/breakdown`/etc. routes the current *web* frontend may still be calling
+  (see `KNOWN-ISSUES.md` §2 — that's precisely what Phase 15 fixes, so don't be surprised if
+  `frontend/` still references deleted routes right now; that's the known, sequenced state, not a
+  bug to fix in Phase 14).
 
 ## 7. If you get stuck or something looks wrong
 

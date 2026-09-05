@@ -194,6 +194,11 @@ export interface WorklistCustomer {
   ptp_amount: string | null;
   ptp_date: string | null;
   normalized_pending: boolean;
+  // Phase 14 (§4.1): already returned by GET /worklist since Phase 3, never
+  // modeled here until now -- worked_today is the server's primary sort key
+  // (worked rows sink last) and drives the greyed-row styling.
+  worked_today: boolean;
+  collected_today: string | null;
 }
 
 export interface AllocationLog {

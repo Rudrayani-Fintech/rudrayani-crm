@@ -2,7 +2,7 @@ import { Alert, Badge, Button, Collapse, Input, Modal, Select, Space, Table, Tag
 import { CalendarOutlined, DollarOutlined, EditOutlined, EnvironmentOutlined, FileTextOutlined, PhoneOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import CustomerDetailDrawer from "../components/CustomerDetailDrawer";
@@ -137,7 +137,6 @@ export default function MyWorklistPage() {
   const [products, setProducts] = useState<{ raw_label: string; canonical_label: string }[]>([]);
 
   const [search, setSearch] = useState("");
-  const [filterCompany, setFilterCompany] = useState<string | undefined>();
   // Lazy initializers: MyWorklistPage only ever mounts once RequireAuth's
   // `loading` gate has cleared (see App.tsx), so `user` is already resolved
   // at this component's first render -- hydrating synchronously here means
@@ -157,19 +156,12 @@ export default function MyWorklistPage() {
   const { myWorkOnly } = useWorkScope();
   const scope: "personal" | "team" = myWorkOnly ? "personal" : "team";
 
-  // Companies actually present in the worklist -- cheap client-side derivation
-  // (mirrors the mobile app's same approach), no new endpoint. Company itself
-  // is filtered client-side too (below), so this list never shrinks out from
-  // under the dropdown the way a server-filtered derivation would.
-  const companyOptions = useMemo(() => {
-    const names = Array.from(new Set(customers.map((c) => c.company_name))).sort();
-    return names.map((name) => ({ value: name, label: name }));
-  }, [customers]);
-
-  const displayedCustomers = useMemo(
-    () => (filterCompany ? customers.filter((c) => c.company_name === filterCompany) : customers),
-    [customers, filterCompany],
-  );
+  // Phase 14 (§4.1): server-side pagination replaces fetching the whole
+  // unpaged list and letting antd's Table paginate the array client-side --
+  // the same 50-per-page contract the mobile Today screen uses (Phase 10).
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const PAGE_SIZE = 50;
 
   const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -211,7 +203,7 @@ export default function MyWorklistPage() {
     setLoading(true);
     try {
       const today = dayjs().format("YYYY-MM-DD");
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { page, limit: PAGE_SIZE };
       if (search) params.q = search;
       if (filterCustomerBranches.length > 0) params.customer_branch = filterCustomerBranches.join(",");
       if (filterProduct) params.product = filterProduct;
@@ -224,6 +216,7 @@ export default function MyWorklistPage() {
         api.get("/ptps/due", { params: { date: today } }),
       ]);
       setCustomers(worklistRes.data.customers);
+      setTotal(worklistRes.data.total);
       setReminders(remindersRes.data.reminders);
       setPtpsDue(ptpsRes.data.ptps);
     } catch (err) {
@@ -231,7 +224,15 @@ export default function MyWorklistPage() {
     } finally {
       setLoading(false);
     }
-  }, [search, filterCustomerBranches, filterProduct, filterBuckets, isBranchManager, scope]);
+  }, [page, search, filterCustomerBranches, filterProduct, filterBuckets, isBranchManager, scope]);
+
+  // A changed search/filter/scope invalidates whatever page was showing --
+  // without this, changing a filter while on page 3 would request page 3 of
+  // the NEW filtered set, which may not exist, instead of starting over from
+  // page 1 the way a filter change should read.
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterCustomerBranches, filterProduct, filterBuckets, scope]);
 
   useEffect(() => {
     api.get("/dispositions").then((res) => setDispositionCodes(res.data.disposition_codes)).catch((err) => message.error(errorMessage(err)));
@@ -251,6 +252,20 @@ export default function MyWorklistPage() {
   }, [load]);
 
   const dueCount = reminders.length + ptpsDue.length;
+
+  // Bug fix (found during Phase 14): this Collapse used to open via
+  // `defaultActiveKey={dueCount > 0 ? ["due"] : []}`, which -- being a
+  // *default* -- is only ever read on the component's first render.
+  // reminders/ptpsDue are both empty until `load()`'s async fetch resolves,
+  // so dueCount is always 0 at mount; the section silently never
+  // auto-opened even when PTPs were due, directly breaking this phase's own
+  // "PTPs due are visible without scrolling" acceptance criterion. Now
+  // controlled: `dueOpen` flips to open the first time real data arrives,
+  // and the agent can still collapse it manually afterward.
+  const [dueOpen, setDueOpen] = useState<string[]>([]);
+  useEffect(() => {
+    if (dueCount > 0) setDueOpen((prev) => (prev.includes("due") ? prev : ["due"]));
+  }, [dueCount]);
 
   const submitReallocation = async () => {
     if (!reallocTarget) return;
@@ -280,7 +295,7 @@ export default function MyWorklistPage() {
         My Worklist
       </Typography.Title>
       <Typography.Text type="secondary">
-        {displayedCustomers.length} customers {scope === "team" ? "assigned to your team" : "assigned to you"}
+        {total} customers {scope === "team" ? "assigned to your team" : "assigned to you"}
       </Typography.Text>
 
       <div style={{ marginTop: 16, display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -292,14 +307,6 @@ export default function MyWorklistPage() {
           allowClear
           onSearch={(v) => setSearch(v)}
           style={{ width: 240 }}
-        />
-        <Select
-          title="All companies" placeholder="All companies"
-          allowClear
-          style={{ width: 180 }}
-          value={filterCompany}
-          onChange={(v) => setFilterCompany(v ?? undefined)}
-          options={companyOptions}
         />
         <Select
           mode="multiple"
@@ -343,7 +350,8 @@ export default function MyWorklistPage() {
 
       <div style={{ marginTop: 16, marginBottom: 16 }}>
         <Collapse
-          defaultActiveKey={dueCount > 0 ? ["due"] : []}
+          activeKey={dueOpen}
+          onChange={(keys) => setDueOpen(Array.isArray(keys) ? keys : [keys])}
           items={[
             {
               key: "due",
@@ -504,12 +512,30 @@ export default function MyWorklistPage() {
       <Table<WorklistCustomer>
         rowKey="id"
         loading={loading}
-        dataSource={displayedCustomers}
-        pagination={{ pageSize: 50 }}
+        dataSource={customers}
+        // Phase 14 (§4.1): server-side pagination -- `total` comes from the
+        // API's own COUNT(*), not customers.length (which is just this
+        // page's 50 rows). The backend already sorts worked_today ASC as
+        // the primary key, so worked rows arrive sunk to the bottom without
+        // any client-side re-sort.
+        pagination={{
+          current: page,
+          pageSize: PAGE_SIZE,
+          total,
+          onChange: (p) => setPage(p),
+          showSizeChanger: false,
+        }}
         locale={{ emptyText: "No customers assigned to you right now" }}
         onRow={(record) => ({
           onClick: () => setDetailId(record.id),
-          style: { cursor: "pointer" },
+          style: {
+            cursor: "pointer",
+            // P8: worked rows grey out (sinking is already handled by the
+            // server's sort order above).
+            ...(record.worked_today
+              ? { color: token.colorTextTertiary, background: token.colorFillTertiary }
+              : {}),
+          },
         })}
         scroll={{ x: scope === "team" ? 1840 : 1700 }}
         columns={[

@@ -13,6 +13,7 @@ import '../features/account/views/generic_list_screen.dart';
 import '../features/account/views/employee_detail_screen.dart';
 import '../core/tracking/attendance_provider.dart';
 import '../features/attendance/punch_in_screen.dart';
+import 'ui/component_gallery_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -23,6 +24,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         ? (attState.punchedIn ? '/home' : '/punch-in')
         : '/login',
     redirect: (_, state) {
+      // Phase 8 (§6): the component gallery is a dev-only visual-review tool,
+      // reachable regardless of auth/punch-in state.
+      if (state.matchedLocation == '/dev/gallery') return null;
+
       final loggedIn = authState.isLoggedIn;
       final onLogin = state.matchedLocation == '/login';
       final onPunchIn = state.matchedLocation == '/punch-in';
@@ -36,6 +41,7 @@ final routerProvider = Provider<GoRouter>((ref) {
     },
     routes: [
       GoRoute(path: '/login', builder: (ctx, s) => const LoginScreen()),
+      GoRoute(path: '/dev/gallery', builder: (ctx, s) => const ComponentGalleryScreen()),
       GoRoute(path: '/punch-in', builder: (ctx, s) => const PunchInScreen()),
       GoRoute(path: '/home', builder: (ctx, s) => const HomeShell()),
       GoRoute(

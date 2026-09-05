@@ -273,6 +273,66 @@ describe("correction requests", () => {
     expect(second.status).toBe(409);
   });
 
+  it("customer record type: rejects a field other than address", async () => {
+    const res = await request(app)
+      .post("/api/correction-requests")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .send({
+        record_type: "customer",
+        record_id: customerId,
+        proposed_changes: { due_amount: 99999 },
+        reason: "trying to change something other than address",
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it("customer record type: an agent not assigned to the customer cannot request a correction (404)", async () => {
+    const res = await request(app)
+      .post("/api/correction-requests")
+      .set("Authorization", `Bearer ${agent2Token}`)
+      .send({
+        record_type: "customer",
+        record_id: customerId,
+        proposed_changes: { address: "123 Someone Else's Street" },
+        reason: "not my customer",
+      });
+    expect(res.status).toBe(404);
+  });
+
+  it("customer record type: an assigned agent's address correction applies customers.address on approval (N3)", async () => {
+    const submit = await request(app)
+      .post("/api/correction-requests")
+      .set("Authorization", `Bearer ${agentToken}`)
+      .send({
+        record_type: "customer",
+        record_id: customerId,
+        proposed_changes: { address: "42 Corrected Lane, Pune" },
+        reason: "lender file had a stale address, customer confirmed the new one",
+      });
+    expect(submit.status).toBe(201);
+    const requestId = submit.body.request.id;
+
+    // Appears in the existing Correction Requests queue alongside the other
+    // record types (Phase 16's A: "appears in the existing... queue").
+    const pendingQueue = await request(app)
+      .get("/api/correction-requests?status=pending")
+      .set("Authorization", `Bearer ${reviewerToken}`);
+    const queued = pendingQueue.body.requests.find((r: { id: string }) => r.id === requestId);
+    expect(queued).toBeDefined();
+    expect(queued.record_type).toBe("customer");
+    expect(queued.customer_id).toBe(customerId);
+
+    const decide = await request(app)
+      .post(`/api/correction-requests/${requestId}/decide`)
+      .set("Authorization", `Bearer ${reviewerToken}`)
+      .send({ approve: true, note: "Confirmed with customer directly" });
+    expect(decide.status).toBe(200);
+    expect(decide.body.request.status).toBe("approved");
+
+    const customer = await pool.query("SELECT address FROM customers WHERE id = $1", [customerId]);
+    expect(customer.rows[0].address).toBe("42 Corrected Lane, Pune");
+  });
+
   it("field visit remark correction applies on approval", async () => {
     const submit = await request(app)
       .post("/api/correction-requests")

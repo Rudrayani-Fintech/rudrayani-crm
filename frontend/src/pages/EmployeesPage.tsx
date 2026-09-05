@@ -16,6 +16,7 @@ import {
 } from "antd";
 import { KeyOutlined, PlusOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -172,6 +173,26 @@ export default function EmployeesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Phase 16: "Link each request to that employee's reset action" --
+  // PasswordResetRequestsPage navigates here with ?reset_user_id=<id>, and
+  // this opens the existing reset-password modal pre-targeted at them, once
+  // the employee list has actually loaded (the id is otherwise unresolvable).
+  // The param is stripped right after so a later manual refresh of this page
+  // doesn't reopen the modal.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const resetUserId = searchParams.get("reset_user_id");
+    if (!resetUserId || employees.length === 0) return;
+    const target = employees.find((e) => e.id === resetUserId);
+    if (target) setResettingFor(target);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("reset_user_id");
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employees]);
 
   // Debounce the search box -- `search` is a dependency of `load` (a
   // useCallback), so updating it directly on every keystroke fired a network

@@ -12,7 +12,13 @@ type CorrectionStatus = "pending" | "approved" | "rejected";
 
 interface CorrectionRequest {
   id: string;
-  record_type: "payment" | "call_log" | "ptp";
+  // Bug found and fixed alongside Phase 16 (N3): this type was missing
+  // "field_visit", which the backend has accepted since the correction
+  // requests were extended to it (see correction-requests.ts's RECORD_TYPES)
+  // -- a field-visit correction request rendered here with an unlabeled tag
+  // and fell through formatChanges() fine (that part's generic), so it never
+  // crashed, just displayed wrong. "customer" is the new Phase 16 addition.
+  record_type: "payment" | "call_log" | "ptp" | "field_visit" | "customer";
   record_id: string;
   reason: string;
   proposed_changes: Record<string, string | number>;
@@ -38,6 +44,8 @@ const RECORD_TYPE_LABEL: Record<CorrectionRequest["record_type"], string> = {
   payment: "Payment",
   call_log: "Call Log",
   ptp: "PTP",
+  field_visit: "Field Visit",
+  customer: "Customer Address",
 };
 
 function formatChanges(changes: Record<string, string | number>): string {

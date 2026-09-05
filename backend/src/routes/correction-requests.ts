@@ -5,8 +5,8 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
-import { type BranchClamp, resolveBranchClamp } from "../services/scope";
-import { capabilitiesOf } from "../types/user";
+import { type BranchClamp, customerWriteScopeClamp, resolveBranchClamp } from "../services/scope";
+import { capabilitiesOf, type UserRow } from "../types/user";
 
 /**
  * Agent-initiated correction requests for a payment/call-log/PTP/field-visit
@@ -25,7 +25,7 @@ import { capabilitiesOf } from "../types/user";
 const router = Router();
 router.use(authenticate);
 
-const RECORD_TYPES = ["payment", "call_log", "ptp", "field_visit"] as const;
+const RECORD_TYPES = ["payment", "call_log", "ptp", "field_visit", "customer"] as const;
 type RecordType = (typeof RECORD_TYPES)[number];
 
 const ALLOWED_FIELDS: Record<RecordType, readonly string[]> = {
@@ -33,6 +33,10 @@ const ALLOWED_FIELDS: Record<RecordType, readonly string[]> = {
   call_log: ["remark"],
   ptp: ["amount", "promised_date"],
   field_visit: ["remark"],
+  // N3: address is lender-sourced and read-only everywhere else (N1) --
+  // this request/approve queue is the one sanctioned way it ever changes
+  // outside an import.
+  customer: ["address"],
 };
 
 const proposedChangesSchema = z.record(z.string(), z.union([z.string(), z.number()]));
@@ -58,20 +62,43 @@ function coalescedCustomerBranchClamp(clamp: BranchClamp, params: unknown[]): st
   params.push(clamp.branchId, clamp.branchName);
   const idN = params.length - 1;
   const nameN = params.length;
-  const branchIdExpr = "COALESCE(cust_p.branch_id, cust_c.branch_id, cust_t.branch_id, cust_f.branch_id)";
+  const branchIdExpr =
+    "COALESCE(cust_p.branch_id, cust_c.branch_id, cust_t.branch_id, cust_f.branch_id, cust_direct.branch_id)";
   const customFieldsExpr =
-    "COALESCE(cust_p.custom_fields, cust_c.custom_fields, cust_t.custom_fields, cust_f.custom_fields)";
+    "COALESCE(cust_p.custom_fields, cust_c.custom_fields, cust_t.custom_fields, cust_f.custom_fields, cust_direct.custom_fields)";
   return ` AND (${branchIdExpr}::text = $${idN} OR (${branchIdExpr} IS NULL AND (${customFieldsExpr}->>'branch' ILIKE $${nameN} OR ${customFieldsExpr}->>'Branch' ILIKE $${nameN})))`;
 }
 
-/** Ownership + agency-scope check for the record being flagged. Returns the row, or throws 404. */
+/**
+ * Ownership + agency-scope check for the record being flagged. Returns the
+ * row, or throws 404.
+ *
+ * `customer` is a different shape of "owned" than the other four -- there's
+ * no single-column author to compare against (nobody "creates" a customer
+ * the way they create a payment). N3: the requester must be assigned to the
+ * customer, primary or field agent, which is exactly `customerWriteScopeClamp()`
+ * -- the same check every other customer-scoped write in the app already
+ * uses (field-visits.ts, call-logs.ts, ptps.ts).
+ */
 async function loadOwnedRecord(
   recordType: RecordType,
   recordId: string,
-  userId: string,
-  agencyId: string,
+  user: UserRow,
 ): Promise<Record<string, unknown>> {
-  const queries: Record<RecordType, string> = {
+  if (recordType === "customer") {
+    const params: unknown[] = [recordId, user.agency_id];
+    const scopeClause = await customerWriteScopeClamp(user, params, "c");
+    const { rows } = await pool.query(
+      `SELECT c.* FROM customers c
+         JOIN companies co ON co.id = c.company_id
+        WHERE c.id = $1 AND co.agency_id = $2 ${scopeClause}`,
+      params,
+    );
+    if (!rows[0]) throw new HttpError(404, "Record not found, or it isn't yours");
+    return rows[0];
+  }
+
+  const queries: Record<Exclude<RecordType, "customer">, string> = {
     payment: `SELECT p.* FROM payments p
                 JOIN customers c ON c.id = p.customer_id
                 JOIN companies co ON co.id = c.company_id
@@ -89,7 +116,7 @@ async function loadOwnedRecord(
                     JOIN companies co ON co.id = c.company_id
                    WHERE fv.id = $1 AND co.agency_id = $2 AND fv.agent_id = $3`,
   };
-  const { rows } = await pool.query(queries[recordType], [recordId, agencyId, userId]);
+  const { rows } = await pool.query(queries[recordType], [recordId, user.agency_id, user.id]);
   if (!rows[0]) throw new HttpError(404, "Record not found, or it isn't yours");
   return rows[0];
 }
@@ -109,7 +136,7 @@ router.post(
       .parse(req.body);
 
     assertAllowedFields(body.record_type, body.proposed_changes);
-    await loadOwnedRecord(body.record_type, body.record_id, req.user!.id, req.user!.agency_id);
+    await loadOwnedRecord(body.record_type, body.record_id, req.user!);
 
     const { rows } = await pool.query(
       `INSERT INTO correction_requests (record_type, record_id, requested_by, reason, proposed_changes)
@@ -156,16 +183,18 @@ router.get(
 
     // Agency scope is enforced by joining out to whichever table the
     // record lives in, since correction_requests itself has no agency_id.
-    // record_type picks which of the four source tables actually owns the
+    // record_type picks which of the five source tables actually owns the
     // row, so each LEFT JOIN only ever matches one of them per request.
+    // 'customer' is the odd one out: record_id IS the customer's own id,
+    // no intermediate join needed to reach it.
     const { rows } = await pool.query(
       `SELECT cr.id, cr.record_type, cr.record_id, cr.reason, cr.proposed_changes,
               cr.status, cr.decided_at, cr.decision_note, cr.created_at,
               u.id AS requested_by_id, u.full_name AS requested_by_name,
               d.full_name AS decided_by_name,
-              COALESCE(cust_p.id, cust_c.id, cust_t.id, cust_f.id) AS customer_id,
-              COALESCE(cust_p.loan_number, cust_c.loan_number, cust_t.loan_number, cust_f.loan_number) AS loan_number,
-              COALESCE(cust_p.customer_name, cust_c.customer_name, cust_t.customer_name, cust_f.customer_name) AS customer_name
+              COALESCE(cust_p.id, cust_c.id, cust_t.id, cust_f.id, cust_direct.id) AS customer_id,
+              COALESCE(cust_p.loan_number, cust_c.loan_number, cust_t.loan_number, cust_f.loan_number, cust_direct.loan_number) AS loan_number,
+              COALESCE(cust_p.customer_name, cust_c.customer_name, cust_t.customer_name, cust_f.customer_name, cust_direct.customer_name) AS customer_name
          FROM correction_requests cr
          JOIN users u ON u.id = cr.requested_by
          LEFT JOIN users d ON d.id = cr.decided_by
@@ -177,6 +206,7 @@ router.get(
          LEFT JOIN customers cust_t ON cust_t.id = pt.customer_id
          LEFT JOIN field_visits fv ON cr.record_type = 'field_visit' AND fv.id = cr.record_id
          LEFT JOIN customers cust_f ON cust_f.id = fv.customer_id
+         LEFT JOIN customers cust_direct ON cr.record_type = 'customer' AND cust_direct.id = cr.record_id
         WHERE u.agency_id = $${agencyParamIndex}
           ${filters.map((f) => `AND ${f}`).join(" ")}
         ORDER BY cr.created_at DESC`,
@@ -199,7 +229,7 @@ async function decideOne(
   note: string | undefined,
 ) {
   // A branch_manager can only decide requests whose underlying customer
-  // is in their own branch -- same four-way COALESCE join as GET / above,
+  // is in their own branch -- same five-way COALESCE join as GET / above,
   // since correction_requests doesn't carry a customer_id of its own.
   const reqParams: unknown[] = [id, agencyId];
   const reqClampSql = coalescedCustomerBranchClamp(clamp, reqParams);
@@ -214,6 +244,7 @@ async function decideOne(
        LEFT JOIN customers cust_t ON cust_t.id = pt.customer_id
        LEFT JOIN field_visits fv ON cr.record_type = 'field_visit' AND fv.id = cr.record_id
        LEFT JOIN customers cust_f ON cust_f.id = fv.customer_id
+       LEFT JOIN customers cust_direct ON cr.record_type = 'customer' AND cust_direct.id = cr.record_id
       WHERE cr.id = $1 AND u.agency_id = $2${reqClampSql}`,
     reqParams,
   );
@@ -230,7 +261,13 @@ async function decideOne(
 
     if (approve) {
       assertAllowedFields(recordType, proposedChanges);
-      const table = { payment: "payments", call_log: "call_logs", ptp: "ptps", field_visit: "field_visits" }[recordType];
+      const table = {
+        payment: "payments",
+        call_log: "call_logs",
+        ptp: "ptps",
+        field_visit: "field_visits",
+        customer: "customers",
+      }[recordType];
       const setClauses: string[] = [];
       const values: unknown[] = [];
       for (const [field, value] of Object.entries(proposedChanges)) {

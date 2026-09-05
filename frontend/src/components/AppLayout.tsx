@@ -10,6 +10,7 @@ import {
   FileSearchOutlined,
   FileSyncOutlined,
   FlagOutlined,
+  KeyOutlined,
   LogoutOutlined,
   MenuOutlined,
   MoonOutlined,
@@ -152,6 +153,13 @@ export default function AppLayout() {
       key: "/correction-requests",
       icon: <FlagOutlined />,
       label: <Link to="/correction-requests">Correction Requests</Link>,
+    },
+    // Phase 16 (A4): same gate as GET /password-reset-requests itself
+    // (employees.view) -- branch-scoped server-side, same as Employees.
+    hasPermission("employees.view") && {
+      key: "/password-reset-requests",
+      icon: <KeyOutlined />,
+      label: <Link to="/password-reset-requests">Password Reset Requests</Link>,
     },
     hasPermission("dispositions.manage") && {
       key: "/dispositions",

@@ -4,8 +4,6 @@ import {
   ApartmentOutlined,
   AuditOutlined,
   CalendarOutlined,
-  DashboardOutlined,
-  AimOutlined,
   EnvironmentOutlined,
   FilterOutlined,
   WalletOutlined,
@@ -85,16 +83,6 @@ export default function AppLayout() {
     },
   ].filter(Boolean);
   const items = [
-    {
-      key: "/",
-      icon: <DashboardOutlined />,
-      label: <Link to="/">{hasPermission("reports.view") ? "Dashboard" : "My Performance"}</Link>,
-    },
-    hasPermission("reports.view") && {
-      key: "/reports",
-      icon: <FileSearchOutlined />,
-      label: <Link to="/reports">Reports</Link>,
-    },
     hasPermission("reports.view") && {
       key: "/agent-activity",
       icon: <UnorderedListOutlined />,
@@ -170,25 +158,25 @@ export default function AppLayout() {
       icon: <AuditOutlined />,
       label: <Link to="/dispositions">Dispositions</Link>,
     },
-    hasPermission("tracking.view") && {
+    // Phase 15 (S5, F4): tracking.view alone (self-scoped) stays with every
+    // telecaller/field_agent so their own attendance/mobile session still
+    // works -- these three nav items specifically are the *team-visibility*
+    // surface (live map, day plan across a team, attendance across a team),
+    // gated on tracking.view_team, not the broader tracking.view.
+    hasPermission("tracking.view_team") && {
       key: "/tracking",
       icon: <EnvironmentOutlined />,
       label: <Link to="/tracking">Tracking</Link>,
     },
-    hasPermission("tracking.view") && {
+    hasPermission("tracking.view_team") && {
       key: "/day-plan",
       icon: <CalendarOutlined />,
       label: <Link to="/day-plan">Day Plan</Link>,
     },
-    hasPermission("tracking.view") && {
+    hasPermission("tracking.view_team") && {
       key: "/attendance",
       icon: <ScheduleOutlined />,
       label: <Link to="/attendance">Attendance</Link>,
-    },
-    hasPermission("targets.manage") && {
-      key: "/targets",
-      icon: <AimOutlined />,
-      label: <Link to="/targets">Targets</Link>,
     },
     hasPermission("payments.deposit") && {
       key: "/deposits",

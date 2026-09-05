@@ -2,13 +2,16 @@ import { Drawer } from "antd";
 import BreakdownTable from "./dashboard/BreakdownTable";
 
 /**
- * Team drill-down: reuses BreakdownTable (already powers the branch drawer's
- * "Agent-wise Breakdown" and the dashboard's own breakdown widget) scoped to
- * this team and defaulted to the agent dimension -- no bespoke roster fetch,
- * the breakdown rows already are the roster with live performance attached.
- * Used both when a branch_manager/ops/admin clicks into a team from above
- * (OrgChartPage) and when a branch_manager views one of their own teams
- * (DashboardPage).
+ * Team drill-down: reuses BreakdownTable (also powers the branch drawer's
+ * "Agent-wise Breakdown") scoped to this team and defaulted to the agent
+ * dimension -- no bespoke roster fetch, the breakdown rows already are the
+ * roster with live performance attached. Used when a branch_manager/ops/
+ * admin clicks into a team from OrgChartPage.
+ *
+ * KNOWN BROKEN since Phase 7: BreakdownTable itself calls the deleted
+ * GET /reports/breakdown. Phase 15 explicitly keeps BreakdownTable in place
+ * (OrgChartPage still needs it) without fixing this -- see
+ * docs/KNOWN-ISSUES.md §2.
  */
 export default function TeamDetailDrawer({
   teamId,

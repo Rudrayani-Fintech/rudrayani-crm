@@ -35,12 +35,18 @@ const KIND_LABEL: Record<AgentActivityRow["kind"], string> = {
 };
 
 /**
- * Agent drill-down: own dashboard numbers (GET /reports/dashboard?agent_id=,
- * exactly what the "My Work" personal view already shows an agent about
- * themselves) plus the recent-activity feed (GET /reports/agent-activity --
- * the one genuinely new endpoint this redesign added, since no agent-centric
- * activity feed existed before). Used from OrgChartPage/TeamDetailDrawer
- * click-through and from DashboardPage's own "My Work" toggle.
+ * Agent drill-down: own dashboard numbers (GET /reports/dashboard?agent_id=)
+ * plus the recent-activity feed (GET /reports/agent-activity). Used from
+ * OrgChartPage/TeamDetailDrawer click-through.
+ *
+ * KNOWN BROKEN since Phase 7 (backend): /reports/dashboard was deleted then;
+ * this component was never in that phase's file list and has been calling a
+ * 404 ever since. Phase 15 (web: delete the KPI surface) explicitly does NOT
+ * touch this file either -- its own file list is App.tsx/AppLayout.tsx plus
+ * an explicit instruction to keep BreakdownTable.tsx/format.ts/types.ts
+ * because OrgChartPage still needs them, regardless of whether they still
+ * work. See docs/KNOWN-ISSUES.md §2 for the full picture and what a fix
+ * would need to look like.
  */
 export default function AgentDetailDrawer({
   agentId,

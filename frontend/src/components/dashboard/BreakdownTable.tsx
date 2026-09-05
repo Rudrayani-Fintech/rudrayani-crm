@@ -42,6 +42,19 @@ export interface BreakdownRow {
  * every cut the report engine supports. Product/bucket rows have no target
  * (they're narrowing filters in the targets model, not their own scope
  * level) -- shown as "—" rather than a misleading 0%.
+ *
+ * KNOWN BROKEN since Phase 7 (backend deleted GET /reports/breakdown, the
+ * call below). Kept in the tree anyway -- not deleted along with the rest of
+ * the KPI surface in Phase 15 -- because BranchDetailDrawer.tsx and
+ * TeamDetailDrawer.tsx still import it for their own drill-through views,
+ * and OrgChartPage.tsx (a page Phase 15 does not touch) reaches those.
+ * Fixing this needs either a new backend aggregate endpoint scoped the way
+ * this table needs (dimension-pivoted, not row-level like the kept
+ * /reports/agent-activity or /reports/trail) or dropping the breakdown
+ * drill-through feature outright in favor of the row-level ledger view
+ * everywhere else in this revamp already uses -- a real product decision,
+ * not something to guess at inside a "delete the KPI surface" phase. See
+ * docs/KNOWN-ISSUES.md §2.
  */
 export default function BreakdownTable({
   filters,

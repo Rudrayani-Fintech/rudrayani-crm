@@ -2,7 +2,7 @@
 
 Live checklist, not a chronological log (see `docs/mobile-revamp-decisions.md` for the append-only
 decision history behind each of these). Update in place as items are fixed or new ones are found.
-Last updated: 2026-09-05, after Phase 13.
+Last updated: 2026-09-05, after Phase 15.
 
 ## Why this file exists
 
@@ -76,23 +76,51 @@ excluding 1e which self-resolves): 11/33 files failing, 80/310 tests failing.** 
 are §1a, and the rest are §1b/1c/1d. Re-run and update this number after fixing any of the above,
 or after each further phase if new failures appear.
 
-## 2. Live frontend/backend contract mismatch — expected, sequenced, DO NOT deploy backend-only
+## 2. Live frontend/backend contract mismatch — partially resolved by Phase 15, one real gap remains
 
-**Phase 7 deleted backend routes (`/reports/dashboard`, `/breakdown`, `/agents`, `/recalls`,
-`/bucket-movements`, `/bucket-mismatches`, `/export`, all of `/api/targets`) that the CURRENT web
-frontend still actively calls**, in: `frontend/src/pages/DashboardPage.tsx`,
-`components/AgentDetailDrawer.tsx`, `components/BranchDetailDrawer.tsx`,
-`components/dashboard/BreakdownTable.tsx`, `components/dashboard/BucketMismatchCard.tsx`,
-`components/dashboard/BucketMovementCard.tsx`, `components/dashboard/RecalledStatTile.tsx`,
-`scrapped-features/management-dashboard/ManagementDashboardPage.tsx`.
+**Phase 7 deleted backend routes** (`/reports/dashboard`, `/breakdown`, `/agents`, `/recalls`,
+`/bucket-movements`, `/bucket-mismatches`, `/export`, all of `/api/targets`) **that the web
+frontend called.** Phase 15 ("Web: delete the KPI surface, rework navigation") shipped
+2026-09-05 and closed most of this gap — but not all of it. Two different situations now:
 
-This is **expected and already accounted for in the spec's own phase ordering** — Phase 15 ("Web:
-delete the KPI surface, rework navigation") is what deletes these frontend pages/components to
-match. The backend is intentionally ahead of the frontend for 8 phases. This is exactly why the
-user directed all phases to land on the `revamp-integration` branch instead of `main`: deploying
-`main`/production between Phase 7 and Phase 15 would break the live web dashboard with 404s.
-**Do not merge `revamp-integration` into `main` (and do not deploy) until at least Phase 15 has
-shipped** — ideally not until the whole revamp is done, per the user's explicit instruction.
+### 2a. RESOLVED by Phase 15
+`frontend/src/pages/DashboardPage.tsx`, `pages/ReportsPage.tsx`, `pages/TargetsPage.tsx`, and
+`scrapped-features/management-dashboard/ManagementDashboardPage.tsx` (plus the KPI-only
+`components/dashboard/*` widgets nothing else imported: `widgetRegistry.tsx`,
+`DashboardCustomizer.tsx`, `Gauge.tsx`, `MetricPanel.tsx`, `MetricTabsCard.tsx`,
+`RecalledStatTile.tsx`, `BucketMovementCard.tsx`, `BucketMismatchCard.tsx`, `SummaryStat.tsx`,
+`PendingApprovalsAlert.tsx`, `SetupChecklist.tsx`, `OverviewChart.tsx`, `DepositsRangeCard.tsx`,
+`ExceptionPaymentsCard.tsx`, `TrailAnalyticsCard.tsx`) are all **deleted outright.** `/` now
+redirects to `/agent-activity` (managers/owners) or `/my-worklist` (individual contributors) —
+see `mobile-revamp-decisions.md`'s Phase 15 section for why the redirect is role-conditional, not
+a single static target.
+
+### 2b. NOT resolved by Phase 15 — confirmed still broken, needs its own fix
+**`components/dashboard/BreakdownTable.tsx` still calls the deleted `GET /reports/breakdown`.**
+Phase 15's own spec text explicitly preserves this file (and `format.ts`/`types.ts`, which it
+depends on) *because* `components/BranchDetailDrawer.tsx` and `components/TeamDetailDrawer.tsx`
+still import it, and `pages/OrgChartPage.tsx` (kept, not in Phase 15's file list) reaches both via
+click-through. **`components/AgentDetailDrawer.tsx` still calls the deleted `GET
+/reports/dashboard?agent_id=`** — same situation, same OrgChartPage.tsx entry point, also not in
+Phase 15's file list.
+
+Practical effect: on `OrgChartPage`, clicking into a branch, a team, or an agent opens a drawer
+that errors (a `message.error` toast; the drawer itself doesn't crash, it just shows no data) or,
+for `AgentActivityPage.tsx`'s own lookup-options call to `GET /employees` when a non-manager
+somehow lands there directly, a similar silent-fail-with-toast. **This means Phase 15 shipping is
+*not* sufficient to safely deploy `revamp-integration` to `main`/production on its own** — the
+three org-chart drill-through drawers need a real fix first (either a new backend aggregate
+endpoint scoped the way `BreakdownTable` needs — dimension-pivoted, unlike the kept
+`/reports/agent-activity`/`/reports/trail`, which are row-level — or dropping the
+breakdown/dashboard-numbers drill-through in favor of the row-level ledger view already used
+everywhere else in this revamp). This is a genuine product decision, not a mechanical swap, and
+is explicitly **out of scope for Phase 15** (whose file list is `App.tsx`/`AppLayout.tsx` plus
+deletions only) — it needs its own phase or a deliberate scope addition to an existing one.
+
+**Still true regardless: do not merge `revamp-integration` into `main` (and do not deploy) until
+this is resolved** — ideally not until the whole revamp is done, per the user's explicit
+instruction. Phase 15 narrowed the blast radius (one screen's three drawers, not the entire portal)
+but did not close it.
 
 ## 3. Housekeeping (not urgent, not part of the revamp)
 
@@ -184,7 +212,28 @@ correction-request UI). The field itself was left in place rather than threading
 through every construction site for zero behavioural gain; it's simply unread now. Harmless, but
 worth deleting outright if `history_timeline.dart` gets touched again for another reason.
 
-## 7. Format for adding new entries
+## 7. Web: Phase 14-15 scope notes
+
+### 7a. My Worklist's company filter is dropped, matching mobile's Phase 10 decision
+`WorklistCustomer` (the `/worklist` response shape) carries `company_name` but no `company_id` --
+the backend's `/worklist` filter accepts `company_id`, not a name string, so a company filter here
+was always client-side-only (derived names, `.filter()`'d in the browser). That doesn't compose
+with real server-side pagination (Phase 14): filtering a company on only the current 50-row page
+would silently hide matches sitting on other pages. Dropped outright rather than half-fixed, same
+call as mobile's Today screen (Phase 10) for consistency across clients. Company is still a visible
+table column. Revisit only alongside adding a real `company_id` to the worklist response.
+
+### 7b. Bug found and fixed during Phase 14: "Due Today" never auto-opened
+`MyWorklistPage.tsx`'s PTP/reminder Collapse used `defaultActiveKey={dueCount > 0 ? ["due"] : []}`
+-- a *default* prop, read only once at mount. `reminders`/`ptpsDue` are both empty until the async
+`load()` resolves, so `dueCount` was always `0` at that first render; the section silently never
+auto-opened even when PTPs were genuinely due, directly contradicting this phase's own "PTPs due
+are visible without scrolling" acceptance criterion. Not a new regression from this phase's other
+changes -- pre-existing, just never triggered a visible failure because nobody was checking this
+specific accept criterion before. Fixed: `Collapse` is now controlled (`activeKey`/`onChange`), and
+an effect opens it the first time `dueCount` transitions above zero.
+
+## 8. Format for adding new entries
 
 When a new phase surfaces a defect that isn't blocking that phase's own verification, add a dated
 subsection under the relevant number above (or a new `## N.` section for a new category) with:

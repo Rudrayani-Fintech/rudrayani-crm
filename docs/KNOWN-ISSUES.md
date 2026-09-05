@@ -2,7 +2,7 @@
 
 Live checklist, not a chronological log (see `docs/mobile-revamp-decisions.md` for the append-only
 decision history behind each of these). Update in place as items are fixed or new ones are found.
-Last updated: 2026-09-05, after Phase 7.
+Last updated: 2026-09-05, after Phase 9.
 
 ## Why this file exists
 
@@ -101,7 +101,31 @@ Many stale local/remote branches exist from an older, unrelated phase-numbering 
 scoping-batch3`, ~20 more). Unrelated to `docs/REVAMP-SPEC.md`'s phases. Safe to leave alone;
 worth a separate cleanup pass (confirm each is actually merged/abandoned before deleting).
 
-## 4. Format for adding new entries
+## 4. Mobile: Phase 9 deferrals
+
+### 4a. The "seven raw-setState screens" were not migrated onto AccountRepository/a provider
+Phase 9 (§7) built the core architecture in full -- `Account` model, `AccountRepository`,
+IndexedStack removal, named `HomeTab` identity, the router redirect split, the X4 pull-to-refresh
+fix, and the `riverpod_generator` cleanup -- but deliberately did not migrate
+`generic_list_screen.dart`, `employee_detail_screen.dart`, `login_screen.dart`,
+`call_log_screen.dart`, `field_visit_screen.dart`, `payment_screen.dart`, `ptps_screen.dart`'s
+hand-rolled `_loading`/`_error`/`_data` fields onto a proper provider. These are money-critical
+write flows (payments, field visits, PTPs) with real side effects (GPS, camera, the offline
+queue) that are genuinely risky to rewrite without a physical device to verify against -- not
+something to rush through on faith. `generic_list_screen.dart`/`employee_detail_screen.dart` are
+the lowest-risk pair to start with (read-only, no offline-queue interaction) if this is picked up
+later.
+
+### 4b. Deep links to `/account/*`/`/customer/*` no longer enforce the punch-in guard
+The router redirect split (§7.6) put the punch-in check on `/login`, `/punch-in`, and `/home`
+individually rather than as one function evaluated for every route. In normal use this is
+equivalent (those routes are only reached by navigating from `/home`, which itself guards
+punch-in), but a *deep link* straight to e.g. `/customer/:id` (there is no push-notification
+deep-linking implemented yet, so this is currently theoretical) would no longer redirect an
+un-punched-in user to `/punch-in` first. Add the same `redirect` to those routes (or wrap them in
+a shared parent route) if/when deep-linking is built.
+
+## 5. Format for adding new entries
 
 When a new phase surfaces a defect that isn't blocking that phase's own verification, add a dated
 subsection under the relevant number above (or a new `## N.` section for a new category) with:

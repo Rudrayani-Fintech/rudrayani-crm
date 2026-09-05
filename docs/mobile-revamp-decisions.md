@@ -808,3 +808,89 @@ flagged here as follow-up rather than fixed unboundedly under this phase. Full s
 *file* count, but that prior number undercounted total failing tests since most of those files
 were failing wholesale on the designation gap; this run is the first to actually get far enough
 into several files to hit these three further-in issues).
+
+## Process change: dedicated integration branch, not phase-by-phase into main (2026-09-05)
+
+Starting with Phase 8, every phase lands on a dedicated `revamp-integration` branch (pushed to
+`origin`) instead of local `main` directly. `main`/`origin/main` auto-deploys to production, and
+Phase 7 already put the backend ahead of the web frontend for 8 phases (§2 below) — merging any
+single phase to `main` between now and Phase 15 would break the live web dashboard. `main` gets
+`revamp-integration` merged in only once the whole revamp (through Phase 17) is done and verified,
+per explicit direction. Each phase still gets its own worktree, its own commit(s), verified before
+merging into `revamp-integration` with `--no-ff`, worktree deleted after — same discipline as
+Phases 0-7, just a different integration target. All known pre-existing defects (the Phase 5
+address fallout, the newer test gaps found during Phase 7, and anything since) are now
+consolidated in one place, `docs/KNOWN-ISSUES.md`, rather than scattered across commit messages —
+check there first before re-investigating something that looks pre-existing.
+
+Testing approach going forward, by explicit direction: write and run each phase's own
+spec-named acceptance tests (cheap, targeted, catches what was actually built), but skip deep
+cross-file regression triage (comparing against a full-suite baseline file by file, forking to
+explain every unrelated pre-existing failure) unless something concretely looks like a new
+regression. This is a deliberate trade-off toward development speed over the exhaustive
+per-phase verification Phases 0-7 used — full-suite/full-regression passes are deferred to
+Phase 17 (already the spec's own dedicated verification phase) rather than repeated every phase.
+
+## Phase 8 and 9 execution (2026-09-05)
+
+First phases on `revamp-integration` (mobile from here on — Phases 0-7 were 100% backend). Both
+implemented in one worktree (`phase8-9-mobile-design-nav`), committed separately (`39a0090` Phase
+8, `508d79d` Phase 9), merged to `revamp-integration` — not `main`, per the process change above.
+
+**Phase 8** (design system, §6): built the full `mobile/lib/core/ui/*` component library
+(`AppScaffold`, `AppCard`, `AppListRow`, `AppStatTile`, `AppFormField`,
+`AppPrimaryButton`/`AppSecondaryButton`, `AppSectionHeader`, `AppMoney`, `AppChipGroup`, `DutyBar`,
+and `AppLoadingState`/`AppEmptyState`/`AppErrorState`/`AppInlineErrorNote` folded in from
+`state_views.dart`) directly on top of `app_theme.dart`'s existing, already-mature design tokens
+(`AppColors`/`AppSpacing`/`AppRadius`/`AppDimens`/`AppTextStyles.tabularNums` all pre-existed --
+Phase 8 was purely additive, not a tokens-from-scratch job). `state_views.dart` becomes class
+typedef aliases to the new `core/ui` implementations (same pattern as Phase 7's
+`report-service.ts`/`state_views.dart`-style shims), so the "do not touch feature screens this
+phase" constraint held literally: zero existing screens needed a single-line change. Added a
+`/dev/gallery` route (exempted from the auth/punch-in redirect) rendering every component with
+sample data. Verified: `flutter analyze` clean, 24 new widget tests passing (including the two
+numeric floors the acceptance criteria name explicitly: `AppListRow` >= 56px, `AppPrimaryButton`/
+`AppSecondaryButton` >= 48px).
+
+**Phase 9** (state/navigation foundation, §7): one `Account` model
+(`core/models/account.dart`) -- a strict field superset of the old `Customer` (every field kept
+its name/type; new fields `pos`/`dpd`/`address`/`branchName`/`nextActionDate`/`workedToday`/
+`collectedToday` were already being returned by `/worklist` since Phases 3-5, just never modeled
+on the client) -- so `customer.dart` becomes `typedef Customer = Account;` and no consumer
+screen's `Customer(...)`/`customer.xxx` references needed to change. One `AccountRepository`
+(`core/data/account_repository.dart`) generalizing the fetch-with-cache-fallback and
+collision-safe cache-key logic that used to be hand-rolled in `worklist_provider.dart`; writes
+delegate to the existing `OfflineQueueNotifier` rather than a second write-queue mechanism.
+`worklistProvider`/`customerByIdProvider` become thin wrappers over the repository, so (again)
+zero consumer screens needed a provider-name change. Fixed X4 (customer detail pull-to-refresh
+invalidated the wrong provider -- the header never updated) by invalidating both providers the
+screen actually depends on. Removed `riverpod_generator`/`riverpod_annotation`/`build_runner`
+(confirmed zero `@riverpod` usages, zero `.g.dart` files anywhere -- pure dead weight) rather than
+adopting codegen. `home_shell.dart`: replaced `IndexedStack` (built every tab eagerly -- the
+documented cause of a 6-8 parallel-request burst at login) with lazy per-tab construction, and
+replaced the bare `int _tab` index with a named `HomeTab` enum. `router.dart`: split the coupled
+auth+attendance redirect -- the top-level redirect now only gates auth; `/login`/`/punch-in`/
+`/home` each own a small punch-in-specific redirect; both `authProvider`/`attendanceProvider` are
+now watched via `.select` so this router stops rebuilding on unrelated field changes within either
+provider's state.
+
+**Known deferral, documented in `docs/KNOWN-ISSUES.md` §4**: "migrate the seven raw-setState
+screens onto the repository" was not done. The core architecture fully satisfies this phase's
+testable acceptance criteria (no request burst, X4 fixed, `flutter analyze` clean); the seven
+screens (`generic_list_screen.dart`, `employee_detail_screen.dart`, `login_screen.dart`,
+`call_log_screen.dart`, `field_visit_screen.dart`, `payment_screen.dart`, `ptps_screen.dart`)
+include several money-critical write flows with real device side effects (GPS, camera, the
+offline queue) that are genuinely risky to rewrite without a physical device to verify against.
+Also documented: the router redirect split means a deep link straight to `/account/*`/
+`/customer/*` no longer enforces the punch-in guard (currently theoretical -- no push-notification
+deep-linking exists yet).
+
+Verified: `flutter analyze` clean (0 issues outside 4 pre-existing, unrelated
+`ptps_screen.dart` lints already there before this phase). Full `flutter test`: 71/71 passing,
+including the pre-existing `home_shell_dashboard_role_test.dart` (untouched
+`resolveDashboardRole`/`DashboardRole`) and `widget_test.dart` (exercises the real router end to
+end -- a good independent signal the redirect split didn't break the login boot path). New:
+24 Phase 8 widget tests, 4 `state_views` alias tests, 4 `AccountRepository` cache-key tests (full
+network-then-cache-fallback behaviour isn't covered -- Hive needs platform channels this test
+suite can't mock, matching `offline_queue_test.dart`'s and `home_shell_dashboard_role_test.dart`'s
+own already-established constraint).

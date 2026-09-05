@@ -1,160 +1,112 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/api/api_client.dart';
 import '../../core/auth/auth_provider.dart';
-import '../../core/tracking/attendance_provider.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/tracking/tracking_service.dart';
+import '../../core/ui/ui.dart';
 
+/// `GET /branches` is deliberately open to any authenticated user (see its
+/// own comment in branches.ts -- every role needs the full list for
+/// pickers), so resolving the signed-in user's own `branch_id` to a
+/// readable name doesn't need a new endpoint or a wider permission.
+final _branchNameProvider = FutureProvider.autoDispose<String?>((ref) async {
+  final branchId = ref.read(authProvider).user?['branch_id'] as String?;
+  if (branchId == null) return null;
+  final api = ref.read(apiClientProvider);
+  final res = await api.get<Map<String, dynamic>>('/branches');
+  final branches = (res.data!['branches'] as List).cast<Map<String, dynamic>>();
+  for (final b in branches) {
+    if (b['id'] == branchId) return b['name'] as String?;
+  }
+  return null;
+});
+
+/// Phase 13 (S6): Account keeps name, phone, branch, and Log out -- nothing
+/// else. The six admin lists, the Punch Out card (now the duty bar's job,
+/// reachable from every tab since Phase 10), and every management/admin
+/// section are gone.
 class AccountScreen extends ConsumerWidget {
   const AccountScreen({super.key});
 
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log out?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log out')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      // Shift stays open server-side, but the service must not outlive the
+      // session's tokens -- punch out properly to close the shift.
+      await TrackingService.stop();
+      await ref.read(authProvider.notifier).logout();
+      // ignore: use_build_context_synchronously
+      if (context.mounted) context.go('/login');
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final auth = ref.watch(authProvider);
-    final user = auth.user;
-    final capabilities = auth.capabilities;
-    final att = ref.watch(attendanceProvider);
-    final attNotifier = ref.read(attendanceProvider.notifier);
-    
-    final isManager = capabilities.contains('agency_admin') ||
-        capabilities.contains('operations_manager') ||
-        capabilities.contains('branch_manager');
-    final isAdmin = capabilities.contains('agency_admin') ||
-        capabilities.contains('operations_manager');
+    final user = ref.watch(authProvider).user;
+    final branchName = ref.watch(_branchNameProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Account'),
-      ),
+    return AppScaffold(
+      title: 'Account',
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          // Profile Info
           Row(
             children: [
               CircleAvatar(
                 radius: 32,
                 backgroundColor: AppColors.primary,
                 child: Text(
-                  (user?['full_name'] ?? 'U')[0].toUpperCase(),
+                  ((user?['full_name'] as String?)?.isNotEmpty == true ? user!['full_name'] as String : 'U')[0]
+                      .toUpperCase(),
                   style: const TextStyle(fontSize: 24, color: AppColors.onPrimary),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: AppSpacing.lg),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      user?['full_name'] ?? 'Agent',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      user?['email'] ?? '',
-                      style: const TextStyle(color: AppColors.textSecondary),
+                      user?['full_name'] as String? ?? 'Agent',
+                      style: Theme.of(context).textTheme.headlineSmall,
                     ),
                   ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          
-          // Punch Out
-          Card(
-            color: att.punchedIn ? AppColors.successContainer : AppColors.neutralContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        att.punchedIn ? Icons.gps_fixed : Icons.gps_off,
-                        color: att.punchedIn ? AppColors.successStrong : AppColors.textSecondary,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        att.punchedIn ? 'On Duty' : 'Off Duty',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: att.punchedIn ? AppColors.successStrong : AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    height: AppDimens.tapTarget,
-                    child: ElevatedButton(
-                      onPressed: att.punchedIn && !att.busy
-                          ? () => attNotifier.punchOut()
-                          : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.error,
-                        foregroundColor: AppColors.onPrimary,
-                      ),
-                      child: att.busy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Text('Punch Out'),
-                    ),
-                  ),
-                ],
-              ),
+          const SizedBox(height: AppSpacing.xl),
+          AppListRow(
+            leading: const Icon(Icons.phone_outlined, color: AppColors.textSecondary),
+            title: const Text('Phone'),
+            subtitle: Text(user?['phone'] as String? ?? '—'),
+          ),
+          AppListRow(
+            leading: const Icon(Icons.apartment_outlined, color: AppColors.textSecondary),
+            title: const Text('Branch'),
+            subtitle: branchName.when(
+              data: (name) => Text(name ?? '—'),
+              loading: () => const Text('Loading…'),
+              error: (_, _) => const Text('—'),
             ),
           ),
-          
-          if (isManager) ...[
-            const SizedBox(height: 24),
-            const Text('Management', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.people),
-              title: const Text('All Customers'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/account/customers'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.badge),
-              title: const Text('Employees'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/account/employees'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.groups),
-              title: const Text('Teams'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/account/teams'),
-            ),
-          ],
-          
-          if (isAdmin) ...[
-            ListTile(
-              leading: const Icon(Icons.business),
-              title: const Text('Branches'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/account/branches'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.domain),
-              title: const Text('Companies'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/account/companies'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.category),
-              title: const Text('Catalog'),
-              subtitle: const Text('Products, Buckets, Dispositions'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => context.push('/account/catalog'),
-            ),
-          ],
+          const SizedBox(height: AppSpacing.xl),
+          AppSecondaryButton(
+            icon: Icons.logout,
+            label: 'Log out',
+            onPressed: () => _confirmLogout(context, ref),
+          ),
         ],
       ),
     );

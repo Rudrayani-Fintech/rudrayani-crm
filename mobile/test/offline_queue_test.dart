@@ -1,6 +1,6 @@
 // Phase 9.1 offline queue tests. Full Hive/connectivity_plus platform
 // channels aren't mockable anywhere in this test suite (see the note in
-// home_shell_dashboard_role_test.dart), so -- matching that same established
+// home_shell_tab_presence_test.dart), so -- matching that same established
 // pattern -- this exercises the pure decision logic flush() relies on
 // (classifyFailure, retry/dead-letter transitions, JSON round-trip) rather
 // than mounting the full OfflineQueueNotifier against a real Hive box.

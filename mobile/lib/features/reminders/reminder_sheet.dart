@@ -65,16 +65,12 @@ class _ReminderSheetState extends ConsumerState<_ReminderSheet> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      final title = widget.customer != null
-          ? 'Reminder: ${widget.customer!.customerName}'
-          : 'Reminder';
       await ref
           .read(remindersControllerProvider)
           .create(
             customerId: widget.customer?.id,
             remindAt: _date,
             note: _noteCtrl.text.trim(),
-            notificationTitle: title,
           );
       if (mounted) {
         Navigator.of(context).pop();

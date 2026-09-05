@@ -148,6 +148,10 @@ const createSchema = z.object({
   amount: z.coerce.number().positive(),
   promised_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD"),
   mode: z.string().trim().min(1).max(60).optional(),
+  // Phase 6 (§4.5): previously the only mobile write that couldn't be
+  // queued offline -- no idempotency key at all, so a retried request over
+  // a flaky connection could create a second promise for the same call.
+  client_key: z.string().uuid().optional(),
 });
 
 /**
@@ -162,6 +166,17 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = createSchema.parse(req.body);
 
+    if (body.client_key) {
+      const dup = await pool.query("SELECT * FROM ptps WHERE agent_id = $1 AND client_key = $2", [
+        req.user!.id,
+        body.client_key,
+      ]);
+      if (dup.rows[0]) {
+        res.status(200).json({ ptp: dup.rows[0], duplicate: true });
+        return;
+      }
+    }
+
     const scopeParams: unknown[] = [body.customer_id, req.user!.agency_id];
     const scopeClause = await customerWriteScopeClamp(req.user!, scopeParams, "c");
     const custRes = await pool.query(
@@ -171,11 +186,27 @@ router.post(
     );
     if (!custRes.rows[0]) throw new HttpError(404, "Customer not found or already closed");
 
-    const { rows } = await pool.query(
-      `INSERT INTO ptps (customer_id, agent_id, amount, promised_date, mode)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [body.customer_id, req.user!.id, body.amount, body.promised_date, body.mode ?? null],
-    );
+    let rows;
+    try {
+      ({ rows } = await pool.query(
+        `INSERT INTO ptps (customer_id, agent_id, amount, promised_date, mode, client_key)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [body.customer_id, req.user!.id, body.amount, body.promised_date, body.mode ?? null, body.client_key ?? null],
+      ));
+    } catch (err) {
+      // Two retries raced: the other one won, answer with its row.
+      if (body.client_key && err instanceof Error && "code" in err && (err as { code?: string }).code === "23505") {
+        const dup = await pool.query("SELECT * FROM ptps WHERE agent_id = $1 AND client_key = $2", [
+          req.user!.id,
+          body.client_key,
+        ]);
+        if (dup.rows[0]) {
+          res.status(200).json({ ptp: dup.rows[0], duplicate: true });
+          return;
+        }
+      }
+      throw err;
+    }
     await refreshNextActionDate(pool, body.customer_id);
     res.status(201).json({ ptp: rows[0] });
   }),

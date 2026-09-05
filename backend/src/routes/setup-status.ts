@@ -23,7 +23,6 @@ router.get(
       employee_added: boolean;
       first_import: boolean;
       allocated: boolean;
-      targets_set: boolean;
     }>(
       `SELECT
          EXISTS(SELECT 1 FROM companies WHERE agency_id = $1) AS company_added,
@@ -36,8 +35,7 @@ router.get(
          EXISTS(
            SELECT 1 FROM customers c JOIN companies co ON co.id = c.company_id
             WHERE co.agency_id = $1 AND c.assigned_agent_id IS NOT NULL
-         ) AS allocated,
-         EXISTS(SELECT 1 FROM targets WHERE agency_id = $1) AS targets_set`,
+         ) AS allocated`,
       [agencyId, req.user!.id],
     );
     res.json({ steps: rows[0] });

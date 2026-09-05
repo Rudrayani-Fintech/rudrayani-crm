@@ -158,12 +158,31 @@ router.get(
   }),
 );
 
-const patchSchema = z.object({ status: z.enum(["done", "cancelled"]) });
+const patchSchema = z.object({
+  status: z.enum(["done", "cancelled"]),
+  // Phase 6 (§4.5): a separate column from reminders.client_key (the one
+  // POST /reminders already uses) -- a retried PATCH must never collide
+  // with the key that created the row, or with a genuinely different PATCH
+  // to the same reminder.
+  client_key: z.string().uuid().optional(),
+});
 
 router.patch(
   "/:id",
   asyncHandler(async (req, res) => {
     const body = patchSchema.parse(req.body);
+
+    if (body.client_key) {
+      const dup = await pool.query(
+        "SELECT * FROM reminders WHERE id = $1 AND created_by = $2 AND patch_client_key = $3",
+        [req.params.id, req.user!.id, body.client_key],
+      );
+      if (dup.rows[0]) {
+        res.json({ reminder: dup.rows[0], duplicate: true });
+        return;
+      }
+    }
+
     const seesAll = await capabilitiesHavePermission(
       capabilitiesOf(req.user!),
       "customers.allocate",
@@ -185,11 +204,12 @@ router.patch(
       }
     }
 
+    params.push(body.status, body.client_key ?? null);
     const { rows } = await pool.query(
-      `UPDATE reminders SET status = $${params.length + 1}
+      `UPDATE reminders SET status = $${params.length - 1}, patch_client_key = $${params.length}
         WHERE id = $1 AND agency_id = $2 ${ownerClause}
         RETURNING *`,
-      [...params, body.status],
+      params,
     );
     if (!rows[0]) throw new HttpError(404, "Reminder not found");
     if (rows[0].customer_id) {

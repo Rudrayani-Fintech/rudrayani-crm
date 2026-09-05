@@ -21,6 +21,15 @@ const gpsSchema = z.object({
   lng: z.number().min(-180).max(180).optional(),
 });
 
+const punchOutSchema = gpsSchema.extend({
+  // Phase 6 (§4.5): punch-out targets the currently open shift
+  // (punch_out_at IS NULL) -- a retry after the first success would find no
+  // open shift and 409 instead of returning the original result. Needs its
+  // own column (not attendance's other client_key-shaped state, since a
+  // shift's punch-in has none of its own to reuse).
+  client_key: z.string().uuid().optional(),
+});
+
 const POINT_OR_NULL = `CASE WHEN $2::float8 IS NOT NULL AND $3::float8 IS NOT NULL
   THEN ST_SetSRID(ST_MakePoint($2::float8, $3::float8), 4326)::geography
   ELSE NULL END`;
@@ -55,15 +64,27 @@ router.post(
 router.post(
   "/punch-out",
   asyncHandler(async (req, res) => {
-    const { lat, lng } = gpsSchema.parse(req.body);
+    const { lat, lng, client_key } = punchOutSchema.parse(req.body);
+
+    if (client_key) {
+      const dup = await pool.query(
+        "SELECT id, punch_in_at, punch_out_at FROM attendance WHERE user_id = $1 AND punch_out_client_key = $2",
+        [req.user!.id, client_key],
+      );
+      if (dup.rows[0]) {
+        res.json({ attendance: dup.rows[0], duplicate: true });
+        return;
+      }
+    }
 
     const { rows } = await pool.query(
       `UPDATE attendance
           SET punch_out_at = now(),
-              punch_out_location = ${POINT_OR_NULL}
+              punch_out_location = ${POINT_OR_NULL},
+              punch_out_client_key = $4
         WHERE user_id = $1 AND punch_out_at IS NULL
         RETURNING id, punch_in_at, punch_out_at`,
-      [req.user!.id, lng ?? null, lat ?? null],
+      [req.user!.id, lng ?? null, lat ?? null, client_key ?? null],
     );
     if (rows.length === 0) throw new HttpError(409, "Not punched in");
     res.json({ attendance: rows[0] });

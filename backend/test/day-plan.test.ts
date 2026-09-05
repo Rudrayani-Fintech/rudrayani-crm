@@ -3,6 +3,7 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { pool } from "../src/config/db";
 import { hashPassword } from "../src/services/auth-service";
+import { istToday } from "../src/utils/ist";
 
 /**
  * Day Plan (Group C): per-agent "what's due today" summary for
@@ -101,7 +102,7 @@ beforeAll(async () => {
   );
   customerId = customer.rows[0].id;
 
-  today = new Date().toISOString().slice(0, 10);
+  today = istToday();
 
   // agentA: on duty, one due PTP, one due reminder, one call logged.
   await pool.query(

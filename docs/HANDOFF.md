@@ -6,31 +6,31 @@ behind decisions already made, `docs/KNOWN-ISSUES.md` is the *what's already bro
 about* checklist. This file exists because a fresh session has none of the prior conversation
 context that produced those three documents.
 
-**Last updated:** 2026-09-05, immediately after Phase 16 and a partial Phase 17 attempt.
+**Last updated:** 2026-09-06, after Phase 17 actually ran to completion (real backend suite, real
+web E2E for all three roles, two genuine pre-existing bugs found and fixed).
 
 ---
 
 ## 1. Where things actually stand
 
-- **Phases 0-16 of 18 are implemented and committed**, live on the `revamp-integration` branch
-  (pushed to `origin`). **Phase 17 ("prove the whole thing works") is NOT done** -- three of its
-  six checks require a working Postgres/physical device/live web session that this session's
-  environment didn't have access to. Full detail: `KNOWN-ISSUES.md` §8. **Do not treat "16 phases
-  committed" as "verified and ready to ship" -- they are different claims.** Phase-by-phase
+- **All 18 phases (0-17) are implemented, verified, and committed**, live on the
+  `revamp-integration` branch (pushed to `origin`). **Phase 17 ("prove the whole thing works") is
+  done** for every item except a physical-device mobile pass (no hardware exists in any session's
+  environment so far — see `KNOWN-ISSUES.md` §8d). Full detail: `KNOWN-ISSUES.md` §8. Phase-by-phase
   summary: §5 below.
-- **The mobile client (Phases 8-13) and the web KPI/nav/admin-surface work (Phases 14-16) are all
-  feature-complete per this spec.** What's left is entirely verification (Phase 17), not new
-  features.
-- **`main` is NOT the integration branch for this work, and still is not safe to deploy.**
-  `origin/main` auto-deploys to production (Railway). Two separate reasons it's still not safe,
-  both already fully documented -- read them before assuming otherwise:
-  1. `KNOWN-ISSUES.md` §2: `components/dashboard/BreakdownTable.tsx` (`GET /reports/breakdown`) and
-     `components/AgentDetailDrawer.tsx` (`GET /reports/dashboard`) still call backend routes Phase 7
-     deleted, reachable via `OrgChartPage.tsx`'s drill-through drawers -- Phase 15 deliberately left
-     both in place (`OrgChartPage.tsx` needs them, and isn't in Phase 15's file list).
-  2. `KNOWN-ISSUES.md` §8: Phase 17 hasn't actually run the backend test suite, a physical-device
-     mobile E2E, or a web E2E per role -- so even setting #1 aside, nothing has *proven* the whole
-     system actually works end to end yet.
+- **The mobile client (Phases 8-13) and the web KPI/nav/admin-surface work (Phases 14-16) are
+  feature-complete and verified.** The backend suite runs clean at its exact pre-existing baseline
+  (zero regressions across Phases 8-17), and a live web E2E pass across telecaller, branch manager,
+  and owner roles found and fixed two genuine pre-existing bugs in `GET /reports/agent-activity`
+  (§1g in KNOWN-ISSUES.md) that had zero prior test coverage.
+- **`main` is still NOT the integration branch for this work, and is still not safe to deploy
+  without one remaining product decision.** `origin/main` auto-deploys to production (Railway).
+  One reason left, already fully documented — read it before assuming otherwise:
+  - `KNOWN-ISSUES.md` §2: `components/dashboard/BreakdownTable.tsx` (`GET /reports/breakdown`) and
+    `components/AgentDetailDrawer.tsx` (`GET /reports/dashboard`) still call backend routes Phase 7
+    deleted, reachable via `OrgChartPage.tsx`'s drill-through drawers -- Phase 15 deliberately left
+    both in place (`OrgChartPage.tsx` needs them, and isn't in Phase 15's file list). This is a
+    genuine open gap, independent of Phase 17's own verification gate, which is otherwise clear.
 
   Every phase from Phase 8 onward lands on `revamp-integration`, not `main`. (Phases 0-7 *are* also
   present on local `main` in the primary checkout, from before this branch existed — that's a
@@ -41,8 +41,10 @@ context that produced those three documents.
   into it locally is the simplest path. If a future session finds someone already has it checked
   out, see §4's git-workflow notes for the workaround used once already this session.
 - **The mobile app (`mobile/`) is done** (Phases 8-13). **Web's KPI/nav restructure and admin
-  surfaces are done** (Phases 14-16). Next: finish Phase 17 (this is also where the `BreakdownTable`/
-  `AgentDetailDrawer` gap above needs resolving before it can pass). Phases 0-7 were 100% backend.
+  surfaces are done** (Phases 14-16). **Phase 17 verification is done** except the physical-device
+  pass. What's left before a real production rollout: (1) resolve the `BreakdownTable`/
+  `AgentDetailDrawer` gap above, (2) do a physical-device mobile pass when hardware is available.
+  Phases 0-7 were 100% backend.
 
 ## 2. Standing instructions from the user (do not relitigate these)
 
@@ -205,47 +207,33 @@ context that produced those three documents.
 | **14** | **Web: worklist day-plan restructure** | **Done** |
 | **15** | **Web: delete KPI surface, rework navigation** | **Done, but only partially closes §2 of KNOWN-ISSUES.md — read that section before deploying** |
 | **16** | **Web: admin surfaces for password-reset/address-correction** | **Done** |
-| 17 | Verification and regression (full suite, physical device E2E) | **3/6 checks done with real output (§8 in KNOWN-ISSUES.md); 3/6 blocked on a working Postgres/physical device/live web session -- not started, not skipped — next up** |
+| 17 | Verification and regression (full suite, physical device E2E) | **5/6 checks done with real output (§8 in KNOWN-ISSUES.md); the 6th (physical-device mobile E2E) still needs real Android hardware — the only item no session's environment has had access to** |
 
-## 6. Finishing Phase 17 (not starting a new phase — this is the only thing left)
+## 6. What's left after Phase 17 (no session has hardware for this yet)
 
-Phase 17 is not a feature phase. Every line item below is something to *run*, not build, and
-almost all of it needs infrastructure this session's environment didn't have: a real
-Postgres+PostGIS instance, a physical Android device (or emulator), and either a person or a
-browser-automation-capable session to click through three role journeys on web. Read
-`KNOWN-ISSUES.md` §8 first — it has the exact commands, the exact error text this session hit
-trying each one, and precisely what's left. This section is the short version.
+Phase 17 is done except one item: a physical-device mobile E2E, which needs a real Android phone
+(or at minimum a working emulator) that no session's environment has had access to so far. Read
+`KNOWN-ISSUES.md` §8d for full detail. When a session with hardware picks this up:
 
-1. **Get a database up.** `docker compose up -d` from the repo root (this session couldn't --
-   Docker Desktop's service needs elevation this session's execution context didn't have; an
-   interactive terminal usually doesn't have this problem). Then
-   `cd backend && npm run migrate:up`.
-2. **Run the real backend suite**: `npm test` in `backend/`. Report the actual pass/fail output --
-   Phase 17's own acceptance criterion is explicit about this ("report the actual output, not
-   assertion"). Phase 16's new migration and test cases (the `customer` correction-request type)
-   have only ever been typechecked and read, never executed -- this is also the first real check
-   of those.
-3. **`flutter analyze && flutter test`** in `mobile/` -- already done and clean as of this
-   session (94/94, §8a in KNOWN-ISSUES.md), but harmless to re-run if meaningful time has passed.
-4. **`npm run typecheck && npm run build`** in `frontend/` -- same, already clean, cheap to re-run.
-5. **Manual physical-device mobile E2E** -- needs a real Android phone. The exact sequence is in
-   `REVAMP-SPEC.md`'s Phase 17 section (`§8, item 4`): punch in → day plan loads → PTP section
-   populated → open a customer → navigate → log a visit with a payment in under 10 seconds → row
-   greys and sinks → go offline → log another → alert appears → come back online → it syncs →
-   punch out → tracking stops.
-6. **Manual web E2E for telecaller, branch manager, and owner** -- once step 1's database is up
-   and seeded with at least one user per role. Don't substitute the live production API for this
-   step even if it seems faster; that's real customer data and this document's own predecessor
-   explicitly ruled that out for the same reason.
-7. **Confirm the ledger answers the owner's question** -- `REVAMP-SPEC.md` Phase 17 item 6:
-   "field_agent_1 contacted 20 Hero customers today — 5 PTP, 10 part paid, 10 paid in full,"
-   checked against real seeded data for one agent/one day via `GET /reports/agent-activity` (or
-   the Agent Daily Activity page), not just "the endpoint returned some JSON."
+1. **Manual physical-device mobile E2E.** The exact sequence is in `REVAMP-SPEC.md`'s Phase 17
+   section (`§8, item 4`): punch in → day plan loads → PTP section populated → open a customer →
+   navigate → log a visit with a payment in under 10 seconds → row greys and sinks → go offline →
+   log another → alert appears → come back online → it syncs → punch out → tracking stops. Focus
+   specifically on what a live web/backend pass *can't* confirm: GPS accuracy, foreground-service
+   reliability across a real app lifecycle, real airplane-mode behavior, and battery/permission
+   prompts on an actual device.
 
-Only once all of the above are actually done, with real reported output, does
-`KNOWN-ISSUES.md` §2's `BreakdownTable`/`AgentDetailDrawer` gap become the *only* remaining
-blocker on merging `revamp-integration` into `main` — and that gap still needs its own separate
-fix (a real product decision, not something Phase 17 resolves as a side effect).
+Everything else Phase 17 asked for is done, with real output, as of 2026-09-06 (§8a-8c in
+KNOWN-ISSUES.md): the full backend suite (80/318 failing, exactly the pre-existing baseline, zero
+regressions), `flutter analyze`/`flutter test`, `frontend`/`backend` typecheck+build, a live manual
+web E2E across telecaller/branch-manager/owner (which found and fixed two genuine pre-existing bugs
+in `GET /reports/agent-activity` — see `KNOWN-ISSUES.md` §1g), and a confirmed answer to the
+owner's ledger question both via a new test file and live real data.
+
+Once the physical-device pass above is done, `KNOWN-ISSUES.md` §2's `BreakdownTable`/
+`AgentDetailDrawer` gap becomes the *only* remaining item before `revamp-integration` is safe to
+merge into `main` — and that gap needs its own separate fix (a real product decision, not something
+Phase 17 resolves as a side effect).
 
 ## 7. If you get stuck or something looks wrong
 

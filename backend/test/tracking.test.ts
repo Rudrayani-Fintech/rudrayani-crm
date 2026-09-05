@@ -3,6 +3,7 @@ import request from "supertest";
 import { createApp } from "../src/app";
 import { pool } from "../src/config/db";
 import { hashPassword } from "../src/services/auth-service";
+import { istToday } from "../src/utils/ist";
 
 /**
  * Live tracking + route replay for managers, and the permission audit the
@@ -312,7 +313,7 @@ describe("live view scoping", () => {
 });
 
 describe("route replay", () => {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = istToday();
 
   it("returns the day's ordered points and path length", async () => {
     const res = await request(app)

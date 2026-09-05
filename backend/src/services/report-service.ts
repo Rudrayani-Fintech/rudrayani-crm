@@ -1305,7 +1305,7 @@ export async function agentRecentActivity(
     dateClause = ` AND {COL} >= (((now() AT TIME ZONE 'Asia/Kolkata')::date)::timestamp AT TIME ZONE 'Asia/Kolkata') AND {COL} < (((now() AT TIME ZONE 'Asia/Kolkata')::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')`;
   }
 
-  const dateFor = (col: string) => (dateClause ? dateClause.replace("{COL}", col) : "");
+  const dateFor = (col: string) => (dateClause ? dateClause.replaceAll("{COL}", col) : "");
 
   // Build disposition filter (backward-compat: single dispositionCodeId or array dispositionCodeIds)
   let dispositionClause = "";
@@ -1362,15 +1362,16 @@ export async function agentRecentActivity(
 
   if (includeCall) {
     branches.push(
-      `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at, cl.agent_id,
+      `(SELECT 'call' AS kind, cl.id::text AS id, cl.created_at AS at, cl.agent_id AS agent_id,
                u.full_name AS agent_name, u.agent_type,
                c.id::text AS customer_id, c.customer_name, c.loan_number,
                c.branch_id AS customer_branch_id, b.name AS customer_branch_name,
                c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
                c.mobile_number AS customer_mobile, c.product AS customer_product,
                c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
-               NULL, cl.remark, cl.extra_remark, NULL::text AS amount, dc.action_code AS detail,
-               dc.description AS disposition_description, cl.edited_at
+               NULL::text AS ptp_status, cl.remark AS remark, cl.extra_remark AS extra_remark,
+               NULL::text AS amount, dc.action_code AS detail,
+               dc.description AS disposition_description, cl.edited_at AS edited_at
           FROM call_logs cl
           JOIN users u ON u.id = cl.agent_id
           JOIN customers c ON c.id = cl.customer_id
@@ -1383,12 +1384,16 @@ export async function agentRecentActivity(
 
   if (includePayment) {
     branches.push(
-      `(SELECT 'payment', p.id::text, p.paid_at, p.collected_by_user_id,
-               u.full_name, u.agent_type,
-               c.id::text, c.customer_name, c.loan_number,
-               c.branch_id, b.name, c.bucket, c.company_id, co.name,
-               c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
-               NULL, NULL::text, NULL::text, p.amount::text, p.mode, NULL::text, NULL::timestamptz
+      `(SELECT 'payment' AS kind, p.id::text AS id, p.paid_at AS at, p.collected_by_user_id AS agent_id,
+               u.full_name AS agent_name, u.agent_type,
+               c.id::text AS customer_id, c.customer_name, c.loan_number,
+               c.branch_id AS customer_branch_id, b.name AS customer_branch_name,
+               c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
+               c.mobile_number AS customer_mobile, c.product AS customer_product,
+               c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
+               NULL::text AS ptp_status, NULL::text AS remark, NULL::text AS extra_remark,
+               p.amount::text AS amount, p.mode AS detail, NULL::text AS disposition_description,
+               NULL::timestamptz AS edited_at
           FROM payments p
           JOIN users u ON u.id = p.collected_by_user_id
           JOIN customers c ON c.id = p.customer_id
@@ -1400,12 +1405,16 @@ export async function agentRecentActivity(
 
   if (includePtp) {
     branches.push(
-      `(SELECT 'ptp', pt.id::text, pt.created_at, pt.agent_id,
-               u.full_name, u.agent_type,
-               c.id::text, c.customer_name, c.loan_number,
-               c.branch_id, b.name, c.bucket, c.company_id, co.name,
-               c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
-               pt.status, NULL::text, NULL::text, pt.amount::text, pt.promised_date::text, NULL::text, NULL::timestamptz
+      `(SELECT 'ptp' AS kind, pt.id::text AS id, pt.created_at AS at, pt.agent_id AS agent_id,
+               u.full_name AS agent_name, u.agent_type,
+               c.id::text AS customer_id, c.customer_name, c.loan_number,
+               c.branch_id AS customer_branch_id, b.name AS customer_branch_name,
+               c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
+               c.mobile_number AS customer_mobile, c.product AS customer_product,
+               c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
+               pt.status AS ptp_status, NULL::text AS remark, NULL::text AS extra_remark,
+               pt.amount::text AS amount, pt.promised_date::text AS detail, NULL::text AS disposition_description,
+               NULL::timestamptz AS edited_at
           FROM ptps pt
           JOIN users u ON u.id = pt.agent_id
           JOIN customers c ON c.id = pt.customer_id
@@ -1417,12 +1426,16 @@ export async function agentRecentActivity(
 
   if (includeFieldVisit) {
     branches.push(
-      `(SELECT 'field_visit', fv.id::text, fv.created_at, fv.agent_id,
-               u.full_name, u.agent_type,
-               c.id::text, c.customer_name, c.loan_number,
-               c.branch_id, b.name, c.bucket, c.company_id, co.name,
-               c.mobile_number, c.product, c.pos::text, c.emi::text, c.due_amount::text,
-               NULL, fv.remark, NULL::text, NULL::text, NULL::text, NULL::text, fv.edited_at
+      `(SELECT 'field_visit' AS kind, fv.id::text AS id, fv.created_at AS at, fv.agent_id AS agent_id,
+               u.full_name AS agent_name, u.agent_type,
+               c.id::text AS customer_id, c.customer_name, c.loan_number,
+               c.branch_id AS customer_branch_id, b.name AS customer_branch_name,
+               c.bucket AS customer_bucket, c.company_id AS customer_company_id, co.name AS customer_company_name,
+               c.mobile_number AS customer_mobile, c.product AS customer_product,
+               c.pos::text AS customer_pos, c.emi::text AS customer_emi, c.due_amount::text AS customer_due_amount,
+               NULL::text AS ptp_status, fv.remark AS remark, NULL::text AS extra_remark,
+               NULL::text AS amount, NULL::text AS detail, NULL::text AS disposition_description,
+               fv.edited_at AS edited_at
           FROM field_visits fv
           JOIN users u ON u.id = fv.agent_id
           JOIN customers c ON c.id = fv.customer_id

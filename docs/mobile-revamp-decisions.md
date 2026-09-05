@@ -1234,3 +1234,99 @@ needing to re-read this narrative first.
 **Consequently: Phases 0-16 are implemented and committed, but Phase 17 -- the actual "safe to
 merge into `main`" gate -- is not done.** Treat "all 16 phases committed" and "verified and ready
 to ship" as two different claims; only the first one is true right now.
+
+## Phase 17, completed for real (2026-09-06)
+
+The user started Docker Desktop themselves (it needs elevation this session's execution context
+doesn't have) and confirmed it was running; `docker ps` then showed both `rudrayani_postgres` and
+`rudrayani_adminer` up. This unblocked all three items the previous entry left open, plus surfaced
+two real bugs neither the test suite nor any prior manual pass had caught.
+
+**The real backend suite.** `npm run migrate:up` applied exactly one migration (Phase 16's
+`correction-requests-customer`), confirming the 2-month-old dev DB already had everything else.
+`npm test` first came back **85 failed / 228 passed (313 total)** -- alarming at a glance, but
+triage (comparing the failing file list against `KNOWN-ISSUES.md` §1's already-documented
+categories) showed the extra failures beyond the known 80/310 baseline were exactly 5: 2 in
+`reports.test.ts` and 1 in `tracking.test.ts` (both already documented as the §1e UTC/IST
+day-boundary flake — the run happened to land inside the ~18:30-23:59 UTC flake window, confirmed
+by checking real wall-clock time), plus 2 new ones in `day-plan.test.ts` matching the exact same
+flake shape but not yet catalogued as an affected file. Rather than just re-documenting the flake
+(as the previous entry's plan assumed a future session would do), fixed it outright in all three
+files by swapping `new Date().toISOString().slice(0, 10)` for the existing `istToday()` helper --
+closing out an issue that had been sitting in KNOWN-ISSUES.md since Phase 7. One test in
+`day-plan.test.ts` still failed after that fix, from a distinct but related timing edge (its
+attendance fixture computes `now() - interval '2 hours'`, which crossed real IST midnight since the
+suite happened to run at 01:22 IST) -- this one wasn't code-fixable, just waited out, and a re-run
+after 02:00 IST came back at **exactly 80 failed / 238 passed (318 total)**, matching the Phase 7
+baseline precisely (34 files / 318 tests now instead of 33/310, because Phase 16's 3 new
+`correction-requests.test.ts` cases and this session's own new 5-test `agent-activity.test.ts` file
+are both green). Zero regressions across every phase from 8 through 17.
+
+**Two real, previously-undiscovered bugs, found via live E2E, not by any test.** Logging in as the
+seeded admin and opening the "Agent Daily Activity" page (`GET /reports/agent-activity`, added
+2026-07-18 per `rudrayani-crm-project-state` memory, well before this revamp) showed three
+"Internal server error" toasts. Root-caused via a direct file-based error logger temporarily added
+to `error-handler.ts` (pino's own output wasn't reaching the captured log file in this environment,
+for reasons not worth chasing further) to two bugs in `agentRecentActivity()`
+(`report-service.ts`), both pre-existing and unrelated to any phase-8-through-17 change:
+1. `dateFor()`'s template uses the `{COL}` placeholder twice but substituted it with `.replace()`
+   (first-occurrence only) -- the same bug *class* as the `scopeFilter()` `$SCOPE` bug fixed
+   2026-07-18 (six call sites, all switched to `.replaceAll()` at the time), just a sibling instance
+   nobody had swept for. Every date-filtered call to this endpoint -- which is the *default* request
+   shape the web page sends -- left a literal `{COL}` in the generated SQL and 500'd.
+2. The 4-branch `UNION ALL` (call/payment/ptp/field_visit) only aliased columns on the `call`
+   branch, relying on UNION column-name inheritance. That inheritance requires `call` to actually be
+   part of the union; filtering to a single non-call `action_type` (e.g. `action_type=ptp` alone)
+   collapses to one un-aliased SELECT, so Postgres uses each column's own source name instead and
+   `ORDER BY at DESC` breaks. Fixed by aliasing every branch consistently. This endpoint had **zero**
+   test coverage before today, which is how both bugs went unnoticed since whenever they were
+   introduced.
+
+Both are fixed, and a new `backend/test/agent-activity.test.ts` (5 tests) now covers exactly the
+shape that broke: a date-filtered single-agent request, the `browse=all` multi-agent rollup (the
+owner's ledger-question mechanism), per-`action_type` narrowing (including the `action_type=ptp`
+case that surfaced bug #2), and a permission-boundary check. Full root-cause writeup:
+`KNOWN-ISSUES.md` §1g.
+
+**Manual web E2E, for real, across all three roles.** Seeded a branch, team, two demo customers
+(Hero Two-Wheeler Loan product, matching the ledger-question wording), and a temporary
+`branch_manager` user directly in the dev DB (`seed_demo.ts` itself hit an unrelated stale
+column-mapping error on its own customer-import step -- a pre-existing dev-tooling gap, noted but
+not chased further since it wasn't blocking). Logged in as the telecaller (Priya Sharma), landed on
+`/my-worklist`, logged a call (the disposition code's description auto-composed into the remark
+correctly) and recorded a ₹2,000 UPI part-payment -- both persisted correctly, and the worklist
+re-sorted live: the called customer's row sank to the bottom with a disposition tag and "a few
+seconds ago" timestamp, confirming Phase 14's worked-state sort in production, not just in a test
+assertion. Logged in as the branch manager and the owner/agency_admin in turn: both landed on
+`/agent-activity` correctly (per their `reports.view` capability) and saw the telecaller's activity
+correctly scoped (branch manager: own branch only; owner: everything) -- and, after the fix above,
+with zero errors.
+
+One browser-automation-tooling note worth recording for a future session: AntD's multi-select
+"Result Code" dropdown didn't respond to the standard click/type tool calls in this environment
+(the dropdown mounted in the DOM but didn't visually render, or search input clicks didn't route to
+the actual focused element) -- worked around by dispatching a full synthetic
+`pointerdown`/`mousedown`/`pointerup`/`mouseup`/`click` event sequence via `javascript_tool` rather
+than the single `click()` the automation tools issue by default. This is the same general category
+already noted in `rudrayani-crm-project-state` memory for a different AntD interaction gotcha
+(`computer` left-clicks not triggering React's onClick) -- not a product defect.
+
+**The owner's ledger question, confirmed twice.** Once at the code level (the new
+`agent-activity.test.ts`'s `browse=all` test explicitly checks the "N contacted, M PTP, K paid"
+shape), and once live: the real call + payment logged above showed up correctly, with correct
+amounts/customer/product/disposition, on the admin's Agent Daily Activity page filtered to that
+day. Test fixtures (the two demo customers, the call log, the payment, the temporary
+branch_manager) were removed from the dev DB afterward to keep it reproducible from `seed_demo.ts`
+alone.
+
+**What's still not done**: a physical-device mobile E2E. No session's environment (this one
+included) has had access to a real Android device or emulator. Everything *around* that flow --
+the same underlying logic, exercised via the web equivalent and the backend suite -- is now
+verified; only device-specific concerns (GPS accuracy, foreground-service reliability across a real
+app lifecycle, real airplane-mode behavior, battery/permission prompts) remain unconfirmed. Full
+detail: `KNOWN-ISSUES.md` §8d.
+
+**Consequently: Phase 17 is done except the physical-device pass, which needs real hardware no
+session has had.** `KNOWN-ISSUES.md` §2's `BreakdownTable`/`AgentDetailDrawer` gap remains the one
+other open item before `revamp-integration` is safe to merge into `main` -- a product decision, not
+something this phase resolves as a side effect.

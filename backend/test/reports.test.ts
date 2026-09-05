@@ -4,6 +4,7 @@ import { createApp } from "../src/app";
 import { pool } from "../src/config/db";
 import { hashPassword } from "../src/services/auth-service";
 import { monthDays } from "../src/services/report-service";
+import { istToday } from "../src/utils/ist";
 
 /**
  * Task 5.5: report engine. Seeds May+June 2026 snapshots so May is classified
@@ -315,7 +316,7 @@ describe("Phase 12 Management Dashboard KPIs (today/type/channel/trend)", () => 
 
   it("/reports/trend buckets collected amounts by day and sums to the range total", async () => {
     const from = `${currentMonth}-01`;
-    const to = now.toISOString().slice(0, 10);
+    const to = istToday(now);
     const res = await request(app)
       .get(`/api/reports/trend?from=${from}&to=${to}&granularity=day`)
       .set("Authorization", `Bearer ${adminToken}`);
@@ -326,7 +327,7 @@ describe("Phase 12 Management Dashboard KPIs (today/type/channel/trend)", () => 
 
   it("an agent's own trend request is scope-clamped to themselves, not 403'd", async () => {
     const from = `${currentMonth}-01`;
-    const to = now.toISOString().slice(0, 10);
+    const to = istToday(now);
     const res = await request(app)
       .get(`/api/reports/trend?from=${from}&to=${to}`)
       .set("Authorization", `Bearer ${agentToken}`);

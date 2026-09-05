@@ -18,7 +18,6 @@ const BucketsPage = lazy(() => import("./pages/BucketsPage"));
 const CompaniesPage = lazy(() => import("./pages/CompaniesPage"));
 const CorrectionRequestsPage = lazy(() => import("./pages/CorrectionRequestsPage"));
 const CustomersPage = lazy(() => import("./pages/CustomersPage"));
-const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const DayPlanPage = lazy(() => import("./pages/DayPlanPage"));
 const DepositsPage = lazy(() => import("./pages/DepositsPage"));
 const DispositionsPage = lazy(() => import("./pages/DispositionsPage"));
@@ -30,10 +29,24 @@ const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
 const MyWorklistPage = lazy(() => import("./pages/MyWorklistPage"));
 const OrgChartPage = lazy(() => import("./pages/OrgChartPage"));
 const ReallocationRequestsPage = lazy(() => import("./pages/ReallocationRequestsPage"));
-const ReportsPage = lazy(() => import("./pages/ReportsPage"));
-const TargetsPage = lazy(() => import("./pages/TargetsPage"));
 const TeamsPage = lazy(() => import("./pages/TeamsPage"));
 const TrackingPage = lazy(() => import("./pages/TrackingPage"));
+
+// Phase 15 (S4): the KPI Dashboard is gone -- "/" redirects to Agent Daily
+// Activity, the new owner's landing page. But that page's own lookup-options
+// effect unconditionally calls GET /employees (employees.view-gated, see
+// AppLayout.tsx's nav check), so a plain telecaller/field_agent (holding
+// only reports.view_self, never employees.view) landing there by default
+// would eat a guaranteed error toast and empty filter dropdowns on every
+// login -- confirmed by reading AgentActivityPage.tsx directly, not
+// something Phase 15's file list (App.tsx, AppLayout.tsx only) authorizes
+// fixing at the source. Individual contributors redirect to their own
+// worklist instead, matching what the deleted Dashboard's "My Performance"
+// label used to mean for them.
+function IndexRedirect() {
+  const { hasPermission } = useAuth();
+  return <Navigate to={hasPermission("reports.view") ? "/agent-activity" : "/my-worklist"} replace />;
+}
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth();
@@ -59,7 +72,7 @@ function NotFoundPage() {
       subTitle="That link doesn't match any page in the portal."
       extra={
         <Link to="/">
-          <Button type="primary">Back to dashboard</Button>
+          <Button type="primary">Back home</Button>
         </Link>
       }
     />
@@ -81,9 +94,8 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route index element={<IndexRedirect />} />
         <Route path="agent-activity" element={<AgentActivityPage />} />
-        <Route path="reports" element={<ReportsPage />} />
         <Route path="employees" element={<EmployeesPage />} />
         <Route path="org-chart" element={<OrgChartPage />} />
         <Route path="branches" element={<BranchesPage />} />
@@ -102,7 +114,6 @@ export default function App() {
         <Route path="dispositions" element={<DispositionsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
         <Route path="day-plan" element={<DayPlanPage />} />
-        <Route path="targets" element={<TargetsPage />} />
         <Route path="deposits" element={<DepositsPage />} />
         <Route path="attendance" element={<AttendancePage />} />
         <Route path="*" element={<NotFoundPage />} />

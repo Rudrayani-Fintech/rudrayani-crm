@@ -35,19 +35,15 @@ final worklistFilterOptionsProvider = FutureProvider<({List<String> branches, Li
   );
 });
 
-/// Phase 9 (§7.2): the assigned-accounts list and single-account lookup now
-/// live on `AccountRepository` (cache-fallback + cache-key logic
-/// consolidated there). `worklistProvider`/`customerByIdProvider` stay as
-/// thin re-exports of that so every existing consumer (WorklistScreen,
-/// CustomerDetailScreen, call log/payment/PTP/field-visit screens) keeps
-/// watching the same provider names unchanged.
-final worklistProvider = FutureProvider<List<Customer>>((ref) {
-  final repo = ref.watch(accountRepositoryProvider);
-  final scope = ref.watch(worklistScopeProvider);
-  final filters = ref.watch(worklistFiltersProvider);
-  return repo.fetchWorklist(scope: scope, filters: filters);
-});
-
+/// Phase 9 (§7.2): single-account lookup lives on `AccountRepository`
+/// (cache-fallback + cache-key logic consolidated there). `customerByIdProvider`
+/// stays as a thin re-export of that so every existing consumer
+/// (CustomerDetailScreen, PTP/Log-Visit screens) keeps watching the same
+/// provider name unchanged. The unpaged list counterpart (`worklistProvider`)
+/// was removed in Phase 11, once its last consumers (the old call-log and
+/// payment screens) were deleted -- the Today screen (Phase 10) reads the paginated
+/// `todayWorklistProvider` (features/today/today_provider.dart) instead, and
+/// nothing else in the app needed the whole unpaged list.
 final customerByIdProvider = FutureProvider.family<Customer, String>((ref, id) {
   final repo = ref.watch(accountRepositoryProvider);
   return repo.fetchById(id);

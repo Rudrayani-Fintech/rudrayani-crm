@@ -5,9 +5,7 @@ import '../core/auth/auth_provider.dart';
 import '../features/auth/login_screen.dart';
 import '../features/home/home_shell.dart';
 import '../features/worklist/customer_detail_screen.dart';
-import '../features/call_log/call_log_screen.dart';
 import '../features/field_visit/field_visit_screen.dart';
-import '../features/payment/payment_screen.dart';
 import '../features/ptps/ptps_screen.dart';
 import '../features/account/views/generic_list_screen.dart';
 import '../features/account/views/employee_detail_screen.dart';
@@ -188,18 +186,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           customerId: state.pathParameters['id']!,
         ),
         routes: [
-          GoRoute(
-            path: 'call-log',
-            builder: (_, state) => CallLogScreen(
-              customerId: state.pathParameters['id']!,
-            ),
-          ),
-          GoRoute(
-            path: 'payment',
-            builder: (_, state) => PaymentScreen(
-              customerId: state.pathParameters['id']!,
-            ),
-          ),
           GoRoute(
             path: 'ptps',
             builder: (_, state) => PtpsScreen(

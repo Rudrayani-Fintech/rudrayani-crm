@@ -2,7 +2,7 @@
 
 Live checklist, not a chronological log (see `docs/mobile-revamp-decisions.md` for the append-only
 decision history behind each of these). Update in place as items are fixed or new ones are found.
-Last updated: 2026-09-05, after Phase 15.
+Last updated: 2026-09-05, after Phase 16 and a partial Phase 17 attempt (§8).
 
 ## Why this file exists
 
@@ -233,7 +233,79 @@ changes -- pre-existing, just never triggered a visible failure because nobody w
 specific accept criterion before. Fixed: `Collapse` is now controlled (`activeKey`/`onChange`), and
 an effect opens it the first time `dueCount` transitions above zero.
 
-## 8. Format for adding new entries
+## 8. Phase 17 verification status -- what actually ran, what's blocked, and how to finish it
+
+Phase 17 ("prove the whole thing works") asks for six things. Three ran, with real output, in the
+session that closed Phases 14-16; three are blocked by this session's own environment and need a
+human (or a session with real DB/device access) to finish. **Do not report Phase 17 as complete**
+until the three blocked items below are actually done — this section exists so the next session
+doesn't have to rediscover the same blocker from scratch.
+
+### 8a. Ran, with real output (2026-09-05)
+1. **`flutter analyze` / `flutter test`** in `mobile/`: clean / 94/94 passing (same 4 pre-existing
+   `ptps_screen.dart` info-level lints present since before Phase 10 -- unrelated to this work).
+2. **`npm run typecheck && npm run build`** in `frontend/`: both clean.
+3. **`npm run typecheck` and `npm run build`** in `backend/`: both clean. (Not literally Phase 17's
+   own wording -- item 1 there asks for the *test suite*, not typecheck/build -- but this is the
+   most Phase 17's item 1 could get without a database; see 8b below for why the actual suite
+   couldn't run.)
+
+### 8b. Blocked -- genuine environment limitation, not skipped for convenience
+**Item 1, "run the full backend suite": could not run.** `backend/test/*.test.ts` needs a real
+Postgres+PostGIS instance (`docker-compose.yml`'s `rudrayani_postgres` service, or an equivalent).
+In this session's environment:
+- `docker ps` → `Error response from daemon: Docker Desktop is unable to start`.
+- The underlying Windows service is stopped and starting it directly failed with `Cannot open
+  com.docker.service service on computer '.'` -- a permissions error, not a missing-service error.
+  This background session's execution context does not hold the privilege to start it.
+- A direct TCP-level check found port 5432 already "open" (something answers the SYN), but a real
+  `pg` client connection to it (`postgres://rudrayani:rudrayani_dev_pass@localhost:5432/rudrayani_crm`,
+  the docker-compose default) timed out at the wire-protocol handshake -- confirms whatever is
+  listening there is not a working Postgres, not a false negative.
+- winget is available but installing PostgreSQL natively hits the same class of problem (a Windows
+  service install needs the same elevation this session doesn't have) and wasn't attempted further
+  given that near-certain outcome.
+- **To finish this**: from an interactive session/terminal with normal user privileges (Docker
+  Desktop typically works fine there), run `docker compose up -d`, then
+  `cd backend && npm run migrate:up && npm test`, and report the actual pass/fail output. Phase 16's
+  new migration (`1789900000000_correction-requests-customer.sql`) and its new test cases
+  (`test/correction-requests.test.ts`, the `customer` record-type block) have been typechecked and
+  read carefully against the existing file's own patterns, but **never actually executed** -- this
+  run is also the first real check that they pass.
+
+**Item 4, "manual end-to-end on a physical Android device": could not run.** No physical device or
+emulator is available to this session. Needs a person with a real Android phone (or at least an
+emulator) to walk through the exact sequence Phase 17 names: punch in → day plan loads → PTP
+section populated → open a customer → navigate → log a visit with a payment in under 10 seconds →
+row greys and sinks → go offline → log another → alert appears → come back online → it syncs →
+punch out → tracking stops.
+
+**Item 5, "manual end-to-end on web for telecaller, branch manager and owner": could not run.**
+Blocked by the same missing database as item 1 (the frontend has nothing real to authenticate
+against or render without a working backend+DB). Deliberately **not** worked around by pointing a
+local build at the live production API (`https://rudrayani-backend-production.up.railway.app`,
+per `rudrayani-crm-project-state` memory) -- that's real customer financial data, this session has
+no role credentials for it, and browsing it on the user's behalf without being asked is not a
+reasonable substitute for a real manual QA pass. Needs a person (or a session with both a working
+local DB and real seeded users for each role) to click through the three role journeys.
+
+**Item 6, "confirm the ledger answers the owner's question": could not run** -- same database
+dependency as items 1 and 5. Once a database is available, this is a `GET /reports/agent-activity`
+call (or the equivalent Agent Daily Activity page view) for one agent, one day, checked against
+real seeded call-log/payment/PTP rows for that agent to confirm the counts genuinely add up to
+"contacted 20 Hero customers today — 5 PTP, 10 part paid, 10 paid in full," not just that the
+endpoint returns *a* number.
+
+### 8c. What this means for merging to `main`
+Phases 0-16 are implemented, and everything automatable about them has real, reported verification
+(see each phase's own commits and `mobile-revamp-decisions.md` sections). But **Phase 17 itself is
+not done** -- three of its six checks haven't run at all, for the reasons above, and §2 of this
+file already separately documents that the `BreakdownTable.tsx`/`AgentDetailDrawer.tsx` gap is
+still open regardless. Do not treat "Phases 0-16 committed" as equivalent to "safe to merge
+`revamp-integration` into `main`" -- Phase 17 passing (all six items, with real output) is still
+the actual gate, per the spec's own ordering and the user's standing instruction.
+
+## 9. Format for adding new entries
 
 When a new phase surfaces a defect that isn't blocking that phase's own verification, add a dated
 subsection under the relevant number above (or a new `## N.` section for a new category) with:

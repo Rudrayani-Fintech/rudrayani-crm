@@ -6,20 +6,25 @@ behind decisions already made, `docs/KNOWN-ISSUES.md` is the *what's already bro
 about* checklist. This file exists because a fresh session has none of the prior conversation
 context that produced those three documents.
 
-**Last updated:** 2026-09-05, immediately after Phase 13.
+**Last updated:** 2026-09-05, immediately after Phase 15.
 
 ---
 
 ## 1. Where things actually stand
 
-- **Phases 0-13 of 18 are done**, verified, and live on the `revamp-integration` branch (pushed to
+- **Phases 0-15 of 18 are done**, verified, and live on the `revamp-integration` branch (pushed to
   `origin`). Phase-by-phase summary: §5 below.
-- **The mobile client (Phases 8-13) is now feature-complete per this spec.** Phase 14 onward is
-  web (`frontend/`, React/TypeScript/Vite/AntD 5) — a different stack from everything done so far.
-- **`main` is NOT the integration branch for this work.** `origin/main` auto-deploys to production
-  (Railway). Phase 7 deleted backend routes the current web frontend still calls (see
-  `KNOWN-ISSUES.md` §2) — deploying anything from this revamp before Phase 15 ships would break
-  the live web dashboard. Every phase from Phase 8 onward lands on `revamp-integration`, not
+- **The mobile client (Phases 8-13) is feature-complete per this spec.** Phase 14 onward is web
+  (`frontend/`, React/TypeScript/Vite/AntD 5) — a different stack from everything done before it.
+- **`main` is NOT the integration branch for this work, and still is not safe to deploy even now.**
+  `origin/main` auto-deploys to production (Railway). Phase 7 deleted backend routes the web
+  frontend called; Phase 15 deleted the pages that called *most* of them (Dashboard/Reports/
+  Targets) but **two files Phase 15 deliberately left in place still call deleted endpoints** --
+  `components/dashboard/BreakdownTable.tsx` (`GET /reports/breakdown`) and
+  `components/AgentDetailDrawer.tsx` (`GET /reports/dashboard`), both reachable from
+  `OrgChartPage.tsx`'s drill-through drawers. **Read `KNOWN-ISSUES.md` §2 in full before assuming
+  it's safe to merge `revamp-integration` into `main`** — that section has the precise remaining
+  gap and what fixing it needs. Every phase from Phase 8 onward lands on `revamp-integration`, not
   `main`. (Phases 0-7 *are* also present on local `main` in the primary checkout, from before this
   branch existed — that's a historical artifact of how those phases were merged, not something to
   repeat or worry about; just don't push local `main` anywhere.)
@@ -27,9 +32,10 @@ context that produced those three documents.
   directly to it (`git push origin HEAD:revamp-integration`) after merging your phase's branch
   into it locally is the simplest path. If a future session finds someone already has it checked
   out, see §4's git-workflow notes for the workaround used once already this session.
-- **The mobile app (`mobile/`) is now done** — Phases 8-13 were all mobile and are complete. The
-  web app (`frontend/`) is the new focus: Phases 14-16, then Phase 17 (final verification, both
-  clients). Phases 0-7 were 100% backend and are done.
+- **The mobile app (`mobile/`) is done** (Phases 8-13). **Web's KPI/nav restructure is done**
+  (Phases 14-15). Next: Phase 16 (web admin surfaces for the new mobile-originated flows), then
+  Phase 17 (final verification, both clients — this is also where the `BreakdownTable`/
+  `AgentDetailDrawer` gap above needs resolving before it can pass). Phases 0-7 were 100% backend.
 
 ## 2. Standing instructions from the user (do not relitigate these)
 
@@ -189,51 +195,41 @@ context that produced those three documents.
 | **11** | **Mobile: Customer detail + Log Visit rebuild, delete call-log/payment screens** | **Done, with documented scope cuts (§5 in KNOWN-ISSUES.md)** |
 | **12** | **Mobile: My Day + Branch views, delete dashboard/performance screens** | **Done** |
 | **13** | **Mobile: the cut list (delete Account admin lists, notifications, etc.)** | **Done, with documented scope notes (§6 in KNOWN-ISSUES.md)** |
-| 14 | Web: worklist day-plan restructure | **Not started — next up** (can run parallel to any remaining mobile work) |
-| 15 | Web: delete KPI surface, rework navigation | Not started (**this is what fixes §2 of KNOWN-ISSUES.md**) |
-| 16 | Web: admin surfaces for password-reset/address-correction | Not started |
+| **14** | **Web: worklist day-plan restructure** | **Done** |
+| **15** | **Web: delete KPI surface, rework navigation** | **Done, but only partially closes §2 of KNOWN-ISSUES.md — read that section before deploying** |
+| 16 | Web: admin surfaces for password-reset/address-correction | **Not started — next up** |
 | 17 | Verification and regression (full suite, physical device E2E) | Not started (**this is where deferred full-regression testing happens**) |
 
-## 6. Starting Phase 14
+## 6. Starting Phase 16
 
-Read `docs/REVAMP-SPEC.md`'s Phase 14 section (and §5.2, the web IA summary) in full before
-starting — this handoff's own author has only skimmed it (its `F` file, `frontend/src/pages/
-MyWorklistPage.tsx`, and the "same day-plan restructure as mobile, Rule R1" framing), not verified
-its full `C`/`A`/`T` text the way every mobile phase's brief above was. Quick orientation from what
-*is* confirmed:
+Read `docs/REVAMP-SPEC.md`'s Phase 16 section in full before starting — this handoff's own author
+has only skimmed it, not verified its full `C`/`A`/`T` text against the actual code the way Phase
+14/15's own sections above were. Quick orientation from what *is* confirmed:
 
-- **This is a stack switch.** Phases 0-13 were `backend/` (Node/Express/TS/pg) and `mobile/`
-  (Flutter/Riverpod/GoRouter). Phase 14 onward is `frontend/` (React 18 + TypeScript + Vite + Ant
-  Design 5) — a codebase this session has not yet read. Spend real time orienting in `frontend/src/`
-  before changing anything; none of the mobile-specific patterns in §4 above (typedef-alias
-  bridging, Riverpod providers, the Hive-backed local-store pattern, GoRouter redirects) carry over
-  directly, though the underlying *product* decisions (P4-P12, I1-I8, F1-F6, N1-N6, S1-S8) apply
-  identically to both clients — re-read §2's decision tables with fresh eyes for the web
-  implications, don't assume "already handled, mobile did this."
-- **Rule R1 ("mobile and web move together")**: Phase 14's `D` is Phase 7 (backend), not Phase
-  13 (mobile) — it's explicitly allowed to run in parallel with any remaining mobile work, not
-  gated behind it. Phases 8-13 being done doesn't mean Phase 14 was blocked waiting; it's just next
-  in spec order.
-- **Same day-plan restructure as mobile's Phase 10**, per the spec's own cross-reference: PTPs due
-  pinned/highlighted above the worklist, worked rows grey and sink, search/filter run server-side
-  (the backend contract for this, `GET /worklist`'s pagination/worked-state/filters, already
-  shipped in Phase 3 — check the web client is actually using it before assuming backend work is
-  needed here, same caution Phase 10's own brief gave for mobile).
-- **`GET /reports/agent-activity` is a row-level activity *feed* (paginated individual actions),
-  not an aggregate stat endpoint** — confirmed by reading `backend/src/routes/reports.ts` directly
-  during mobile Phase 10, and re-confirmed during Phase 12's My Day screen (which had to compose
-  `/reports/trail` + `/reports/overview` instead for month-range aggregates, since no single
-  endpoint gives one the way `/tracking/team-day` does for a single day). If Phase 14's ledger view
-  needs a similar aggregate, the same composition approach — or a real backend gap worth scoping
-  explicitly — likely applies; don't assume `/agent-activity` alone answers it.
-- §4.10's **"Keep" list** (`/reports/agent-activity` + export, `/trail`, `/overview`, `/trend`,
-  `/deposits-range`, `/exceptions`, `filterOptions`, `collectedToday`, `collectionByType`,
-  `collectionByChannel`, `listDeposits`, `depositTotals`) is exactly what's still live server-side
-  after Phase 7's deletions — Phase 14 (and 15, 16) build against these, not the deleted
-  `/dashboard`/`/agents`/`/breakdown`/etc. routes the current *web* frontend may still be calling
-  (see `KNOWN-ISSUES.md` §2 — that's precisely what Phase 15 fixes, so don't be surprised if
-  `frontend/` still references deleted routes right now; that's the known, sequenced state, not a
-  bug to fix in Phase 14).
+- **The stack is `frontend/`** (React 18 + TypeScript + Vite + Ant Design 5, `npm run typecheck`/
+  `npm run build` to verify — no test runner is configured, `package.json` has no `test` script).
+  Phase 14/15 (§ above) are this session's only experience in this codebase; read the actual files
+  named in Phase 16's `F` list before assuming their current shape matches the spec's framing.
+- **Phase 16's spec text names a backend test file** (`backend/test/correction-requests.test.ts`)
+  in its `T`, even though its `F` (files to change) list is frontend-only. That almost certainly
+  means the backend side (§4.9: `customer` added to `RECORD_TYPES`, `ALLOWED_FIELDS.customer =
+  ['address']`) was already implemented in an earlier backend phase (0-7) and Phase 16 is purely
+  the web UI on top of it — but this handoff has not personally verified that by reading
+  `backend/src/routes/correction-requests.ts` directly. Check before assuming; if `customer` isn't
+  actually in `RECORD_TYPES` yet, that's a real backend gap this phase's file list doesn't cover,
+  worth surfacing rather than working around.
+- **`AlertsBell.tsx` currently only polls tracking alerts** (per the spec's own `C` text) — read it
+  first to understand its existing polling pattern before adding a second query to it for
+  password-reset-request counts, rather than building a parallel mechanism.
+- **`ReportCorrectionModal.tsx` already exists and is used from `MyWorklistPage.tsx`** (Phase 14
+  section above) for `call`/`payment`/`ptp`/`field_visit` record types — Phase 16 extends it with a
+  `customer` type, `address`-only. Read its current `CorrectableRecordType` union and props shape
+  before adding a case; it should be a straightforward extension of an established pattern, not a
+  rewrite.
+- **This phase does not touch `OrgChartPage.tsx`, `BreakdownTable.tsx`, or `AgentDetailDrawer.tsx`**
+  — the `KNOWN-ISSUES.md` §2 gap (both still calling backend routes deleted in Phase 7) is still
+  open after Phase 16 too, unless a future session deliberately scopes a fix for it. Don't assume
+  Phase 16 or Phase 17 resolves it automatically; check `KNOWN-ISSUES.md` §2 directly.
 
 ## 7. If you get stuck or something looks wrong
 

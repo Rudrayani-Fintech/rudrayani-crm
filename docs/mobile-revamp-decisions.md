@@ -1073,3 +1073,87 @@ Verified: `flutter analyze` clean after both phases (0 issues beyond the same 4 
 new Phase 12 tests: Branch-tab presence gate, `findSelfRow`'s self-row lookup; 16 new Phase 13
 tests: `phoneDigitsRegExp` boundaries, two `widget_test.dart` assertions for the reduced login
 surface) -- no regressions from any of the deletions across both phases.
+
+## Phase 14 and 15 execution (2026-09-05)
+
+First web phases (`frontend/`, React 18/TypeScript/Vite/AntD 5) -- a stack this session had not
+touched at all before now; everything here started from actually reading the code, not from
+mobile-phase pattern-matching. Both implemented in one worktree
+(`worktree-phase14-15-web-ledger`, branched from `origin/revamp-integration` at `1c09a8f`,
+immediately after Phases 12-13 landed), committed separately, merged into `revamp-integration`
+only (never `main`), per the user's standing instruction restated explicitly this session.
+
+**Phase 14** (worklist day-plan restructure, P7, P8, Rule R1): `MyWorklistPage.tsx` was fetching
+the *entire* unpaged `/worklist` result and letting antd's `Table` paginate the in-memory array --
+Phase 3's backend pagination (`page`/`limit`/a real `total`) existed but nothing on web actually
+used it. Now server-side: `total` comes from the API response, not `customers.length`. Worked rows
+(`worked_today`, on the response since Phase 3, never added to the `WorklistCustomer` TypeScript
+type until now) render greyed via `onRow` -- sinking to the bottom needs no client sort, since the
+backend's own `ORDER BY worked_today ASC` primary key already puts them last in whichever page
+they land on. The client-side company filter (`WorklistCustomer` has `company_name` but no
+`company_id`, so it was always a derived-names `.filter()` over the loaded array) is dropped
+outright rather than half-fixed -- it doesn't compose with real pagination (filtering only the
+current 50-row page would silently hide matches sitting on other pages), and dropping it matches
+mobile's identical Phase 10 call for the identical reason, keeping the two clients' cut consistent
+rather than coincidentally different.
+
+**Bug found and fixed, not just documented**: the "Due Today" PTP/reminder section used
+`Collapse`'s `defaultActiveKey` -- a prop React only ever reads at first mount. Since
+`reminders`/`ptpsDue` start empty and only populate once `load()`'s async fetch resolves,
+`dueCount` was always `0` at that first render, so the section never auto-opened even when PTPs
+were genuinely due -- silently failing this exact phase's own "PTPs due are visible without
+scrolling" acceptance criterion, for however long that's been true. Fixed by making the `Collapse`
+controlled (`activeKey`/`onChange` state) with an effect that opens it the moment `dueCount`
+crosses zero, while still letting the agent collapse it manually afterward.
+
+**Phase 15** (delete the KPI surface, rework navigation, P2, P3, S4, S5, F4): deleted
+`DashboardPage.tsx`/`ReportsPage.tsx`/`TargetsPage.tsx`, `scrapped-features/`,
+`useDashboardPreferences.ts`, and every `components/dashboard/*` widget confirmed -- by grepping
+the whole tree for each name individually, not by trusting the spec's own component list at face
+value -- to have no consumer left once those three pages are gone (`widgetRegistry.tsx`,
+`DashboardCustomizer.tsx`, `Gauge.tsx`, `MetricPanel.tsx`, `MetricTabsCard.tsx`,
+`RecalledStatTile.tsx`, `BucketMovementCard.tsx`, `BucketMismatchCard.tsx`, `SummaryStat.tsx`,
+`PendingApprovalsAlert.tsx`, `SetupChecklist.tsx`, `OverviewChart.tsx`, `DepositsRangeCard.tsx`,
+`ExceptionPaymentsCard.tsx`, `TrailAnalyticsCard.tsx`). `BreakdownTable.tsx`/`format.ts`/`types.ts`
+are explicitly kept, per the spec's own "except as noted" instruction and confirmed independently:
+`BranchDetailDrawer.tsx`/`TeamDetailDrawer.tsx` still import `BreakdownTable`, `OrgChartPage.tsx`
+still imports `format.ts`, and none of those three files are in this phase's own file list.
+
+`/` redirects role-conditionally, not to one static target: `reports.view` holders (managers,
+owners) land on `/agent-activity` (S4's new landing page); everyone else lands on `/my-worklist`.
+This departs from a literal single-target reading of S4 for a concrete reason, found by reading
+`AgentActivityPage.tsx` directly rather than assuming: its lookup-options effect unconditionally
+calls `GET /employees` (`employees.view`-gated), which a plain telecaller/field_agent (holding only
+`reports.view_self`) does not have -- landing them there by default on every login would guarantee
+an error toast and empty filter dropdowns before they ever see their own data. `/my-worklist` is
+functionally what the deleted Dashboard's role-conditional "My Performance" label already meant
+for this same group; nothing new was invented, the old routing intent was just carried forward
+onto a route that still exists.
+
+Tracking/Day Plan/Attendance nav items move from `tracking.view` to `tracking.view_team` (S5) --
+a telecaller/field_agent keeps `tracking.view` for their own mobile session (unaffected), but loses
+these three *team*-visibility nav links; the routes stay reachable by direct URL, the same
+de-linked-but-not-deleted pattern used elsewhere in this revamp (e.g. mobile's `/account/ptps/:status`
+in Phase 13) rather than actually removing the pages.
+
+**Found while verifying the "except as noted" deletions, not fixed (outside this phase's file
+list)**: `BreakdownTable.tsx` (`GET /reports/breakdown`) and `AgentDetailDrawer.tsx`
+(`GET /reports/dashboard?agent_id=`) both still call endpoints Phase 7 deleted on the backend --
+both reachable only via `OrgChartPage.tsx`'s branch/team/agent drill-through drawers, and
+`OrgChartPage.tsx` isn't in Phase 15's file list (`App.tsx`/`AppLayout.tsx` plus deletions only).
+This means **Phase 15 shipping does not, by itself, make it safe to merge `revamp-integration`
+into `main`** the way `KNOWN-ISSUES.md` §2 previously implied it would -- it closed most of the
+gap (every KPI/target page and widget) but not all of it. Fixing the remainder is a real product
+decision (a new dimension-pivoted backend aggregate endpoint, vs. dropping the drill-through
+feature in favor of the row-level ledger view used everywhere else in this revamp), not a
+mechanical endpoint swap, so it's documented in full in `KNOWN-ISSUES.md` §2 rather than guessed
+at here. Doc comments in the three affected files were updated in place to point future readers at
+that section instead of describing behavior that no longer exists.
+
+Verified: `npm run typecheck` clean after both phases; `npm run build` succeeds with no unresolved
+imports (Phase 15's own explicit acceptance criterion, checked directly rather than assumed after
+hand-deleting 19 files). No automated test runner is configured for `frontend/` (`package.json` has
+no `test` script) -- manual verification against a seeded 400-account agent (Phase 14) and a
+manual pass of every remaining nav item per role (Phase 15) are both deferred to Phase 17, per the
+same testing-strategy decision already established for the mobile phases (spec-named checks per
+phase; full manual/device end-to-end is Phase 17's own explicit job, not repeated early).

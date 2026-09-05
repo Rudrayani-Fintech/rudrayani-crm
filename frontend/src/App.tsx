@@ -28,6 +28,7 @@ const ImportReviewPage = lazy(() => import("./pages/ImportReviewPage"));
 const MyRequestsPage = lazy(() => import("./pages/MyRequestsPage"));
 const MyWorklistPage = lazy(() => import("./pages/MyWorklistPage"));
 const OrgChartPage = lazy(() => import("./pages/OrgChartPage"));
+const PasswordResetRequestsPage = lazy(() => import("./pages/PasswordResetRequestsPage"));
 const ReallocationRequestsPage = lazy(() => import("./pages/ReallocationRequestsPage"));
 const TeamsPage = lazy(() => import("./pages/TeamsPage"));
 const TrackingPage = lazy(() => import("./pages/TrackingPage"));
@@ -111,6 +112,7 @@ export default function App() {
         <Route path="allocation" element={<AllocationPage />} />
         <Route path="reallocation-requests" element={<ReallocationRequestsPage />} />
         <Route path="correction-requests" element={<CorrectionRequestsPage />} />
+        <Route path="password-reset-requests" element={<PasswordResetRequestsPage />} />
         <Route path="dispositions" element={<DispositionsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
         <Route path="day-plan" element={<DayPlanPage />} />

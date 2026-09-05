@@ -3,7 +3,7 @@ import { DatePicker, Input, InputNumber, Modal, Select, Space, Typography, messa
 import dayjs, { type Dayjs } from "dayjs";
 import { api, errorMessage } from "../api/client";
 
-export type CorrectableRecordType = "payment" | "call_log" | "ptp" | "field_visit";
+export type CorrectableRecordType = "payment" | "call_log" | "ptp" | "field_visit" | "customer";
 
 interface FieldDef {
   key: string;
@@ -23,6 +23,9 @@ const FIELDS_BY_TYPE: Record<CorrectableRecordType, FieldDef[]> = {
     { key: "promised_date", label: "Promised Date", kind: "date" },
   ],
   field_visit: [{ key: "remark", label: "Remark", kind: "text" }],
+  // N3: address is the only correctable field for a customer record --
+  // matches the backend's own ALLOWED_FIELDS.customer allow-list.
+  customer: [{ key: "address", label: "Address", kind: "text" }],
 };
 
 const MODE_OPTIONS = ["NEFT", "RTGS", "Cash", "UPI", "Cheque", "DD"].map((m) => ({ value: m, label: m }));

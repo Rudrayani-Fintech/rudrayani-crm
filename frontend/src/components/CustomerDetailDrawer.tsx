@@ -54,6 +54,10 @@ interface CustomerDetail {
     pos: string | null;
     emi: string | null;
     due_date: string | null;
+    // Phase 5 (N1, N2): lender-sourced, read-only -- correcting it goes
+    // through the correction-request queue (Phase 16, N3), never a direct
+    // edit here.
+    address: string | null;
     status: "active" | "closed" | "recalled";
     recalled_at: string | null;
     custom_fields: Record<string, string>;
@@ -256,6 +260,29 @@ export default function CustomerDetailDrawer({
               <Descriptions.Item label="Company">{detail.company_name}</Descriptions.Item>
               <Descriptions.Item label={fieldLabel("Mobile", "mobile_number")}>
                 {orDash(detail.customer.mobile_number)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Address">
+                <Space>
+                  <span>{orDash(detail.customer.address)}</span>
+                  {/* N1: lender-sourced, read-only -- the only sanctioned way
+                      this ever changes is a manager-approved correction
+                      request (N3), same queue/pattern as the trail entries
+                      below. */}
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<FlagOutlined />}
+                    onClick={() =>
+                      setCorrectionTarget({
+                        recordType: "customer",
+                        recordId: detail.customer.id,
+                        currentValues: { address: detail.customer.address ?? "" },
+                      })
+                    }
+                  >
+                    Request correction
+                  </Button>
+                </Space>
               </Descriptions.Item>
               <Descriptions.Item label={fieldLabel("Product", "product")}>
                 {orDash(detail.customer.product)}

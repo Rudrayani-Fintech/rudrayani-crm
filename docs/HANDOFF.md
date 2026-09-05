@@ -6,35 +6,42 @@ behind decisions already made, `docs/KNOWN-ISSUES.md` is the *what's already bro
 about* checklist. This file exists because a fresh session has none of the prior conversation
 context that produced those three documents.
 
-**Last updated:** 2026-09-05, immediately after Phase 15.
+**Last updated:** 2026-09-05, immediately after Phase 16 and a partial Phase 17 attempt.
 
 ---
 
 ## 1. Where things actually stand
 
-- **Phases 0-15 of 18 are done**, verified, and live on the `revamp-integration` branch (pushed to
-  `origin`). Phase-by-phase summary: §5 below.
-- **The mobile client (Phases 8-13) is feature-complete per this spec.** Phase 14 onward is web
-  (`frontend/`, React/TypeScript/Vite/AntD 5) — a different stack from everything done before it.
-- **`main` is NOT the integration branch for this work, and still is not safe to deploy even now.**
-  `origin/main` auto-deploys to production (Railway). Phase 7 deleted backend routes the web
-  frontend called; Phase 15 deleted the pages that called *most* of them (Dashboard/Reports/
-  Targets) but **two files Phase 15 deliberately left in place still call deleted endpoints** --
-  `components/dashboard/BreakdownTable.tsx` (`GET /reports/breakdown`) and
-  `components/AgentDetailDrawer.tsx` (`GET /reports/dashboard`), both reachable from
-  `OrgChartPage.tsx`'s drill-through drawers. **Read `KNOWN-ISSUES.md` §2 in full before assuming
-  it's safe to merge `revamp-integration` into `main`** — that section has the precise remaining
-  gap and what fixing it needs. Every phase from Phase 8 onward lands on `revamp-integration`, not
-  `main`. (Phases 0-7 *are* also present on local `main` in the primary checkout, from before this
-  branch existed — that's a historical artifact of how those phases were merged, not something to
-  repeat or worry about; just don't push local `main` anywhere.)
+- **Phases 0-16 of 18 are implemented and committed**, live on the `revamp-integration` branch
+  (pushed to `origin`). **Phase 17 ("prove the whole thing works") is NOT done** -- three of its
+  six checks require a working Postgres/physical device/live web session that this session's
+  environment didn't have access to. Full detail: `KNOWN-ISSUES.md` §8. **Do not treat "16 phases
+  committed" as "verified and ready to ship" -- they are different claims.** Phase-by-phase
+  summary: §5 below.
+- **The mobile client (Phases 8-13) and the web KPI/nav/admin-surface work (Phases 14-16) are all
+  feature-complete per this spec.** What's left is entirely verification (Phase 17), not new
+  features.
+- **`main` is NOT the integration branch for this work, and still is not safe to deploy.**
+  `origin/main` auto-deploys to production (Railway). Two separate reasons it's still not safe,
+  both already fully documented -- read them before assuming otherwise:
+  1. `KNOWN-ISSUES.md` §2: `components/dashboard/BreakdownTable.tsx` (`GET /reports/breakdown`) and
+     `components/AgentDetailDrawer.tsx` (`GET /reports/dashboard`) still call backend routes Phase 7
+     deleted, reachable via `OrgChartPage.tsx`'s drill-through drawers -- Phase 15 deliberately left
+     both in place (`OrgChartPage.tsx` needs them, and isn't in Phase 15's file list).
+  2. `KNOWN-ISSUES.md` §8: Phase 17 hasn't actually run the backend test suite, a physical-device
+     mobile E2E, or a web E2E per role -- so even setting #1 aside, nothing has *proven* the whole
+     system actually works end to end yet.
+
+  Every phase from Phase 8 onward lands on `revamp-integration`, not `main`. (Phases 0-7 *are* also
+  present on local `main` in the primary checkout, from before this branch existed — that's a
+  historical artifact of how those phases were merged, not something to repeat or worry about; just
+  don't push local `main` anywhere.)
 - **Nobody has `revamp-integration` checked out** in any worktree as of this writing — pushing
   directly to it (`git push origin HEAD:revamp-integration`) after merging your phase's branch
   into it locally is the simplest path. If a future session finds someone already has it checked
   out, see §4's git-workflow notes for the workaround used once already this session.
-- **The mobile app (`mobile/`) is done** (Phases 8-13). **Web's KPI/nav restructure is done**
-  (Phases 14-15). Next: Phase 16 (web admin surfaces for the new mobile-originated flows), then
-  Phase 17 (final verification, both clients — this is also where the `BreakdownTable`/
+- **The mobile app (`mobile/`) is done** (Phases 8-13). **Web's KPI/nav restructure and admin
+  surfaces are done** (Phases 14-16). Next: finish Phase 17 (this is also where the `BreakdownTable`/
   `AgentDetailDrawer` gap above needs resolving before it can pass). Phases 0-7 were 100% backend.
 
 ## 2. Standing instructions from the user (do not relitigate these)
@@ -197,39 +204,48 @@ context that produced those three documents.
 | **13** | **Mobile: the cut list (delete Account admin lists, notifications, etc.)** | **Done, with documented scope notes (§6 in KNOWN-ISSUES.md)** |
 | **14** | **Web: worklist day-plan restructure** | **Done** |
 | **15** | **Web: delete KPI surface, rework navigation** | **Done, but only partially closes §2 of KNOWN-ISSUES.md — read that section before deploying** |
-| 16 | Web: admin surfaces for password-reset/address-correction | **Not started — next up** |
-| 17 | Verification and regression (full suite, physical device E2E) | Not started (**this is where deferred full-regression testing happens**) |
+| **16** | **Web: admin surfaces for password-reset/address-correction** | **Done** |
+| 17 | Verification and regression (full suite, physical device E2E) | **3/6 checks done with real output (§8 in KNOWN-ISSUES.md); 3/6 blocked on a working Postgres/physical device/live web session -- not started, not skipped — next up** |
 
-## 6. Starting Phase 16
+## 6. Finishing Phase 17 (not starting a new phase — this is the only thing left)
 
-Read `docs/REVAMP-SPEC.md`'s Phase 16 section in full before starting — this handoff's own author
-has only skimmed it, not verified its full `C`/`A`/`T` text against the actual code the way Phase
-14/15's own sections above were. Quick orientation from what *is* confirmed:
+Phase 17 is not a feature phase. Every line item below is something to *run*, not build, and
+almost all of it needs infrastructure this session's environment didn't have: a real
+Postgres+PostGIS instance, a physical Android device (or emulator), and either a person or a
+browser-automation-capable session to click through three role journeys on web. Read
+`KNOWN-ISSUES.md` §8 first — it has the exact commands, the exact error text this session hit
+trying each one, and precisely what's left. This section is the short version.
 
-- **The stack is `frontend/`** (React 18 + TypeScript + Vite + Ant Design 5, `npm run typecheck`/
-  `npm run build` to verify — no test runner is configured, `package.json` has no `test` script).
-  Phase 14/15 (§ above) are this session's only experience in this codebase; read the actual files
-  named in Phase 16's `F` list before assuming their current shape matches the spec's framing.
-- **Phase 16's spec text names a backend test file** (`backend/test/correction-requests.test.ts`)
-  in its `T`, even though its `F` (files to change) list is frontend-only. That almost certainly
-  means the backend side (§4.9: `customer` added to `RECORD_TYPES`, `ALLOWED_FIELDS.customer =
-  ['address']`) was already implemented in an earlier backend phase (0-7) and Phase 16 is purely
-  the web UI on top of it — but this handoff has not personally verified that by reading
-  `backend/src/routes/correction-requests.ts` directly. Check before assuming; if `customer` isn't
-  actually in `RECORD_TYPES` yet, that's a real backend gap this phase's file list doesn't cover,
-  worth surfacing rather than working around.
-- **`AlertsBell.tsx` currently only polls tracking alerts** (per the spec's own `C` text) — read it
-  first to understand its existing polling pattern before adding a second query to it for
-  password-reset-request counts, rather than building a parallel mechanism.
-- **`ReportCorrectionModal.tsx` already exists and is used from `MyWorklistPage.tsx`** (Phase 14
-  section above) for `call`/`payment`/`ptp`/`field_visit` record types — Phase 16 extends it with a
-  `customer` type, `address`-only. Read its current `CorrectableRecordType` union and props shape
-  before adding a case; it should be a straightforward extension of an established pattern, not a
-  rewrite.
-- **This phase does not touch `OrgChartPage.tsx`, `BreakdownTable.tsx`, or `AgentDetailDrawer.tsx`**
-  — the `KNOWN-ISSUES.md` §2 gap (both still calling backend routes deleted in Phase 7) is still
-  open after Phase 16 too, unless a future session deliberately scopes a fix for it. Don't assume
-  Phase 16 or Phase 17 resolves it automatically; check `KNOWN-ISSUES.md` §2 directly.
+1. **Get a database up.** `docker compose up -d` from the repo root (this session couldn't --
+   Docker Desktop's service needs elevation this session's execution context didn't have; an
+   interactive terminal usually doesn't have this problem). Then
+   `cd backend && npm run migrate:up`.
+2. **Run the real backend suite**: `npm test` in `backend/`. Report the actual pass/fail output --
+   Phase 17's own acceptance criterion is explicit about this ("report the actual output, not
+   assertion"). Phase 16's new migration and test cases (the `customer` correction-request type)
+   have only ever been typechecked and read, never executed -- this is also the first real check
+   of those.
+3. **`flutter analyze && flutter test`** in `mobile/` -- already done and clean as of this
+   session (94/94, §8a in KNOWN-ISSUES.md), but harmless to re-run if meaningful time has passed.
+4. **`npm run typecheck && npm run build`** in `frontend/` -- same, already clean, cheap to re-run.
+5. **Manual physical-device mobile E2E** -- needs a real Android phone. The exact sequence is in
+   `REVAMP-SPEC.md`'s Phase 17 section (`§8, item 4`): punch in → day plan loads → PTP section
+   populated → open a customer → navigate → log a visit with a payment in under 10 seconds → row
+   greys and sinks → go offline → log another → alert appears → come back online → it syncs →
+   punch out → tracking stops.
+6. **Manual web E2E for telecaller, branch manager, and owner** -- once step 1's database is up
+   and seeded with at least one user per role. Don't substitute the live production API for this
+   step even if it seems faster; that's real customer data and this document's own predecessor
+   explicitly ruled that out for the same reason.
+7. **Confirm the ledger answers the owner's question** -- `REVAMP-SPEC.md` Phase 17 item 6:
+   "field_agent_1 contacted 20 Hero customers today — 5 PTP, 10 part paid, 10 paid in full,"
+   checked against real seeded data for one agent/one day via `GET /reports/agent-activity` (or
+   the Agent Daily Activity page), not just "the endpoint returned some JSON."
+
+Only once all of the above are actually done, with real reported output, does
+`KNOWN-ISSUES.md` §2's `BreakdownTable`/`AgentDetailDrawer` gap become the *only* remaining
+blocker on merging `revamp-integration` into `main` — and that gap still needs its own separate
+fix (a real product decision, not something Phase 17 resolves as a side effect).
 
 ## 7. If you get stuck or something looks wrong
 

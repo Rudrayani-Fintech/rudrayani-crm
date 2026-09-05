@@ -1157,3 +1157,80 @@ no `test` script) -- manual verification against a seeded 400-account agent (Pha
 manual pass of every remaining nav item per role (Phase 15) are both deferred to Phase 17, per the
 same testing-strategy decision already established for the mobile phases (spec-named checks per
 phase; full manual/device end-to-end is Phase 17's own explicit job, not repeated early).
+
+## Phase 16 execution, and a partial Phase 17 attempt (2026-09-05)
+
+Same worktree pattern as every phase before it (`worktree-phase16-17-final-verification`, branched
+from `origin/revamp-integration` at `ad66883`, immediately after Phases 14-15 landed), Phase 16
+committed on its own, then Phase 17 attempted in the same session since both were asked for
+together. Per the user's standing instruction, work stayed on its own branch, merged into
+`revamp-integration` only, `main` untouched.
+
+**Phase 16** (admin surfaces for the new flows, A4, N3): the correction-request queue gains a
+`customer` record type -- genuinely new backend work, despite Phase 16's own file list being
+frontend-only. Confirmed rather than assumed: `correction-requests.ts`'s `RECORD_TYPES` had no
+`customer` entry at all before this session touched it, and Phase 16's own `T` line names a
+backend test file whose implied assertions couldn't otherwise be true. Implemented by mirroring
+the file's own existing precedent almost exactly -- the `field_visit`-widening migration
+(`1789000000000_correction-requests-field-visit.sql`) was the template for the new
+`1789900000000_correction-requests-customer.sql`, and `customerWriteScopeClamp()` (already the
+ownership check for every other customer-scoped write in the app -- field-visits.ts, call-logs.ts,
+ptps.ts) is reused for `loadOwnedRecord()`'s new `customer` branch, since a customer record has no
+single-column "author" the way a payment/call-log/ptp/field-visit does. The GET list query and
+`decideOne()`'s SELECT both needed a fifth COALESCE branch (`cust_direct`, joined straight on
+`record_id` since a customer correction's own id *is* the customer's id -- no intermediate table
+the way the other four route through).
+
+`CustomerDetailDrawer.tsx` had no `address` field at all in its local `CustomerDetail` type or its
+rendered Descriptions block, even though `GET /customers/:id` has returned it (`SELECT c.*`) since
+Phase 5 -- added both, plus a "Request correction" trigger reusing the exact same
+`ReportCorrectionModal`/`correctionTarget` plumbing already wired for trail entries, rather than
+building a second modal-invocation path.
+
+`PasswordResetRequestsPage.tsx` is new; the backend queue it reads (`GET /password-reset-requests`,
+branch-scoped via `agentBranchClamp`) already existed from Phase 2, so this phase is purely the web
+UI on top of it. "Link each request to that employee's reset action" is implemented as a
+`?reset_user_id=` query param navigation into `EmployeesPage.tsx`, which now reads it once its own
+employee list has loaded and auto-opens the *existing* reset-password modal pre-targeted -- chosen
+over duplicating the reset flow into the new page, since the actual reset-password form (with its
+own validation, its own "sessions logged out" messaging) already exists and works. `AlertsBell.tsx`
+gains a second polled source (`api/passwordResetAlerts.ts`, the same shared-interval-across-
+subscribers shape as the pre-existing `liveTracking.ts`) rather than folding reset-request polling
+into the tracking-alerts module directly -- the two are unrelated data with unrelated permission
+gates (`tracking.view` vs `employees.view`), and a manager holding only one of the two still needs
+the bell to work for whichever they do hold.
+
+**Bug found and fixed while touching this**: `CorrectionRequestsPage.tsx`'s own `record_type` union
+was missing `"field_visit"` -- already accepted by the backend since an earlier phase extended
+`RECORD_TYPES` to include it, but never added to this page's type. A field-visit correction request
+rendered with a blank `Tag` (the lookup into `RECORD_TYPE_LABEL` returned `undefined`) -- not a
+crash, just silently wrong for however long that's been true. Fixed alongside adding `"customer"`,
+since both were the same one-line gap in the same map.
+
+**Phase 17** ("prove the whole thing works"): three of its six items ran, with real output --
+`flutter analyze`/`flutter test` (94/94, unchanged from Phase 13's count -- Phases 14-16 never
+touched `mobile/`), `frontend/`'s `npm run typecheck && npm run build`, and `backend/`'s
+`npm run typecheck`/`npm run build` (a substitute for Phase 17's literal item 1, "run the full
+backend suite," not the thing itself). The other three -- the actual backend test suite, physical-
+device mobile E2E, and web E2E per role -- could not run, for a single root cause: **no working
+Postgres was reachable in this session's environment.** `docker ps` reported "Docker Desktop is
+unable to start"; the underlying Windows service was stopped and starting it directly failed with
+a permissions error (`Cannot open com.docker.service service`) rather than a missing-service one --
+this background session's execution context doesn't hold the privilege Docker Desktop's service
+needs. A direct `pg` client connection attempt to the docker-compose default
+(`postgres://rudrayani:rudrayani_dev_pass@localhost:5432/rudrayani_crm`) timed out at the wire-
+protocol handshake, confirming the "open" port wasn't actually serving Postgres, not just a slow
+response. `winget` is available but a native install would hit the same class of privilege problem
+(Windows service creation) and wasn't attempted further given that near-certain outcome.
+
+This is reported here in full, not silently worked around, deliberately: fabricating "manual E2E
+passed" without actually clicking through it, or running tests against the live production database
+to route around a local one, would both be worse than an honest "blocked, here's exactly why and
+what to do next." Full detail -- including precisely what a future session (or the user, from an
+interactive terminal where Docker Desktop typically works fine) needs to run to actually close
+these three items -- is in `KNOWN-ISSUES.md` §8, written to be actionable on its own without
+needing to re-read this narrative first.
+
+**Consequently: Phases 0-16 are implemented and committed, but Phase 17 -- the actual "safe to
+merge into `main`" gate -- is not done.** Treat "all 16 phases committed" and "verified and ready
+to ship" as two different claims; only the first one is true right now.

@@ -97,10 +97,18 @@ beforeAll(async () => {
     teamId: string | null,
     branchId: string | null,
   ) => {
+    const designation =
+      flags === "is_agency_admin"
+        ? "agency_admin"
+        : flags === "is_operations_manager"
+          ? "operations_manager"
+          : flags === "is_telecaller"
+            ? "telecaller"
+            : "field_agent";
     const { rows } = await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, team_id, branch_id, ${flags})
-       VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id`,
-      [agency, `Track ${key}`, PHONES[key], hash, teamId, branchId],
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, team_id, branch_id, ${flags}, designation)
+       VALUES ($1, $2, $3, $4, $5, $6, true, $7) RETURNING id`,
+      [agency, `Track ${key}`, PHONES[key], hash, teamId, branchId, designation],
     );
     userIds[key] = rows[0].id;
     tokens[key] = await login(PHONES[key]);
@@ -130,6 +138,9 @@ afterAll(async () => {
   const ids = Object.values(userIds);
   await pool.query("DELETE FROM location_pings WHERE user_id = ANY($1)", [ids]);
   await pool.query("DELETE FROM attendance WHERE user_id = ANY($1)", [ids]);
+  // branches.branch_manager_id FKs to users -- clear it before deleting the
+  // branch_manager row, or this delete throws on the FK constraint.
+  await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM users WHERE id = ANY($1)", [ids]);
   await pool.query("DELETE FROM teams WHERE id = ANY($1)", [[teamAId, teamBId]]);
   await pool.query("DELETE FROM branches WHERE agency_id = $1", [agencyId]);
@@ -193,15 +204,16 @@ describe("live view scoping", () => {
     for (let m = 28; m >= 0; m -= 4) await ping(userIds.tele, m, 5000 + (m % 3));
   });
 
-  // Phase 12: agentA (field_agent) now holds tracking.view, but is clamped to
-  // self only -- sees their own live ping, never the rest of the team.
-  it("an agent sees only themselves, never the rest of the team", async () => {
+  // Phase 7 (§4.8, S5): tracking.view no longer opens the live map for an
+  // individual agent at all -- the live map (this route) is now gated
+  // entirely on tracking.view_team, which telecaller/field_agent never
+  // hold. An agent's own attendance/location still surfaces through
+  // /tracking/team-day (self-scoped, tracking.view) instead.
+  it("an agent is 403'd from the live map -- it is manager-only now", async () => {
     const res = await request(app)
       .get("/api/tracking/live")
       .set("Authorization", `Bearer ${tokens.agentA}`);
-    expect(res.status).toBe(200);
-    const ids = res.body.agents.map((a: { user_id: string }) => a.user_id);
-    expect(ids).toEqual([userIds.agentA]);
+    expect(res.status).toBe(403);
   });
 
   it("admin sees all on-duty agents of the agency, never other agencies", async () => {

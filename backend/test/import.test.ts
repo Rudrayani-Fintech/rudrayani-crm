@@ -24,15 +24,15 @@ async function buildTestSheet(): Promise<Buffer> {
   const ws = wb.addWorksheet("Ledger");
   ws.addRow([
     "Loan No", "Cust Name", "Mobile", "Prod", "BKT", "Total Due", "POS", "EMI Amt",
-    "Due Date", "Agent Ph", "Vehicle No",
+    "Due Date", "Agent Ph", "Address", "Vehicle No",
   ]);
-  ws.addRow(["LN001", "Ramesh Kumar", "9800000001", "HL", "B1", "1,25,000", 150000, 5200, "2026-01-08", "", "MH10AB1234"]);
-  ws.addRow(["LN002", "Suresh Patil", "9800000002", "Home Loan", "B2", 78000, 90000, 3100, "2026-01-08", "", ""]);
-  ws.addRow(["LN003", "Ganesh Jadhav", "9800000003", "PL", "B1", 56000, 65000, 2500, "2026-01-08", "", "MH09XY7777"]);
-  ws.addRow(["LN004", "Mahesh Pawar", "9800000004", "PL", "B3", 91000, 105000, 4100, "2026-01-08", "", ""]);
-  ws.addRow(["", "No LoanNumber", "9800000005", "PL", "B1", 10000, 12000, 500, "2026-01-08", "", ""]); // missing required
-  ws.addRow(["LN001", "Dup LoanNumber", "9800000006", "HL", "B1", 20000, 24000, 900, "2026-01-08", "", ""]); // in-file dup
-  ws.addRow(["LN005", "Bad Amount", "9800000007", "HL", "B2", "not-a-number", 70000, 700, "2026-01-08", "", ""]); // malformed
+  ws.addRow(["LN001", "Ramesh Kumar", "9800000001", "HL", "B1", "1,25,000", 150000, 5200, "2026-01-08", "", "1 MG Road", "MH10AB1234"]);
+  ws.addRow(["LN002", "Suresh Patil", "9800000002", "Home Loan", "B2", 78000, 90000, 3100, "2026-01-08", "", "2 Park St", ""]);
+  ws.addRow(["LN003", "Ganesh Jadhav", "9800000003", "PL", "B1", 56000, 65000, 2500, "2026-01-08", "", "3 Church Rd", "MH09XY7777"]);
+  ws.addRow(["LN004", "Mahesh Pawar", "9800000004", "PL", "B3", 91000, 105000, 4100, "2026-01-08", "", "4 Lake View", ""]);
+  ws.addRow(["", "No LoanNumber", "9800000005", "PL", "B1", 10000, 12000, 500, "2026-01-08", "", "5 Hill Rd", ""]); // missing required
+  ws.addRow(["LN001", "Dup LoanNumber", "9800000006", "HL", "B1", 20000, 24000, 900, "2026-01-08", "", "6 Sea Face", ""]); // in-file dup
+  ws.addRow(["LN005", "Bad Amount", "9800000007", "HL", "B2", "not-a-number", 70000, 700, "2026-01-08", "", "7 River Side", ""]); // malformed
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -47,6 +47,8 @@ const MAPPING = {
   "EMI Amt": "emi",
   "Due Date": "emi_due_date",
   "Agent Ph": "agent_phone",
+  // Phase 5 (N1, N2, §4.3): address is now required by default.
+  Address: "address",
   // "Vehicle No" deliberately unmapped -> custom_fields
 };
 
@@ -57,8 +59,8 @@ beforeAll(async () => {
   agencyId = agency.rows[0].id;
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Import Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Import Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   const company = await pool.query(
@@ -101,6 +103,7 @@ describe("Excel import pipeline (brief §4)", () => {
       "EMI Amt",
       "Due Date",
       "Agent Ph",
+      "Address",
       "Vehicle No",
     ]);
     expect(res.body.row_count).toBe(7);
@@ -193,8 +196,8 @@ describe("Excel import pipeline (brief §4)", () => {
 
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Ledger");
-    ws.addRow(["Loan No", "Cust Name", "Mobile", "Prod", "BKT", "Total Due", "POS", "EMI Amt", "Due Date", "Agent Ph"]);
-    ws.addRow(["LN900", "Pos Test Customer", "9800000099", "HL", "B1", "5,000", "1,25,000", 500, "2026-01-08", ""]);
+    ws.addRow(["Loan No", "Cust Name", "Mobile", "Prod", "BKT", "Total Due", "POS", "EMI Amt", "Due Date", "Agent Ph", "Address"]);
+    ws.addRow(["LN900", "Pos Test Customer", "9800000099", "HL", "B1", "5,000", "1,25,000", 500, "2026-01-08", "", "1 Test Rd"]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
     const upload = await request(app)
@@ -220,6 +223,7 @@ describe("Excel import pipeline (brief §4)", () => {
           "EMI Amt": "emi",
           "Due Date": "emi_due_date",
           "Agent Ph": "agent_phone",
+          Address: "address",
         },
         file_name: "pos_test.xlsx",
       });
@@ -314,8 +318,8 @@ describe("Products & buckets derivation (brief §4)", () => {
 
   it("an agent (customers.view only) cannot run imports", async () => {
     await pool.query(
-      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent)
-       VALUES ($1, 'No Import Rights', '7200000002', $2, true)`,
+      `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+     VALUES ($1, 'No Import Rights', '7200000002', $2, true, 'field_agent')`,
       [agencyId, await hashPassword(PASSWORD)],
     );
     const login = await request(app)
@@ -341,6 +345,8 @@ describe("all system fields required (owner feedback round, Phase 2)", () => {
     "EMI Amt": "emi",
     "Due Date": "emi_due_date",
     "Agent Ph": "agent_phone",
+    // Phase 5 (N1, N2, §4.3): address is now required by default too.
+    Address: "address",
   };
 
   it("commit rejects a mapping missing a newly-required field (e.g. pos)", async () => {
@@ -350,7 +356,7 @@ describe("all system fields required (owner feedback round, Phase 2)", () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Ledger");
     ws.addRow(Object.keys(missingPos));
-    ws.addRow(["LN800", "Full Fields", "9800000010", "HL", "B1", "5000", 500, "2026-01-08", ""]);
+    ws.addRow(["LN800", "Full Fields", "9800000010", "HL", "B1", "5000", 500, "2026-01-08", "", "1 Test Rd"]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
     const upload = await request(app)
@@ -374,7 +380,7 @@ describe("all system fields required (owner feedback round, Phase 2)", () => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Ledger");
     ws.addRow(Object.keys(FULL_MAPPING));
-    ws.addRow(["LN801", "Full Fields", "9800000011", "HL", "B1", "5000", "125000", 500, "2026-01-08", ""]);
+    ws.addRow(["LN801", "Full Fields", "9800000011", "HL", "B1", "5000", "125000", 500, "2026-01-08", "", "1 Test Rd"]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
 
     const upload = await request(app)
@@ -405,5 +411,51 @@ describe("all system fields required (owner feedback round, Phase 2)", () => {
       .send({ company_id: companyId, name: "Missing POS Template", column_mapping: missingPos });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('must map a column to "pos"');
+  });
+});
+
+describe("customers.address backfill (Phase 5, §4.3)", () => {
+  // The migration (1789600000000_customer-address-column.sql) only ever
+  // runs once, against whatever rows existed at migration time -- it can't
+  // be re-exercised against a customer created fresh during a test run. This
+  // runs the exact same backfill UPDATE against freshly-inserted rows
+  // instead, to prove the SQL logic itself (the same fuzzy match mobile's
+  // customer_detail_screen.dart already uses: the first custom_fields key
+  // whose lower-cased name contains "address" or "addr", non-empty).
+  it("populates address from the first address-like custom_fields key, skips rows with none", async () => {
+    const known = await pool.query<{ id: string }>(
+      `INSERT INTO customers (company_id, loan_number, customer_name, mobile_number, bucket, custom_fields)
+       VALUES
+         ($1, 'ADDR-BF-1', 'Backfill One', '9820000001', 'B1', '{"Village": "X", "Customer Address": "12 MG Road, Pune"}'),
+         ($1, 'ADDR-BF-2', 'Backfill Two', '9820000002', 'B1', '{"addr_line1": "45 Park St"}'),
+         ($1, 'ADDR-BF-3', 'Backfill Three', '9820000003', 'B1', '{"Village": "Y"}')
+       RETURNING id`,
+      [companyId],
+    );
+    expect(known.rows).toHaveLength(3);
+
+    await pool.query(
+      `UPDATE customers c
+          SET address = sub.v
+         FROM (
+           SELECT DISTINCT ON (c2.id) c2.id, TRIM(kv.value) AS v
+             FROM customers c2, jsonb_each_text(c2.custom_fields) kv
+            WHERE (lower(kv.key) LIKE '%address%' OR lower(kv.key) LIKE '%addr%')
+              AND TRIM(kv.value) <> ''
+            ORDER BY c2.id, kv.key
+         ) sub
+        WHERE c.id = sub.id AND c.company_id = $1`,
+      [companyId],
+    );
+
+    const { rows } = await pool.query<{ loan_number: string; address: string | null }>(
+      "SELECT loan_number, address FROM customers WHERE company_id = $1 AND loan_number LIKE 'ADDR-BF-%' ORDER BY loan_number",
+      [companyId],
+    );
+    expect(rows).toEqual([
+      { loan_number: "ADDR-BF-1", address: "12 MG Road, Pune" },
+      { loan_number: "ADDR-BF-2", address: "45 Park St" },
+      { loan_number: "ADDR-BF-3", address: null },
+    ]);
   });
 });

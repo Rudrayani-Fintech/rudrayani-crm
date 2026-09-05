@@ -74,7 +74,8 @@ TRUNCATE TABLE
   customers,
   companies,
   refresh_tokens,
-  otp_requests
+  otp_requests,
+  audit_logs
 RESTART IDENTITY CASCADE;
 
 -- ── WIPE ALL USERS EXCEPT THE ADMIN ───────────────────────────
@@ -82,6 +83,11 @@ RESTART IDENTITY CASCADE;
 -- null it out everywhere first so the batch delete never trips over
 -- a still-referenced manager mid-delete.
 UPDATE users SET manager_id = NULL;
+-- branches.branch_manager_id also references users with NO ACTION
+-- (no CASCADE) -- null it out too, otherwise DELETE FROM users below
+-- fails on any branch still pointing at a non-admin manager. Harmless
+-- since branches themselves are deleted a few statements down anyway.
+UPDATE branches SET branch_manager_id = NULL;
 DELETE FROM users WHERE phone <> '9999999999';
 
 -- Admin's own branch/team is about to be deleted -- clear those refs

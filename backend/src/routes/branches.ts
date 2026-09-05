@@ -133,9 +133,7 @@ router.patch(
 /**
  * Branch drill-down (Phase 9): one aggregating fetch behind the BranchesPage
  * drawer -- team details, targets, and deposits for this branch. Agent-wise
- * breakdown is deliberately NOT duplicated here: the frontend embeds the
- * existing BreakdownTable widget (dimension=agent, branch_id=this branch),
- * which already hits GET /reports/breakdown on its own.
+ * breakdown is deliberately NOT duplicated here.
  * Gated the same as the Branches nav item itself (branches.manage) -- but
  * that permission is also granted to branch_manager (Phase 2), so this is
  * NOT always agency-wide: a branch_manager caller is clamped to their own
@@ -168,7 +166,7 @@ router.get(
     const branch = branchRows[0];
     if (!branch) throw new HttpError(404, "Branch not found");
 
-    const [teamsRes, agentCountRes, targetsRes, deposits, depositPayments] = await Promise.all([
+    const [teamsRes, agentCountRes, deposits, depositPayments] = await Promise.all([
       pool.query(
         `SELECT t.id, t.name, t.created_at,
                 COUNT(DISTINCT u.id) FILTER (WHERE u.is_active)::int AS member_count
@@ -180,16 +178,6 @@ router.get(
         [id],
       ),
       pool.query(`SELECT COUNT(*)::int AS n FROM users WHERE branch_id = $1 AND is_active`, [id]),
-      pool.query(
-        `SELECT t.id, t.metric, t.target_amount, t.target_count, t.product, t.bucket,
-                co.name AS company_name
-           FROM targets t
-           LEFT JOIN companies co ON co.id = t.company_id
-          WHERE t.agency_id = $1 AND t.scope_type = 'branch' AND t.scope_id = $2
-            AND t.month = $3::date
-          ORDER BY t.metric`,
-        [agencyId, id, monthStart],
-      ),
       depositTotals(agencyId, { month: monthStart, branch_id: id }),
       listDeposits(agencyId, { month: monthStart, branch_id: id, limit: 200 }),
     ]);
@@ -200,7 +188,6 @@ router.get(
       teams: teamsRes.rows,
       team_count: teamsRes.rows.length,
       agent_count: agentCountRes.rows[0].n,
-      targets: targetsRes.rows,
       deposits: { ...deposits, payments: depositPayments },
     });
   }),

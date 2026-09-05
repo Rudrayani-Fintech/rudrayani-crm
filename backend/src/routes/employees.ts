@@ -926,7 +926,7 @@ router.patch(
     // Deactivation takes effect immediately: kill sessions.
     if (body.is_active === false) {
       await pool.query(
-        "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+        "UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'deactivated' WHERE user_id = $1 AND revoked_at IS NULL",
         [req.params.id],
       );
     }
@@ -955,8 +955,14 @@ router.post(
        WHERE id = $1`,
       [req.params.id, passwordHash],
     );
+    // A5/O4: this reset exists mainly for A4's mobile-forgot-password flow —
+    // the requester's live mobile session (if any) must not be destroyed by
+    // it. Web sessions (device_id IS NULL) are revoked; mobile sessions
+    // (device_id IS NOT NULL) are left alone. Contrast with the blanket
+    // revoke above on deactivation, which is deliberately unscoped.
     await pool.query(
-      "UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL",
+      `UPDATE refresh_tokens SET revoked_at = now(), revoked_reason = 'admin_reset'
+       WHERE user_id = $1 AND revoked_at IS NULL AND device_id IS NULL`,
       [req.params.id],
     );
     await recordAuditLog(pool, {

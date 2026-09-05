@@ -65,10 +65,12 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   const mk = async (key: keyof typeof PHONES, flags: string, teamId: string | null) => {
+    const designation =
+      flags === "is_agency_admin" ? "agency_admin" : flags === "is_telecaller" ? "telecaller" : "field_agent";
     const { rows } = await pool.query(
-      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, ${flags})
-       VALUES ($1, $2, $3, $4, $5, $6, true) RETURNING id`,
-      [agencyId, branch.rows[0].id, teamId, `DP ${key}`, PHONES[key], hash],
+      `INSERT INTO users (agency_id, branch_id, team_id, full_name, phone, password_hash, ${flags}, designation)
+       VALUES ($1, $2, $3, $4, $5, $6, true, $7) RETURNING id`,
+      [agencyId, branch.rows[0].id, teamId, `DP ${key}`, PHONES[key], hash, designation],
     );
     userIds[key] = rows[0].id;
   };
@@ -145,6 +147,9 @@ afterAll(async () => {
   await pool.query("DELETE FROM customers WHERE company_id = $1", [companyId]);
   await pool.query("DELETE FROM disposition_codes WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM companies WHERE id = $1", [companyId]);
+  // branches.branch_manager_id FKs to users -- clear it before deleting the
+  // branch_manager row, or this delete throws on the FK constraint.
+  await pool.query("UPDATE branches SET branch_manager_id = NULL WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM users WHERE agency_id = $1", [agencyId]);
   await pool.query("DELETE FROM teams WHERE id = ANY($1)", [[teamAId, teamBId]]);
   await pool.query("DELETE FROM branches WHERE agency_id = $1", [agencyId]);

@@ -40,18 +40,39 @@ function detectNeeds(template = "") {
   };
 }
 
-async function run(): Promise<void> {
-  const agencyId = process.argv[2];
-  if (!agencyId) {
-    console.error("Usage: npm run seed:dispositions -- <agency_id>");
-    process.exit(1);
+// X1 fix: the sheet's Action Code column already tags most rows with a
+// channel (OC = on-call, FV = field visit, LG = legal call-forward, PIOC/PIFV
+// = penal-interest variants); this derives the `channel` column at insert
+// time instead of leaving it for a separate migration to backfill later
+// (see 1785600000000_add-disposition-channel.sql, which ran once and was
+// then silently undone by a re-seed that never set channel at all).
+function channelForActionCode(actionCode: string): "FV" | "OC" | null {
+  switch (actionCode) {
+    case "FV":
+    case "PIFV":
+      return "FV";
+    case "OC":
+    case "LG":
+    case "PIOC":
+      return "OC";
+    default:
+      // "OC/FV" is handled by the caller (expands into two rows). Anything
+      // else is a sheet action code this mapping doesn't know about --
+      // insert with channel NULL rather than guess; the admin UI (or a
+      // future edit to this switch) is where that gets resolved.
+      return null;
   }
+}
 
+export async function seedDispositionCodesForAgency(
+  agencyId: string,
+  filePath: string = FILE_PATH,
+): Promise<number> {
   // Was the xlsx package (known advisories, unmaintained) -- exceljs is
   // already a dependency and used everywhere else in this codebase for the
   // same job, so this was the one remaining reason xlsx was installed at all.
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(FILE_PATH);
+  await workbook.xlsx.readFile(filePath);
   const sheet = workbook.worksheets[0];
   if (!sheet) throw new Error("Trail_Codes.xlsx has no worksheets");
 
@@ -89,35 +110,66 @@ async function run(): Promise<void> {
     }
 
     const needs = detectNeeds(String(remarkTemplate ?? ""));
+    const actionCodeStr = String(actionCode ?? "");
+    // "OC/FV" codes are usable from either channel with identical wording
+    // (see 1785600000000_add-disposition-channel.sql) -- insert one row per
+    // channel rather than picking one. Everything else derives a single
+    // channel from the action code.
+    const channels =
+      actionCodeStr === "OC/FV" ? (["FV", "OC"] as const) : [channelForActionCode(actionCodeStr)];
 
-    await pool.query(
-      `INSERT INTO disposition_codes
-        (agency_id, action_code, category, result_code, description, remark_template,
-         needs_amount, needs_date, needs_time, needs_mode, needs_reason, needs_name_relation)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-      [
-        agencyId,
-        actionCode || null,
-        category || null,
-        resultCode ? String(resultCode) : null,
-        description || null,
-        remarkTemplate || null,
-        needs.needs_amount,
-        needs.needs_date,
-        needs.needs_time,
-        needs.needs_mode,
-        needs.needs_reason,
-        needs.needs_name_relation,
-      ],
-    );
-    inserted += 1;
+    for (const channel of channels) {
+      // ON CONFLICT DO NOTHING on the natural key (see the matching unique
+      // index added by 1789100000000_dedupe-and-backfill-disposition-channel.sql)
+      // makes re-running this script safe -- the previous version had no such
+      // guard, and a second run after the channel migration is exactly how
+      // production ended up with every code duplicated at channel = NULL (X1).
+      const result = await pool.query(
+        `INSERT INTO disposition_codes
+          (agency_id, action_code, category, result_code, description, remark_template, channel,
+           needs_amount, needs_date, needs_time, needs_mode, needs_reason, needs_name_relation)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         ON CONFLICT (
+           agency_id, action_code, COALESCE(result_code, ''), COALESCE(description, ''),
+           COALESCE(remark_template, ''), channel
+         ) DO NOTHING`,
+        [
+          agencyId,
+          actionCode || null,
+          category || null,
+          resultCode ? String(resultCode) : null,
+          description || null,
+          remarkTemplate || null,
+          channel,
+          needs.needs_amount,
+          needs.needs_date,
+          needs.needs_time,
+          needs.needs_mode,
+          needs.needs_reason,
+          needs.needs_name_relation,
+        ],
+      );
+      if ((result.rowCount ?? 0) > 0) inserted += 1;
+    }
   }
 
+  return inserted;
+}
+
+async function run(): Promise<void> {
+  const agencyId = process.argv[2];
+  if (!agencyId) {
+    console.error("Usage: npm run seed:dispositions -- <agency_id>");
+    process.exit(1);
+  }
+  const inserted = await seedDispositionCodesForAgency(agencyId);
   console.log(`Seeded ${inserted} disposition codes for agency ${agencyId}`);
   await pool.end();
 }
 
-run().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  run().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

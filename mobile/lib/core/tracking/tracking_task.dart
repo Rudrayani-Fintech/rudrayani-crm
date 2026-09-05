@@ -55,14 +55,31 @@ class TrackingTaskHandler extends TaskHandler {
 
   Future<void> _capturePing() async {
     try {
-      final pos = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 30),
-        ),
-      );
+      Position pos;
+      try {
+        pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 30),
+          ),
+        );
+      } catch (_) {
+        // X2: a high-accuracy fix is all-or-nothing -- indoors that's
+        // silence rather than a degraded fix. Retry once at a lower
+        // accuracy/shorter timeout before giving up the tick entirely.
+        pos = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.medium,
+            timeLimit: Duration(seconds: 15),
+          ),
+        );
+      }
       _pending.add({
-        'recorded_at': pos.timestamp.toUtc().toIso8601String(),
+        // X2: location_pings has a unique (user_id, recorded_at) index with
+        // ON CONFLICT DO NOTHING. Using the GPS fix's own timestamp means a
+        // repeated cached fix (same pos.timestamp) is silently discarded --
+        // stamp with wall-clock time instead so every tick is recorded.
+        'recorded_at': DateTime.now().toUtc().toIso8601String(),
         'lat': pos.latitude,
         'lng': pos.longitude,
         'accuracy_meters': pos.accuracy,

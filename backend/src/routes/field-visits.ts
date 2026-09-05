@@ -5,6 +5,8 @@ import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
+import { recordEmbeddedPayment } from "../services/embedded-payment-service";
+import { refreshNextActionDate } from "../services/ptp-service";
 import { customerWriteScopeClamp } from "../services/scope";
 import { getStorage } from "../services/storage/storage-provider";
 
@@ -32,6 +34,12 @@ const visitBody = z.object({
   lat: z.coerce.number().min(-90).max(90).optional(),
   lng: z.coerce.number().min(-180).max(180).optional(),
   client_key: z.string().uuid().optional(),
+  // Phase 6 (I2, §4.4): money is recorded inside the interaction. Flat
+  // fields, not a nested object -- this is a multipart/form-data body
+  // (photo/signature upload), where a client can't send nested JSON.
+  payment_amount: z.coerce.number().positive().optional(),
+  payment_mode: z.string().trim().min(1).max(60).optional(),
+  payment_paid_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
 });
 
 async function saveImage(file: Express.Multer.File | undefined, folder: string) {
@@ -56,7 +64,12 @@ router.post(
         [req.user!.id, body.client_key],
       );
       if (dup.rows[0]) {
-        res.status(200).json({ field_visit: dup.rows[0], duplicate: true });
+        // Phase 6 (§4.4): a retried request with an embedded payment must
+        // also get its original payment back, not just the visit.
+        const payment = await pool.query("SELECT * FROM payments WHERE field_visit_id = $1", [
+          dup.rows[0].id,
+        ]);
+        res.status(200).json({ field_visit: dup.rows[0], payment: payment.rows[0] ?? null, duplicate: true });
         return;
       }
     }
@@ -92,8 +105,10 @@ router.post(
     const signatureKey = await saveImage(signature, "signatures");
 
     const hasGps = body.lat !== undefined && body.lng !== undefined;
+    const client = await pool.connect();
     try {
-      const { rows } = await pool.query(
+      await client.query("BEGIN");
+      const { rows } = await client.query(
         `INSERT INTO field_visits
            (customer_id, agent_id, photo_url, signature_url, remark, location, client_key)
          VALUES ($1, $2, $3, $4, $5,
@@ -116,14 +131,64 @@ router.post(
           body.client_key ?? null,
         ],
       );
-      res.status(201).json({ field_visit: rows[0] });
+      const fieldVisit = rows[0];
+
+      // Phase 6 (I2, §4.4): money recorded inside the interaction, one
+      // transaction, same client_key as the visit itself.
+      let payment: Record<string, unknown> | null = null;
+      if (body.payment_amount !== undefined) {
+        payment = await recordEmbeddedPayment(client, {
+          customerId: body.customer_id,
+          collectedByUserId: req.user!.id,
+          collectorBranchId: req.user!.branch_id,
+          payment: {
+            amount: body.payment_amount,
+            mode: body.payment_mode,
+            paid_at: body.payment_paid_at,
+          },
+          clientKey: body.client_key ?? null,
+          fieldVisitId: fieldVisit.id,
+        });
+      }
+
+      // Phase 4 (§4.2): a field visit counts toward the daily attempt cap
+      // and can still resurface the customer via a pending PTP/reminder,
+      // even though it can't drive the disposition-cadence source itself
+      // yet (field_visits has no disposition_code_id column).
+      await refreshNextActionDate(client, body.customer_id);
+      await client.query("COMMIT");
+      res.status(201).json({ field_visit: fieldVisit, payment });
     } catch (err) {
+      await client.query("ROLLBACK");
       // The photo/signature were already written to storage before this
-      // INSERT -- if the row never lands, clean them up rather than leaving
-      // orphaned files with nothing referencing them.
+      // transaction -- if it never committed, clean them up rather than
+      // leaving orphaned files with nothing referencing them.
       if (photoKey) await getStorage().delete(photoKey);
       if (signatureKey) await getStorage().delete(signatureKey);
+      // Two retries raced: the other one won, answer with its row.
+      if (
+        body.client_key &&
+        err instanceof Error &&
+        "code" in err &&
+        (err as { code?: string }).code === "23505"
+      ) {
+        const dup = await pool.query("SELECT * FROM field_visits WHERE agent_id = $1 AND client_key = $2", [
+          req.user!.id,
+          body.client_key,
+        ]);
+        if (dup.rows[0]) {
+          const payment = await pool.query("SELECT * FROM payments WHERE field_visit_id = $1", [
+            dup.rows[0].id,
+          ]);
+          res
+            .status(200)
+            .json({ field_visit: dup.rows[0], payment: payment.rows[0] ?? null, duplicate: true });
+          return;
+        }
+      }
       throw err;
+    } finally {
+      client.release();
     }
   }),
 );

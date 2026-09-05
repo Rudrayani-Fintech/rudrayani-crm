@@ -66,14 +66,14 @@ beforeAll(async () => {
   );
   void bm;
   const agent = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, team_id)
-     VALUES ($1, 'Field Agent One', $2, $3, true, $4) RETURNING id`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, team_id, designation)
+     VALUES ($1, 'Field Agent One', $2, $3, true, $4, 'field_agent') RETURNING id`,
     [agencyId, AGENT_PHONE, hash, teamId],
   );
   agentId = agent.rows[0].id;
   const agent2 = await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, team_id)
-     VALUES ($1, 'Field Agent Two', $2, $3, true, $4) RETURNING id`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, team_id, designation)
+     VALUES ($1, 'Field Agent Two', $2, $3, true, $4, 'field_agent') RETURNING id`,
     [agencyId, AGENT2_PHONE, hash, teamId],
   );
   agent2Id = agent2.rows[0].id;

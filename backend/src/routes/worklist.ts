@@ -5,7 +5,7 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { agentBranchClamp, resolveBranchClamp } from "../services/scope";
-import { istMonthStart } from "../utils/ist";
+import { istMonthStart, istToday } from "../utils/ist";
 
 /**
  * The agent's worklist — "Today's Allocation" (build brief Section 8): every
@@ -18,6 +18,12 @@ router.use(authenticate, requirePermission("calls.log"));
 router.get(
   "/",
   asyncHandler(async (req, res) => {
+    const { page, limit } = z
+      .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(200).default(50),
+      })
+      .parse(req.query);
     const q = (req.query.q as string | undefined)?.trim();
     const companyId = req.query.company_id as string | undefined;
     const customerBranchParam = req.query.customer_branch as string | undefined;
@@ -98,16 +104,41 @@ router.get(
       }
     }
 
+    // N5: GET /worklist used to return every matching row with no LIMIT and
+    // total: rows.length -- a real COUNT(*) over the same WHERE, taken
+    // before page-specific params are appended below, mirrors /customers.
+    // The `$1::uuid IS NOT NULL` clause is a no-op (req.user!.id is never
+    // null) but keeps $1 referenced -- in the scope=team branch, `conditions`
+    // only uses $2/$3 (from agentBranchClamp), and an entirely-unreferenced
+    // placeholder makes Postgres unable to determine its type ("could not
+    // determine data type of parameter $1"), the exact bug already fixed
+    // once for filter-options below.
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total
+         FROM customers c
+         LEFT JOIN branches b ON b.id = c.branch_id
+        WHERE $1::uuid IS NOT NULL AND (${conditions})`,
+      params,
+    );
+
     // Bare `date_trunc('month', now())` resolves in the DB session's UTC
     // clock, misclassifying "this month" for the first ~5.5h of every IST
     // day. Bind the IST month start explicitly instead.
     params.push(istMonthStart());
     const monthParam = params.length;
+    // Same reasoning for "today": bind the IST calendar date explicitly
+    // rather than comparing against the UTC session clock.
+    params.push(istToday());
+    const todayParam = params.length;
+
+    params.push(limit, (page - 1) * limit);
+    const limitParam = params.length - 1;
+    const offsetParam = params.length;
 
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
-              c.next_action_date, c.dpd,
+              c.next_action_date, c.dpd, c.address,
               co.name AS company_name,
               COALESCE(b.name, NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name,
               (c.assigned_agent_id = $1) AS is_primary_for_me,
@@ -119,7 +150,9 @@ router.get(
               ld.result_code AS last_result_code,
               pp.amount AS ptp_amount,
               pp.promised_date AS ptp_date,
-              bm.normalized_pending
+              bm.normalized_pending,
+              wt.worked_today,
+              COALESCE(ct.collected_today, 0) AS collected_today
          FROM customers c
          JOIN companies co ON co.id = c.company_id
          LEFT JOIN branches b ON b.id = c.branch_id
@@ -145,11 +178,40 @@ router.get(
                    AND m.month = $${monthParam}::date
               ) AS normalized_pending
          ) bm ON true
+         -- P6/P7/P8: has ANYONE logged a call or field visit against this
+         -- customer today (IST) -- not scoped to the caller, since the
+         -- point is "has this customer already been contacted today",
+         -- regardless of which of their assigned agents did it.
+         LEFT JOIN LATERAL (
+              SELECT (
+                EXISTS(SELECT 1 FROM call_logs cl2
+                        WHERE cl2.customer_id = c.id
+                          AND (cl2.created_at AT TIME ZONE 'Asia/Kolkata')::date = $${todayParam}::date)
+                OR EXISTS(SELECT 1 FROM field_visits fv2
+                        WHERE fv2.customer_id = c.id
+                          AND (fv2.created_at AT TIME ZONE 'Asia/Kolkata')::date = $${todayParam}::date)
+              ) AS worked_today
+         ) wt ON true
+         -- Unlike worked_today, this IS scoped to the caller -- "what did I
+         -- personally collect from this customer today" (N4: money credits
+         -- whoever recorded it).
+         LEFT JOIN LATERAL (
+              SELECT SUM(p.amount) AS collected_today
+                FROM payments p
+               WHERE p.customer_id = c.id
+                 AND p.collected_by_user_id = $1
+                 AND (p.paid_at AT TIME ZONE 'Asia/Kolkata')::date = $${todayParam}::date
+         ) ct ON true
         WHERE ${conditions}
-        ORDER BY c.next_action_date ASC NULLS LAST, c.due_amount DESC NULLS LAST`,
+        -- P8: worked rows sink to the bottom without disappearing --
+        -- worked-state is the primary sort key, ahead of the existing
+        -- PTP-date/due-amount ordering.
+        ORDER BY wt.worked_today ASC,
+                 c.next_action_date ASC NULLS LAST, c.due_amount DESC NULLS LAST
+        LIMIT $${limitParam} OFFSET $${offsetParam}`,
       params,
     );
-    res.json({ customers: rows, total: rows.length });
+    res.json({ customers: rows, total: countResult.rows[0].total, page, limit });
   }),
 );
 
@@ -215,7 +277,7 @@ router.get(
     const { rows } = await pool.query(
       `SELECT c.id, c.loan_number, c.customer_name, c.mobile_number,
               c.product, c.bucket, c.due_amount, c.pos, c.emi, c.custom_fields,
-              c.next_action_date, c.dpd,
+              c.next_action_date, c.dpd, c.address,
               co.name AS company_name,
               COALESCE(b.name, NULLIF(TRIM(COALESCE(c.custom_fields->>'branch', c.custom_fields->>'Branch')), '')) AS branch_name,
               (c.assigned_agent_id = $1) AS is_primary_for_me,

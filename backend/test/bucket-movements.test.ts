@@ -49,8 +49,8 @@ beforeAll(async () => {
 
   const hash = await hashPassword(PASSWORD);
   await pool.query(
-    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin)
-     VALUES ($1, 'Movement Admin', $2, $3, true)`,
+    `INSERT INTO users (agency_id, full_name, phone, password_hash, is_agency_admin, designation)
+     VALUES ($1, 'Movement Admin', $2, $3, true, 'agency_admin')`,
     [agencyId, ADMIN_PHONE, hash],
   );
   adminToken = await login(ADMIN_PHONE);

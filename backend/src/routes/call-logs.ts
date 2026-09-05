@@ -11,6 +11,7 @@ import {
   type DispositionCodeRow,
   type DispositionFields,
 } from "../services/disposition-service";
+import { embeddedPaymentSchema, recordEmbeddedPayment } from "../services/embedded-payment-service";
 import { refreshNextActionDate } from "../services/ptp-service";
 import { customerWriteScopeClamp } from "../services/scope";
 
@@ -33,6 +34,8 @@ const logBody = z.object({
   call_duration_seconds: z.coerce.number().int().min(0).max(24 * 3600).optional(),
   extra_remark: z.string().trim().max(500).optional(), // free text appended after the composed remark
   client_key: z.string().uuid().optional(), // offline-sync idempotency key
+  // Phase 6 (I2, §4.4): money is recorded inside the interaction.
+  payment: embeddedPaymentSchema.optional(),
 });
 
 /** Look up a call log previously created with this idempotency key. */
@@ -43,7 +46,13 @@ async function findByClientKey(agentId: string, clientKey: string) {
   );
   if (!existing.rows[0]) return null;
   const ptp = await pool.query("SELECT * FROM ptps WHERE call_log_id = $1", [existing.rows[0].id]);
-  return { call_log: existing.rows[0], ptp: ptp.rows[0] ?? null, duplicate: true };
+  const payment = await pool.query("SELECT * FROM payments WHERE call_log_id = $1", [existing.rows[0].id]);
+  return {
+    call_log: existing.rows[0],
+    ptp: ptp.rows[0] ?? null,
+    payment: payment.rows[0] ?? null,
+    duplicate: true,
+  };
 }
 
 /**
@@ -128,13 +137,31 @@ router.post(
           ],
         );
         ptp = ptpRes.rows[0];
-        // A fresh PTP's promised_date may now be the earliest known
-        // follow-up for this customer.
-        await refreshNextActionDate(client, body.customer_id);
       }
 
+      // Phase 6 (I2, §4.4): money recorded inside the interaction, one
+      // transaction, same client_key as the call log itself.
+      let payment: Record<string, unknown> | null = null;
+      if (body.payment) {
+        payment = await recordEmbeddedPayment(client, {
+          customerId: body.customer_id,
+          collectedByUserId: req.user!.id,
+          collectorBranchId: req.user!.branch_id,
+          payment: body.payment,
+          clientKey: body.client_key ?? null,
+          callLogId: callLog.rows[0].id,
+        });
+      }
+
+      // Phase 4 (§4.2): every call log can move next_action_date, not just
+      // PTP-creating ones -- this is the disposition-cadence engine's only
+      // hook. A fresh PTP's promised_date wins over the code's own cadence
+      // (refreshNextActionDate takes the MIN across all three sources), so
+      // calling this unconditionally is correct either way.
+      await refreshNextActionDate(client, body.customer_id);
+
       await client.query("COMMIT");
-      res.status(201).json({ call_log: callLog.rows[0], ptp });
+      res.status(201).json({ call_log: callLog.rows[0], ptp, payment });
     } catch (err) {
       await client.query("ROLLBACK");
       // Two retries raced: the other one won, answer with its row.

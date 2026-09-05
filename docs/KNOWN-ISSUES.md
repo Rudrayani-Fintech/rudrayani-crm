@@ -2,7 +2,7 @@
 
 Live checklist, not a chronological log (see `docs/mobile-revamp-decisions.md` for the append-only
 decision history behind each of these). Update in place as items are fixed or new ones are found.
-Last updated: 2026-09-05, after Phase 9.
+Last updated: 2026-09-05, after Phase 11.
 
 ## Why this file exists
 
@@ -125,7 +125,41 @@ deep-linking implemented yet, so this is currently theoretical) would no longer 
 un-punched-in user to `/punch-in` first. Add the same `redirect` to those routes (or wrap them in
 a shared parent route) if/when deep-linking is built.
 
-## 5. Format for adding new entries
+## 5. Mobile: Phase 10-11 scope cuts and follow-ups
+
+### 5a. Today screen's company filter is loaded-page-only, not server-side
+§4.1 lists `company_id` among the filters "both clients must use ... instead of filtering
+client-side," but the Today screen dropped the company filter dropdown entirely rather than half-
+implement it: it doesn't compose with server-side pagination without a `company_id` on the
+`Account` model (currently only `companyName`, a display string). Company is still visible on
+every row (P10). Worth adding properly (model field + filter param) in a later mobile pass if a
+company filter is wanted back.
+
+### 5b. "Most-used" trail-code ordering is local-device-only
+`DispositionUsageStore` (Hive) tallies usage per device, not per agent account -- an agent who
+switches phones, reinstalls, or clears app data starts the most-used ordering over from zero. This
+was a deliberate **DECIDE** resolution (§0.1: simplest option), not an oversight; revisit only if
+agents report the reset as actually disruptive in practice.
+
+### 5c. Log Visit no longer captures a photo or GPS point
+Per §5.1's literal component list, the merged Log Visit screen (Phase 11) doesn't offer photo/GPS
+capture at all -- previously `field_visit_screen.dart`'s "Met customer" outcome required one.
+Continuous background tracking (X2) still records agent location roughly every 2 minutes while
+punched in, and I6 already held photo proof non-mandatory. If per-interaction photo evidence turns
+out to still be wanted (e.g. for dispute resolution), it would need `field_visits` to gain a
+`disposition_code_id` (or an equivalent link) since that table isn't the write path any more --
+Log Visit now submits to `POST /call-logs` (see `mobile-revamp-decisions.md`'s Phase 11 section
+for why).
+
+### 5d. "Mark customer as Closed" has no mobile UI any more
+`payment_screen.dart`'s close-customer toggle was deleted with the rest of that screen. This
+mirrors an existing Phase 6 product decision (`embedded-payment-service.ts`'s own doc comment:
+closing a customer from inside a call/visit form was ruled out of scope then too), not a new gap.
+The standalone `POST /payments` `close_customer` path is unchanged and still used by web/offline
+replay -- there's simply no mobile screen driving it directly. Revisit only if closing a customer
+from the field turns out to be a real workflow need.
+
+## 6. Format for adding new entries
 
 When a new phase surfaces a defect that isn't blocking that phase's own verification, add a dated
 subsection under the relevant number above (or a new `## N.` section for a new category) with:

@@ -3,8 +3,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 /// India-only heuristic: a bare 10-digit number gets the country code
 /// prefixed for wa.me, which requires it. Shared so it isn't re-derived per
-/// screen (payment_screen.dart, customer_detail_screen.dart, ptps_screen.dart
-/// all need the same normalization for the same reason).
+/// screen (field_visit_screen.dart, customer_detail_screen.dart,
+/// ptps_screen.dart all need the same normalization for the same reason).
 String whatsappDigits(String mobileNumber) {
   final digits = mobileNumber.replaceAll(RegExp(r'\D'), '');
   if (digits.length == 10) return '91$digits';

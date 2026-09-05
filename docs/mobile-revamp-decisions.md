@@ -894,3 +894,95 @@ end -- a good independent signal the redirect split didn't break the login boot 
 network-then-cache-fallback behaviour isn't covered -- Hive needs platform channels this test
 suite can't mock, matching `offline_queue_test.dart`'s and `home_shell_dashboard_role_test.dart`'s
 own already-established constraint).
+
+## Phase 10 and 11 execution (2026-09-05)
+
+Both implemented in one worktree (`worktree-phase10-11-today-dutybar`, branched from
+`origin/revamp-integration` at `e8c2aa3`), committed separately (Phase 10, then Phase 11) so each
+phase's diff stays independently reviewable, per §2's "one worktree per phase-pair" convention.
+
+**Phase 10** (Today/day plan + duty bar, §5.1, §7): added `AccountRepository.fetchWorklistPage`
+(page/limit/`q`, §4.1) alongside the existing unpaged `fetchWorklist` at the time, backing a new
+`TodayWorklistNotifier` (`features/today/today_provider.dart`) that owns the lazy-scrolled,
+50-per-page list. Worked-row sinking is a pure `sortWithWorkedSunk` function; the progress line
+("N of M worked · ₹X collected") is derived entirely from the worklist's own
+worked/unworked sort boundary (`workedCountFromLoaded`) rather than a second endpoint --
+since the backend sorts worked rows strictly after unworked ones globally (§4.1's `ORDER BY
+(worked_today) ASC, ...`), the position of the first worked row loaded already answers "how many
+are worked" exactly, with no extra request and no dependency on `reports.view_self` permission
+scoping. `TodaySection(heroMode: true)` (built in Phase 8, never given a real call site) is reused
+as-is for the PTP/reminder section -- fixes X6's dead `heroMode` reference as a side effect, not a
+new component. `DutyBarHost` wires Phase 8's presentational `DutyBar` to
+`attendanceProvider`/`offlineQueueProvider`/a new `isOfflineProvider` (F6's "explicit offline-mode
+alert", a `StreamProvider<bool>` over `connectivity_plus`), mounted above `SyncBanner` in
+`HomeShell` -- SyncBanner is kept rather than replaced, since it remains the actionable detail
+surface (pending list, dead-letter discard) the duty bar's compact count doesn't try to duplicate.
+`WorklistScreen` is deleted outright (superseded, not left dormant) once `HomeShell`'s first tab
+points at the new `TodayScreen`.
+
+Deliberate cuts from the pre-Phase-10 worklist UI, none asked for by the acceptance criteria:
+the sort dropdown and the PTP-due/overdue/not-worked quick-filter chips are dropped -- P6
+explicitly rules out agent sorting ("search and filter, not sort"), and worked state is now
+conveyed visually (row greying + sinking) rather than via a manual toggle. The company filter
+drops from a dropdown to "visible on every row" only (P10) -- it was client-side-only before and
+doesn't compose with server-side pagination without a `company_id` on the `Account` model, which
+is out of this phase's scope; a proper server-side company filter is a reasonable Phase 12+
+follow-up if wanted. The in-screen "must be punched in" checks some write-flow screens carried
+never applied to the worklist itself, so nothing changed there.
+
+**Phase 11** (Customer and Log Visit, I1-I6, §5.1): customer detail collapses to exactly three
+primary actions (Call, Navigate, Log Visit) per §5.1's literal layout; `Navigate` now reads
+`customers.address` (Phase 5's real column) instead of fuzzy-scanning `custom_fields`.
+`field_visit_screen.dart` is reworked in place into the merged Log Visit screen (kept at the same
+route/class name -- it's a rework, not a new feature, per the phase's own file list) and
+`features/call_log/`/`features/payment/` are deleted outright along with their routes.
+
+The merged screen submits through **`POST /call-logs`**, not `/field-visits` -- confirmed against
+`field_visits`' own migration history (`1783900000000_field-visits-reallocation.sql` onward) that
+the table has no `disposition_code_id` column, so it structurally cannot be the record that drives
+PTP creation or the disposition-cadence engine (Phase 4's own code comment in `field-visits.ts`
+already says as much). A payment is embedded (`payment: {amount, mode, paid_at}`) only when the
+selected code represents an actual collection, not a promise -- `dispositionCreatesPtp()`
+(`core/models/disposition_code.dart`) is a direct Dart mirror of the backend's `createsPtp()`
+(disposition-service.ts), since the client needs to know before submitting whether "amount" means
+money collected today or a future promised figure. This reading of I2 ("money is recorded inside
+the interaction -- inside the field visit (mobile)") takes "the field visit" as the field agent's
+interaction-logging screen, not literally the `field_visits` table -- the alternative reading is
+foreclosed by the schema itself.
+
+Per §5.1's literal Log Visit component list (amount, mode pills, trail-code pills, date, remark,
+save -- no photo/GPS step), the screen drops the old photo/GPS capture and the Met/Could-not-access
+outcome control entirely. This is also exactly how X3 ("field-visit outcome is discarded") gets
+fixed: I1 makes the trail code the only outcome taxonomy, so there is no second ad hoc outcome
+left to lose -- `disposition_code_id` always reaches the payload because submission is blocked
+until a code is chosen (see `buildLogVisitPayload`'s tests). Continuous background tracking (X2)
+already records the agent's location roughly every 2 minutes while punched in, and I6 already held
+photo proof to be non-mandatory in every case, so nothing evidentiary is lost outright -- just no
+longer duplicated per-interaction.
+
+Trail-code pills are grouped by `disposition_codes.category` (already existed, seeded for Phase
+4's cadence defaults) and ordered most-used-first within each group, with groups themselves ordered
+by their own most-used code. "Most-used" has no backend column and is inherently a per-agent,
+per-device convenience rather than shared data anyone else needs -- **DECIDE** resolved as a local
+Hive tally (`DispositionUsageStore`, mirroring `WorklistFilterStore`'s own per-store-box pattern),
+the simplest option consistent with the rest of the spec (§0.1).
+
+Two things ported forward from the deleted `payment_screen.dart` because they're clearly valuable
+and fully compatible with the embedded-payment path: the EMI/Due quick-amount chips, and the
+post-save receipt sheet (WhatsApp/SMS share) when the response carries a `receipt_no` -- embedded
+payments generate one exactly like standalone ones. One thing deliberately **not** ported: the
+"Mark customer as Closed" toggle. This isn't a new decision -- `embedded-payment-service.ts`'s own
+Phase 6 doc comment already ruled it out ("closing a customer from inside a call/visit form is a
+bigger product decision than this phase makes"), and the backend's `embeddedPaymentSchema` has no
+`close_customer` field to submit even if the UI offered it. The standalone `POST /payments`
+`close_customer` path still exists for web and the offline queue's older payment items; it simply
+has no mobile screen driving it directly any more.
+
+Verified: `flutter analyze` clean after both phases (0 issues beyond the same 4 pre-existing
+`ptps_screen.dart` lints). Full `flutter test`: 89/89 passing (13 new Phase 10 tests: worked-sort/
+progress-line pure functions, `DutyBar`'s offline/sync-count/punch contract, `TodaySection`'s
+collapse/empty/populated states; 18 new Phase 11 tests: FV-channel filtering, required-field
+enforcement per I5, the PTP-vs-payment payload split per I2, grouped most-used-first ordering) --
+no regressions from either phase's deletions (`worklist_screen.dart`, `call_log_screen.dart`,
+`payment_screen.dart`, and their now-orphaned `call_log_screen_test.dart`, all removed outright
+rather than left dormant, per §0.5).

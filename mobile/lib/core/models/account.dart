@@ -70,6 +70,37 @@ class Account {
     this.recalledAt,
   });
 
+  /// Used by Phase 10's Today screen to optimistically grey/sink a row right
+  /// after a visit is logged, without a full list reload (§10 acceptance:
+  /// "greys the row and sinks it without a full reload").
+  Account copyWith({bool? workedToday, double? collectedToday}) => Account(
+        id: id,
+        loanNumber: loanNumber,
+        customerName: customerName,
+        mobileNumber: mobileNumber,
+        product: product,
+        bucket: bucket,
+        dueAmount: dueAmount,
+        pos: pos,
+        emi: emi,
+        dpd: dpd,
+        address: address,
+        customFields: customFields,
+        companyName: companyName,
+        branchName: branchName,
+        lastRemark: lastRemark,
+        lastCallAt: lastCallAt,
+        lastResultCode: lastResultCode,
+        ptpAmount: ptpAmount,
+        ptpDate: ptpDate,
+        nextActionDate: nextActionDate,
+        normalizedPending: normalizedPending,
+        workedToday: workedToday ?? this.workedToday,
+        collectedToday: collectedToday ?? this.collectedToday,
+        status: status,
+        recalledAt: recalledAt,
+      );
+
   factory Account.fromJson(Map<String, dynamic> j) => Account(
         id: j['id'] as String,
         loanNumber: j['loan_number'] as String,

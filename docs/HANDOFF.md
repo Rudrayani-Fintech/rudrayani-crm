@@ -6,13 +6,13 @@ behind decisions already made, `docs/KNOWN-ISSUES.md` is the *what's already bro
 about* checklist. This file exists because a fresh session has none of the prior conversation
 context that produced those three documents.
 
-**Last updated:** 2026-09-05, immediately after Phase 9.
+**Last updated:** 2026-09-05, immediately after Phase 11.
 
 ---
 
 ## 1. Where things actually stand
 
-- **Phases 0-9 of 18 are done**, verified, and live on the `revamp-integration` branch (pushed to
+- **Phases 0-11 of 18 are done**, verified, and live on the `revamp-integration` branch (pushed to
   `origin`). Phase-by-phase summary: §5 below.
 - **`main` is NOT the integration branch for this work.** `origin/main` auto-deploys to production
   (Railway). Phase 7 deleted backend routes the current web frontend still calls (see
@@ -124,10 +124,25 @@ context that produced those three documents.
   the *pure* logic pieces (a classifier function, a cache-key builder, a decision function) as
   standalone top-level functions and test those in isolation instead.
 - **`AccountRepository`** (`core/data/account_repository.dart`) is now the one place `Account`
-  reads happen (`fetchWorklist`, `fetchById`) and writes are queued (`enqueueWrite` — delegates to
-  the existing `OfflineQueueNotifier`, doesn't reimplement queueing). `worklistProvider`/
-  `customerByIdProvider` (`features/worklist/worklist_provider.dart`) are thin wrappers over it —
-  route any *new* account-related fetch through the repository, not a fresh hand-rolled provider.
+  reads happen (`fetchWorklist` for the full unpaged list, `fetchWorklistPage` for the Today
+  screen's paginated/searched view added in Phase 10, `fetchById`) and writes are queued
+  (`enqueueWrite` — delegates to the existing `OfflineQueueNotifier`, doesn't reimplement
+  queueing). `customerByIdProvider` (`features/worklist/worklist_provider.dart`) stays a thin
+  wrapper over it — route any *new* account-related fetch through the repository, not a fresh
+  hand-rolled provider. (`worklistProvider`, the old unpaged-list provider, was removed in Phase
+  11 once its last consumers were deleted — don't resurrect it for a new screen without checking
+  `fetchWorklistPage` doesn't already fit better.)
+- **Paginated-list pattern** (`features/today/today_provider.dart`'s `TodayWorklistNotifier`): a
+  plain `StateNotifier` holding `items`/`total`/`hasMore`, recreated (via `.autoDispose` +
+  `ref.watch` on its filter/search/scope providers) whenever the query itself changes, with an
+  explicit `loadMore()` the screen calls from a `ScrollController` listener. Reuse this shape for
+  My Day/Branch (Phase 12) if either turns out to need a scrollable, paginated feed rather than a
+  small fixed-size summary.
+- **Local per-device tallies via a dedicated Hive box** (`core/offline/disposition_usage_store.dart`'s
+  `DispositionUsageStore`, added in Phase 11 for the Log Visit trail-code "most-used first"
+  ordering): mirrors `WorklistFilterStore`'s per-store-box pattern. Reach for this shape again for
+  any other "remember what this device/agent tends to do" convenience that has no reason to be
+  server data.
 - **`HomeTab` enum** (`features/home/home_shell.dart`) is the named-tab-identity pattern — a
   `_HomeTabEntry` list pairs each tab's identity, its `NavigationDestination`, and a lazy
   `WidgetBuilder`; the active tab is found by identity (`indexWhere`), not by a stored position.
@@ -154,38 +169,43 @@ context that produced those three documents.
 | 7 | Backend: permissions, delete KPI/targets surface | Done |
 | **8** | **Mobile: design system** | **Done** |
 | **9** | **Mobile: state/navigation foundation** | **Done, with documented deferrals (§4 in KNOWN-ISSUES.md)** |
-| 10 | Mobile: Today (day plan) + duty bar wiring | **Not started — next up** |
-| 11 | Mobile: Customer detail + Log Visit rebuild, delete call-log/payment screens | Not started |
-| 12 | Mobile: My Day + Branch views, delete dashboard/performance screens | Not started |
+| **10** | **Mobile: Today (day plan) + duty bar wiring** | **Done** |
+| **11** | **Mobile: Customer detail + Log Visit rebuild, delete call-log/payment screens** | **Done, with documented scope cuts (§5 in KNOWN-ISSUES.md)** |
+| 12 | Mobile: My Day + Branch views, delete dashboard/performance screens | **Not started — next up** |
 | 13 | Mobile: the cut list (delete Account admin lists, notifications, etc.) | Not started |
 | 14 | Web: worklist day-plan restructure | Not started (can run parallel to mobile phases) |
 | 15 | Web: delete KPI surface, rework navigation | Not started (**this is what fixes §2 of KNOWN-ISSUES.md**) |
 | 16 | Web: admin surfaces for password-reset/address-correction | Not started |
 | 17 | Verification and regression (full suite, physical device E2E) | Not started (**this is where deferred full-regression testing happens**) |
 
-## 6. Starting Phase 10
+## 6. Starting Phase 12
 
-Read `docs/REVAMP-SPEC.md` §5.1 (mobile IA — the exact layout of the Today/Customer/Log
-Visit/My Day/Branch/Account screens) and the Phase 10 section in full before starting. Quick
-orientation:
+Read `docs/REVAMP-SPEC.md` §5.1 (mobile IA) and the Phase 12 section in full before starting.
+Quick orientation:
 
-- **Builds on Phase 8's `DutyBar`** (`core/ui/duty_bar.dart`) — currently a pure presentational
-  shell taking `onDuty`/`shiftDuration`/`pendingSyncCount`/`offline`/`onPunchPressed` as explicit
-  params, with sample data only in the Phase 8 gallery. Phase 10 wires it to
-  `attendanceProvider`/`offlineQueueProvider` and mounts it (probably above `HomeShell`'s tab
-  content, alongside or replacing `SyncBanner` — check whether both are still wanted).
-- **New `features/today/*`** — the actual home screen: PTP section (collapsible, highlighted),
-  progress line ("12 of 40 worked · ₹8,400 collected"), lazy paginated worklist with server-side
-  search + branch filter, worked rows greyed/sunk to the bottom.
-- This is a **feature screen** phase — unlike Phase 8, this is exactly where `core/ui/*`
-  components (built but unused so far) get their first real consumer. Use `AppListRow`,
-  `AppStatTile`, `AppChipGroup`, `AppMoney`, `AppSectionHeader` etc. rather than hand-rolling.
-- The backend groundwork for worked-state/pagination/server-side filtering already shipped in
-  Phase 3 (`GET /worklist`) — check `worked_today`/`collected_today` are already on the `Account`
-  model (they are, added in Phase 9) before assuming backend work is needed here.
-- Acceptance criteria are concrete and testable (400-account scroll performance, PTP-first
-  ordering, worked-row greying without full reload, offline alert on connectivity loss, punch-out
-  reachable in one tap from every tab) — read them closely, they're not vague.
+- **Delete the three role dashboards and My Performance**
+  (`features/dashboard/*`, `features/performance/performance_screen.dart`) and replace them in
+  `HomeShell` with **My Day** (every role) and **Branch** (branch managers only) — this finally
+  finishes the tab lineup Phase 10 started (`HomeTab` currently has `today`/`dashboard`/
+  `performance`/`account`; this phase is what turns it into `today`/`myDay`/`branch`/`account`
+  per §5.4's nav table).
+- **No targets, no percentages, no gauges** on either screen — same "ledger, not KPIs" rule as
+  everywhere else in this revamp (P4, P5).
+- **`GET /reports/agent-activity` is a row-level activity *feed* (paginated individual actions),
+  not an aggregate stat endpoint** — confirmed by reading `backend/src/routes/reports.ts` directly
+  during Phase 10 (see that phase's section in `mobile-revamp-decisions.md` for why Phase 10's own
+  progress line avoided it and derived its numbers from the worklist's sort order instead). If My
+  Day needs a single "contacted: 12, collected: ₹8,400" summary rather than a scrollable feed,
+  either sum the feed client-side (fine for a bounded "today" window, less fine for "this month")
+  or check whether a dedicated summary endpoint already exists elsewhere in `report-service.ts`
+  before assuming one needs to be added — this phase's own file list is mobile-only, so a genuine
+  backend gap here would need scoping explicitly, not silently worked around.
+- `reports.view_self` is the permission that gates an agent's own numbers on this endpoint (vs.
+  `reports.view` for the full agency-wide view) — every field agent/telecaller should already hold
+  it; branch managers additionally get `scope=team` for the Branch tab's per-agent rows.
+- This is another **feature screen** phase — keep using `core/ui/*` (`AppStatTile` in particular,
+  built in Phase 8, still looking for its first real consumer beyond the gallery) rather than
+  hand-rolling stat cards.
 
 ## 7. If you get stuck or something looks wrong
 

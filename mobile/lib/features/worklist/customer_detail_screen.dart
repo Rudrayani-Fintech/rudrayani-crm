@@ -81,22 +81,12 @@ class _CustomerDetailBody extends ConsumerWidget {
     }
   }
 
-  /// The address arrives through the import's custom fields — find the
-  /// first address-looking column and hand it to the maps app.
-  String? get _address {
-    for (final e in customer.customFields.entries) {
-      final k = e.key.toLowerCase();
-      if ((k.contains('address') || k.contains('addr')) &&
-          (e.value?.toString().trim().isNotEmpty ?? false)) {
-        return e.value.toString().trim();
-      }
-    }
-    return null;
-  }
-
   Future<void> _navigate(BuildContext context) async {
-    final address = _address;
-    if (address == null) {
+    // Phase 11 (§5.1): reads the real `customers.address` column (Phase 5)
+    // now that it exists, instead of fuzzy-scanning custom_fields for a
+    // column whose name merely looks address-like.
+    final address = customer.address?.trim();
+    if (address == null || address.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No address on file for this customer')),
       );
@@ -249,7 +239,9 @@ class _CustomerDetailBody extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Call & action buttons
+              // Phase 11 (§5.1): exactly three primary actions -- Call,
+              // Navigate, Log Visit. Log Call/Record Payment/View PTPs/Field
+              // Visit collapse into the one merged Log Visit screen.
               Row(
                 children: [
                   Expanded(
@@ -274,56 +266,25 @@ class _CustomerDetailBody extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: OutlinedButton.icon(
-                      icon: const Icon(Icons.note_add),
-                      label: const Text('Log Call'),
-                      onPressed: () =>
-                          context.push('/customer/${customer.id}/call-log'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.payment),
-                      label: const Text('Record Payment'),
-                      onPressed: () =>
-                          context.push('/customer/${customer.id}/payment'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.calendar_today),
-                      label: const Text('View PTPs'),
-                      onPressed: () =>
-                          context.push('/customer/${customer.id}/ptps'),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.assignment_turned_in),
-                      label: const Text('Field Visit'),
-                      onPressed: () => context
-                          .push('/customer/${customer.id}/field-visit'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
                       icon: const Icon(Icons.directions),
                       label: const Text('Navigate'),
                       onPressed: () => _navigate(context),
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.assignment_turned_in),
+                  label: const Text('Log Visit'),
+                  onPressed: () => context.push('/customer/${customer.id}/field-visit'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.onPrimary,
+                  ),
+                ),
               ),
               const SizedBox(height: 8),
               Row(

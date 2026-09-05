@@ -160,6 +160,16 @@ Many stale local/remote branches exist from an older, unrelated phase-numbering 
 scoping-batch3`, ~20 more). Unrelated to `docs/REVAMP-SPEC.md`'s phases. Safe to leave alone;
 worth a separate cleanup pass (confirm each is actually merged/abandoned before deleting).
 
+`backend/src/migrations/seed_demo.ts` fails on its own customer-import step with `HttpError: The
+template must map a column to "mobile_number"` (found while seeding fixtures for Phase 17's live
+web E2E, 2026-09-06). It successfully creates the demo users (Priya/Rahul/Sneha/Amit) first, so the
+failure is isolated to the import-column-mapping constant used for its demo customers, which has
+gone stale relative to `import-service.ts`'s current required-field validation — the same general
+class of drift as §1a (a hardcoded column-mapping fixture not updated when a required field
+changed), just in dev tooling rather than a test file. Not chased further since it wasn't blocking;
+worth a one-line fix (add a `mobile_number` mapping to the constant) whenever someone next needs
+`seed:demo`'s full output including its sample customers.
+
 ## 4. Mobile: Phase 9 deferrals
 
 ### 4a. The "seven raw-setState screens" were not migrated onto AccountRepository/a provider

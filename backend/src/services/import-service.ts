@@ -506,17 +506,29 @@ async function resolveAgents(
   client: PoolClient,
   companyId: string,
   rows: MappedRow[],
-): Promise<Map<string, { id: string; team_id: string | null }>> {
+): Promise<Map<string, { id: string; team_id: string | null; is_field_agent: boolean }>> {
   const phones = [...new Set(rows.map((r) => r.agent_phone).filter((p): p is string => !!p))];
-  const resolved = new Map<string, { id: string; team_id: string | null }>();
+  const resolved = new Map<string, { id: string; team_id: string | null; is_field_agent: boolean }>();
   if (phones.length === 0) return resolved;
+  // is_field_agent decides WHICH assignment column the import writes: the
+  // customer's primary/telecalling owner (assigned_agent_id) or its field
+  // agent (assigned_field_agent_id). These are two parallel tracks -- the
+  // allocation API exposes them as separate endpoints (/allocations/assign vs
+  // /allocations/assign-field-agent) -- so an import that resolved a field
+  // agent's phone must fill the field-agent column, not the telecalling one.
   const { rows: users } = await client.query(
-    `SELECT u.id, u.team_id, u.phone FROM users u
+    `SELECT u.id, u.team_id, u.phone, u.is_field_agent FROM users u
        JOIN companies co ON co.agency_id = u.agency_id
       WHERE co.id = $1 AND u.phone = ANY($2) AND u.is_active = true`,
     [companyId, phones],
   );
-  for (const u of users) resolved.set(u.phone as string, { id: u.id, team_id: u.team_id });
+  for (const u of users) {
+    resolved.set(u.phone as string, {
+      id: u.id,
+      team_id: u.team_id,
+      is_field_agent: !!u.is_field_agent,
+    });
+  }
   return resolved;
 }
 
@@ -654,10 +666,11 @@ export async function commitImport(params: {
       const inserted = await client.query(
         `INSERT INTO customers
            (company_id, loan_number, customer_name, mobile_number, product, bucket,
-            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_team_id, branch_id, import_run_id, dpd, address)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+            due_amount, pos, emi, due_date, custom_fields, assigned_agent_id, assigned_field_agent_id,
+            assigned_team_id, branch_id, import_run_id, dpd, address)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
            CASE WHEN $10::date IS NULL THEN NULL ELSE GREATEST((now() AT TIME ZONE 'Asia/Kolkata')::date - $10::date, 0) END,
-           $16)
+           $17)
          ON CONFLICT (company_id, loan_number) DO NOTHING
          RETURNING id`,
         [
@@ -672,7 +685,8 @@ export async function commitImport(params: {
           row.emi,
           row.emi_due_date,
           JSON.stringify(row.custom_fields),
-          agent?.id ?? null,
+          agent && !agent.is_field_agent ? agent.id : null,
+          agent && agent.is_field_agent ? agent.id : null,
           agent?.team_id ?? null,
           branch ?? null,
           mode === "new" ? runId : null,
@@ -698,7 +712,7 @@ export async function commitImport(params: {
       if (row.customer_branch && !branch) unknownBranches.add(row.customer_branch);
       const existing = await client.query(
         `SELECT id, customer_name, mobile_number, product, bucket, due_amount, pos, emi, due_date,
-                custom_fields, assigned_agent_id, assigned_team_id, branch_id
+                custom_fields, assigned_agent_id, assigned_field_agent_id, assigned_team_id, branch_id
            FROM customers WHERE id = $1 FOR UPDATE`,
         [customerId],
       );
@@ -724,6 +738,7 @@ export async function commitImport(params: {
             due_date: cust.due_date,
             custom_fields: cust.custom_fields,
             assigned_agent_id: cust.assigned_agent_id,
+            assigned_field_agent_id: cust.assigned_field_agent_id,
             assigned_team_id: cust.assigned_team_id,
             branch_id: cust.branch_id,
           }),
@@ -746,10 +761,11 @@ export async function commitImport(params: {
                 emi             = COALESCE($8, emi),
                 due_date        = COALESCE($9, due_date),
                 custom_fields   = custom_fields || $10::jsonb,
-                assigned_agent_id = COALESCE($11, assigned_agent_id),
-                assigned_team_id  = COALESCE($12, assigned_team_id),
-                branch_id       = COALESCE($13, branch_id),
-                address         = COALESCE($14, address),
+                assigned_agent_id       = COALESCE($11, assigned_agent_id),
+                assigned_field_agent_id = COALESCE($12, assigned_field_agent_id),
+                assigned_team_id  = COALESCE($13, assigned_team_id),
+                branch_id       = COALESCE($14, branch_id),
+                address         = COALESCE($15, address),
                 dpd             = CASE WHEN COALESCE($9, due_date) IS NULL THEN NULL
                                        ELSE GREATEST((now() AT TIME ZONE 'Asia/Kolkata')::date - COALESCE($9, due_date), 0) END
           WHERE id = $1`,
@@ -764,18 +780,26 @@ export async function commitImport(params: {
           row.emi,
           row.emi_due_date,
           JSON.stringify(row.custom_fields),
-          agent?.id ?? null,
+          agent && !agent.is_field_agent ? agent.id : null,
+          agent && agent.is_field_agent ? agent.id : null,
           agent?.team_id ?? null,
           branch ?? null,
           row.address,
         ],
       );
       snapshotIds.push(cust.id as string);
-      if (agent && cust.assigned_agent_id !== agent.id) {
+      // Compare against whichever column this agent's type actually writes,
+      // otherwise a field-agent reassignment looks like a no-op (its previous
+      // holder lives in assigned_field_agent_id, not assigned_agent_id) and
+      // never reaches allocation_logs.
+      const priorHolder = agent?.is_field_agent
+        ? cust.assigned_field_agent_id
+        : cust.assigned_agent_id;
+      if (agent && priorHolder !== agent.id) {
         await client.query(
           `INSERT INTO allocation_logs (customer_id, from_agent_id, to_agent_id, allocated_by, reason)
            VALUES ($1, $2, $3, $4, 'Monthly allocation import')`,
-          [cust.id, cust.assigned_agent_id, agent.id, params.uploadedBy],
+          [cust.id, priorHolder, agent.id, params.uploadedBy],
         );
       }
     }

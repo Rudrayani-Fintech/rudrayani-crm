@@ -87,7 +87,7 @@ afterAll(async () => {
 });
 
 describe("agency master catalog (system_field_definitions)", () => {
-  it("self-seeds the 11 core fields (address included, Phase 5) on first access, in order", async () => {
+  it("self-seeds the 12 core fields (address Phase 5, customer_branch made core after the branch-manager blindness bug) on first access, in order", async () => {
     const res = await request(app)
       .get("/api/field-config/definitions")
       .set("Authorization", `Bearer ${adminToken}`);
@@ -105,9 +105,14 @@ describe("agency master catalog (system_field_definitions)", () => {
       "emi_due_date",
       "agent_phone",
       "address",
+      // customer_branch became core in migration 1790000000000: while it was
+      // is_core = false it defaulted to disabled for every company, so it never
+      // reached the import mapping dropdown, customers.branch_id stayed NULL,
+      // and branch managers saw zero customers.
+      "customer_branch",
     ]);
     const core = res.body.definitions.filter((d: { is_core: boolean }) => d.is_core);
-    expect(core).toHaveLength(11);
+    expect(core).toHaveLength(12);
     const agentPhone = res.body.definitions.find((d: { field_key: string }) => d.field_key === "agent_phone");
     expect(agentPhone.field_type).toBe("resolver");
     expect(agentPhone.storage_column).toBeNull();

@@ -39,6 +39,7 @@ const ROLLBACK_ALLOWED_FIELDS = new Set([
   "due_date",
   "custom_fields",
   "assigned_agent_id",
+  "assigned_field_agent_id",
   "assigned_team_id",
   "branch_id",
   "status",

@@ -75,7 +75,13 @@ const CORE_FIELD_DEFINITIONS_SQL = `(VALUES
   ('emi',           'EMI Amount',                   'emi',           'numeric',  true,  7),
   ('emi_due_date',  'EMI Due Date',                 'due_date',      'date',     true,  8),
   ('agent_phone',   'Agent Phone',                  NULL,            'resolver', true,  9),
-  ('address',       'Address',                      'address',       'text',     true,  10)
+  ('address',       'Address',                      'address',       'text',     true,  10),
+  -- Core (enabled by default) but NOT in DEFAULT_REQUIRED_CORE_FIELDS: a file
+  -- with no branch column must still import, it just leaves branch_id NULL.
+  -- Without this being enabled the field never reaches the import mapping
+  -- dropdown, branch_id stays NULL on every row, and branch managers see no
+  -- customers at all -- see migration 1790000000000.
+  ('customer_branch', 'Customer Branch',            'branch_id',     'resolver', true,  11)
 ) AS f(field_key, label, storage_column, field_type, is_core, sort_order)`;
 
 /**

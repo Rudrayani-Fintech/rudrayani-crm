@@ -18,7 +18,6 @@ import companyRoutes from "./routes/companies";
 import correctionRequestRoutes from "./routes/correction-requests";
 import passwordResetRequestRoutes from "./routes/password-reset-requests";
 import customerRoutes from "./routes/customers";
-import dashboardPreferencesRoutes from "./routes/dashboard-preferences";
 import dayPlanRoutes from "./routes/day-plan";
 import dispositionRoutes from "./routes/dispositions";
 import employeeRoutes from "./routes/employees";
@@ -34,7 +33,6 @@ import ptpRoutes from "./routes/ptps";
 import reallocationRequestRoutes from "./routes/reallocation-requests";
 import reminderRoutes from "./routes/reminders";
 import reportRoutes from "./routes/reports";
-import setupStatusRoutes from "./routes/setup-status";
 import teamRoutes from "./routes/teams";
 import trackingRoutes from "./routes/tracking";
 import worklistRoutes from "./routes/worklist";
@@ -110,8 +108,6 @@ export function createApp() {
   app.use("/api/buckets", bucketRoutes);
   app.use("/api/field-config", fieldConfigRoutes);
   app.use("/api/reports", reportRoutes);
-  app.use("/api/setup-status", setupStatusRoutes);
-  app.use("/api/dashboard-preferences", dashboardPreferencesRoutes);
   app.use("/api", catalogRoutes);
 
   app.use(notFoundHandler);

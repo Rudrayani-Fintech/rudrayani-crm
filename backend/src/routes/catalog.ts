@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { pool } from "../config/db";
 import { asyncHandler } from "../middleware/async-handler";
-import { authenticate, requirePermission } from "../middleware/authenticate";
+import { authenticate } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 
 /**
@@ -44,29 +44,10 @@ router.get(
   }),
 );
 
-const normalizeSchema = z.object({
-  company_id: z.string().uuid(),
-  raw_labels: z.array(z.string().min(1)).min(1),
-  canonical_label: z.string().trim().min(1).max(200),
-});
-
-/** "HL" + "Home Loan" -> canonical "Home Loan", no re-import (brief §4). */
-router.post(
-  "/products/normalize",
-  authenticate,
-  requirePermission("imports.manage"),
-  asyncHandler(async (req, res) => {
-    const body = normalizeSchema.parse(req.body);
-    await assertCompanyInAgency(body.company_id, req.user!.agency_id);
-    const { rowCount } = await pool.query(
-      `UPDATE products SET canonical_label = $3
-        WHERE company_id = $1 AND raw_label = ANY($2)`,
-      [body.company_id, body.raw_labels, body.canonical_label],
-    );
-    if (rowCount === 0) throw new HttpError(404, "No matching product labels found");
-    res.json({ ok: true, updated: rowCount });
-  }),
-);
+// POST /products/normalize ("HL" + "Home Loan" -> canonical "Home Loan") was
+// removed after an audit found no caller in either the web or mobile client.
+// products.canonical_label is still read by GET /products above; if product
+// normalisation is wanted again it needs a UI to drive it.
 
 // Buckets moved to routes/buckets.ts (Phase 5 buckets master).
 

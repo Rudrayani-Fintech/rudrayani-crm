@@ -282,27 +282,6 @@ describe("Products & buckets derivation (brief §4)", () => {
     expect(labels).toEqual(["HL", "Home Loan", "PL"]);
   });
 
-  it("normalizes HL + Home Loan into one canonical product without re-import", async () => {
-    const res = await request(app)
-      .post("/api/products/normalize")
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        company_id: companyId,
-        raw_labels: ["HL", "Home Loan"],
-        canonical_label: "Home Loan",
-      });
-    expect(res.status).toBe(200);
-    expect(res.body.updated).toBe(2);
-
-    const list = await request(app)
-      .get(`/api/products?company_id=${companyId}`)
-      .set("Authorization", `Bearer ${token}`);
-    const canonicals = new Set(
-      list.body.products.map((p: { canonical_label: string }) => p.canonical_label),
-    );
-    expect(canonicals).toEqual(new Set(["Home Loan", "PL"]));
-  });
-
   it("imported bucket labels auto-register in the buckets master", async () => {
     const res = await request(app)
       .get(`/api/buckets?company_id=${companyId}`)

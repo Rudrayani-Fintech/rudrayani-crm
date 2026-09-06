@@ -10,7 +10,6 @@ import { scopeFilter } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 import {
   agentRecentActivity,
-  collectionTrend,
   depositsByRange,
   exceptionPayments,
   overview,
@@ -455,21 +454,5 @@ router.get(
   }),
 );
 
-/**
- * Recovery Trend (Management Dashboard KPI, Phase 12): daily/weekly collected
- * buckets over a free date range -- same scope clamp as /deposits-range and
- * /trail (event-level data, so a range fits better than month-at-a-time).
- */
-router.get(
-  "/trend",
-  asyncHandler(async (req, res) => {
-    const { from, to, granularity, ...filters } = dateRangeSchema
-      .extend({ granularity: z.enum(["day", "week"]).default("day") })
-      .parse(req.query);
-    const scope = await resolveDateRangeScope(req, filters);
-    const points = await collectionTrend(req.user!.agency_id, from, to, granularity, scope);
-    res.json({ from, to, granularity, points });
-  }),
-);
 
 export default router;

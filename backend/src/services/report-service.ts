@@ -177,13 +177,6 @@ export function monthDays(month: string, now = new Date()): MonthDays {
   return { in_month: inMonth, elapsed: curD, left: inMonth - curD };
 }
 
-/** Is `month` ('YYYY-MM' or 'YYYY-MM-01') the current calendar month in IST? */
-function isCurrentMonth(month: string, now = new Date()): boolean {
-  const [y, m] = month.split("-").map(Number);
-  const [curY, curM] = istToday(now).split("-").map(Number);
-  return y === curY && m === curM;
-}
-
 /**
  * `customer_month_snapshots.assigned_team_id` is only ever populated as the
  * assigned agent's own team_id AT ALLOCATION TIME (allocations.ts) -- it's
@@ -256,60 +249,6 @@ function baseConditions(filters: ReportFilters, params: unknown[]): string[] {
   return conditions;
 }
 
-/**
- * WHERE fragments against the LIVE `customers` table — same shape as
- * baseConditions() but for the current month, which has no frozen snapshot
- * to read (Phase 8 computed-default target).
- */
-function liveConditions(filters: ReportFilters, params: unknown[]): string[] {
-  const conditions: string[] = [];
-  if (filters.company_id) {
-    params.push(filters.company_id);
-    conditions.push(`c.company_id = $${params.length}`);
-  }
-  if (filters.branch_id) {
-    conditions.push(
-      reportBranchClause(filters.branch_id, params, "c", "tm", [
-        "c.assigned_agent_id",
-        "c.assigned_field_agent_id",
-      ]),
-    );
-  }
-  if (filters.team_id) {
-    // Previously a bare `c.assigned_team_id = $N` -- same collapse-to-zero
-    // bug as baseConditions() had (1B.4) for any team-less agent, just on
-    // the live-customers path instead of the snapshot path.
-    conditions.push(
-      reportTeamClause(filters.team_id, params, "c", [
-        "c.assigned_agent_id",
-        "c.assigned_field_agent_id",
-      ]),
-    );
-  }
-  if (filters.agent_id) {
-    params.push(filters.agent_id);
-    conditions.push(`c.assigned_agent_id = $${params.length}`);
-  }
-  if (filters.product) {
-    params.push(filters.product);
-    conditions.push(
-      `(lower(c.product) = lower($${params.length}) OR EXISTS (
-          SELECT 1 FROM products pr
-           WHERE pr.company_id = c.company_id
-             AND lower(pr.raw_label) = lower(c.product)
-             AND lower(pr.canonical_label) = lower($${params.length})))`,
-    );
-  }
-  if (filters.bucket) {
-    params.push(filters.bucket);
-    conditions.push(`lower(c.bucket) = lower($${params.length})`);
-  }
-  if (filters.status) {
-    params.push(filters.status);
-    conditions.push(`c.status = $${params.length}`);
-  }
-  return conditions;
-}
 
 /** Payment-side filters (deposits card + overview): money in the current scope. */
 function paymentConditions(filters: ReportFilters, params: unknown[]): string[] {
@@ -452,43 +391,6 @@ export async function depositTotals(
   return { collected, deposited, pending: roundMoney(collected - deposited) ?? 0 };
 }
 
-
-export interface TrendPoint {
-  bucket: string; // 'YYYY-MM-DD' (day) or the Monday of the ISO week (week)
-  amount: number;
-}
-
-/**
- * Phase 12 (Management Dashboard "Recovery Trend" KPI): daily or weekly
- * collected-amount buckets over a free date range, same payment scope
- * narrowing as the rest of the payment-side report surface.
- */
-export async function collectionTrend(
-  agencyId: string,
-  from: string,
-  to: string,
-  granularity: "day" | "week",
-  filters: Omit<ReportFilters, "month">,
-): Promise<TrendPoint[]> {
-  const params: unknown[] = [agencyId, from, to];
-  const conditions = paymentConditions({ ...filters, month: from } as ReportFilters, params);
-  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
-  const truncUnit = granularity === "week" ? "week" : "day";
-  const { rows } = await pool.query(
-    `SELECT to_char(date_trunc('${truncUnit}', p.paid_at AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD') AS bucket,
-            COALESCE(SUM(p.amount), 0)::float AS amount
-       FROM payments p
-       JOIN customers c ON c.id = p.customer_id
-       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
-       JOIN users cu ON cu.id = p.collected_by_user_id
-      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
-        AND p.paid_at < (($3::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')
-        ${where}
-      GROUP BY 1 ORDER BY 1`,
-    params,
-  );
-  return rows as TrendPoint[];
-}
 
 export interface DepositRow {
   id: string;

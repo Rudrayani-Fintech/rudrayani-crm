@@ -452,108 +452,6 @@ export async function depositTotals(
   return { collected, deposited, pending: roundMoney(collected - deposited) ?? 0 };
 }
 
-/**
- * Phase 12 (Management Dashboard "Collected Today" KPI): money collected
- * since IST midnight. Previously used bare `now()`, which resolves in the
- * DB session's timezone (UTC) -- wrong for the first ~5.5h of every IST day
- * and liable to bucket a payment into the wrong day entirely. Fixed to use
- * the same `AT TIME ZONE 'Asia/Kolkata'` idiom as depositTotals() above,
- * just anchored to today's IST date instead of a passed-in month. Shares
- * paymentConditions() with the MTD figure so both use identical scope
- * narrowing, just a different time window.
- */
-export async function collectedToday(
-  agencyId: string,
-  filters: ReportFilters,
-): Promise<number> {
-  const params: unknown[] = [agencyId];
-  const conditions = paymentConditions(filters, params);
-  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
-  const { rows } = await pool.query(
-    `SELECT COALESCE(SUM(p.amount), 0)::float AS today
-       FROM payments p
-       JOIN customers c ON c.id = p.customer_id
-       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
-       JOIN users cu ON cu.id = p.collected_by_user_id
-      WHERE p.paid_at >= (((now() AT TIME ZONE 'Asia/Kolkata')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-        AND p.paid_at < (((now() AT TIME ZONE 'Asia/Kolkata')::date + interval '1 day')::timestamp AT TIME ZONE 'Asia/Kolkata')
-        ${where}`,
-    params,
-  );
-  return rows[0].today as number;
-}
-
-export interface PaymentTypeSplit {
-  emi: number;
-  settlement: number;
-}
-
-/** Phase 12 (Management Dashboard "Settlement vs EMI Collections" KPI). */
-export async function collectionByType(
-  agencyId: string,
-  filters: ReportFilters,
-): Promise<PaymentTypeSplit> {
-  const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
-  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
-  const { rows } = await pool.query(
-    `SELECT COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'settlement'), 0)::float AS settlement,
-            COALESCE(SUM(p.amount) FILTER (WHERE p.type = 'emi'), 0)::float AS emi
-       FROM payments p
-       JOIN customers c ON c.id = p.customer_id
-       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
-       JOIN users cu ON cu.id = p.collected_by_user_id
-      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
-        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-        ${where}`,
-    params,
-  );
-  return { emi: rows[0].emi as number, settlement: rows[0].settlement as number };
-}
-
-export interface CollectionChannelSplit {
-  field: number;
-  telecalling: number;
-  /** Collected by someone who is neither a field agent nor a telecaller
-   *  (e.g. a TL or admin recording a payment directly) -- not silently
-   *  folded into either bucket. */
-  other: number;
-}
-
-/**
- * Phase 12 (Management Dashboard "Field vs Telecalling Collections" KPI):
- * splits the same MTD collected total by the collecting user's capability
- * flags. A user with both is_field_agent and is_telecaller (unusual but not
- * disallowed) counts toward "field" -- the flag order used everywhere else
- * a single-bucket classification is needed (e.g. /tracking "not moving" alert).
- */
-export async function collectionByChannel(
-  agencyId: string,
-  filters: ReportFilters,
-): Promise<CollectionChannelSplit> {
-  const params: unknown[] = [agencyId, filters.month];
-  const conditions = paymentConditions(filters, params);
-  const where = conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : "";
-  const { rows } = await pool.query(
-    `SELECT
-        COALESCE(SUM(p.amount) FILTER (WHERE cu.is_field_agent), 0)::float AS field,
-        COALESCE(SUM(p.amount) FILTER (WHERE NOT cu.is_field_agent AND cu.is_telecaller), 0)::float AS telecalling,
-        COALESCE(SUM(p.amount) FILTER (WHERE NOT cu.is_field_agent AND NOT cu.is_telecaller), 0)::float AS other
-       FROM payments p
-       JOIN customers c ON c.id = p.customer_id
-       JOIN companies co ON co.id = c.company_id AND co.agency_id = $1
-       JOIN users cu ON cu.id = p.collected_by_user_id
-      WHERE p.paid_at >= ($2::date::timestamp AT TIME ZONE 'Asia/Kolkata')
-        AND p.paid_at < ((($2::date + interval '1 month')::date)::timestamp AT TIME ZONE 'Asia/Kolkata')
-        ${where}`,
-    params,
-  );
-  return {
-    field: rows[0].field as number,
-    telecalling: rows[0].telecalling as number,
-    other: rows[0].other as number,
-  };
-}
 
 export interface TrendPoint {
   bucket: string; // 'YYYY-MM-DD' (day) or the Monday of the ISO week (week)
@@ -1191,43 +1089,6 @@ export async function trailAnalytics(
   };
 }
 
-/** Products + buckets available under the current scope (dashboard filter options). */
-export async function filterOptions(
-  agencyId: string,
-  companyId?: string,
-): Promise<{ products: string[]; buckets: string[] }> {
-  const productParams: unknown[] = [agencyId];
-  let companyClause = "";
-  if (companyId) {
-    productParams.push(companyId);
-    companyClause = `AND p.company_id = $${productParams.length}`;
-  }
-  const { rows: products } = await pool.query(
-    `SELECT DISTINCT p.canonical_label AS label
-       FROM products p JOIN companies co ON co.id = p.company_id
-      WHERE co.agency_id = $1 ${companyClause}
-      ORDER BY 1`,
-    productParams,
-  );
-  const bucketParams: unknown[] = [agencyId];
-  let bucketCompanyClause = "";
-  if (companyId) {
-    bucketParams.push(companyId);
-    bucketCompanyClause = `AND b.company_id = $${bucketParams.length}`;
-  }
-  const { rows: buckets } = await pool.query(
-    `SELECT b.label, MIN(b.sort_order) AS ord
-       FROM buckets b JOIN companies co ON co.id = b.company_id
-      WHERE co.agency_id = $1 ${bucketCompanyClause}
-      GROUP BY b.label ORDER BY ord, b.label`,
-    bucketParams,
-  );
-  return {
-    products: products.map((r) => r.label as string),
-    buckets: buckets.map((r) => r.label as string),
-  };
-}
-
 export interface AgentActivityRow {
   kind: "call" | "payment" | "ptp" | "field_visit";
   id: string;
@@ -1266,8 +1127,8 @@ export interface AgentActivityRow {
  * /tracking/team-day does).
  *
  * `options.today` scopes to the current IST day (for the "Today's Work"
- * view) using the same AT TIME ZONE 'Asia/Kolkata' idiom as
- * collectedToday() -- bare `now()` would have the same UTC-boundary bug.
+ * view) using the same AT TIME ZONE 'Asia/Kolkata' idiom as depositTotals()
+ * -- bare `now()` would have the same UTC-boundary bug.
  * `options.dispositionCodeId` narrows to calls carrying that disposition;
  * payments/PTPs/field visits have no disposition of their own, so that
  * filter excludes those branches entirely rather than silently matching

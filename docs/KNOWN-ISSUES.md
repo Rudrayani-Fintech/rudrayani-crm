@@ -2,7 +2,8 @@
 
 Live checklist, not a chronological log (see `docs/mobile-revamp-decisions.md` for the append-only
 decision history behind each of these). Update in place as items are fixed or new ones are found.
-Last updated: 2026-09-05, after Phase 16 and a partial Phase 17 attempt (§8).
+Last updated: 2026-09-06, after a full role-by-role product audit (§9). §2 — the last defect
+blocking a merge to `main` — is now fixed.
 
 ## Why this file exists
 
@@ -107,7 +108,7 @@ a new 5-test `agent-activity.test.ts` file, both green) — confirms **zero regr
 every phase from 8 through 17. Re-run and update this number after fixing any of §1a-§1d, or after
 each further phase if new failures appear.
 
-## 2. Live frontend/backend contract mismatch — partially resolved by Phase 15, one real gap remains
+## 2. Live frontend/backend contract mismatch — fully resolved as of 2026-09-06
 
 **Phase 7 deleted backend routes** (`/reports/dashboard`, `/breakdown`, `/agents`, `/recalls`,
 `/bucket-movements`, `/bucket-mismatches`, `/export`, all of `/api/targets`) **that the web
@@ -126,32 +127,35 @@ redirects to `/agent-activity` (managers/owners) or `/my-worklist` (individual c
 see `mobile-revamp-decisions.md`'s Phase 15 section for why the redirect is role-conditional, not
 a single static target.
 
-### 2b. NOT resolved by Phase 15 — confirmed still broken, needs its own fix
-**`components/dashboard/BreakdownTable.tsx` still calls the deleted `GET /reports/breakdown`.**
-Phase 15's own spec text explicitly preserves this file (and `format.ts`/`types.ts`, which it
-depends on) *because* `components/BranchDetailDrawer.tsx` and `components/TeamDetailDrawer.tsx`
-still import it, and `pages/OrgChartPage.tsx` (kept, not in Phase 15's file list) reaches both via
-click-through. **`components/AgentDetailDrawer.tsx` still calls the deleted `GET
-/reports/dashboard?agent_id=`** — same situation, same OrgChartPage.tsx entry point, also not in
-Phase 15's file list.
+### 2b. [FIXED, 2026-09-06] The org-chart drill-through drawers
+`components/dashboard/BreakdownTable.tsx` called the deleted `GET /reports/breakdown` and
+`components/AgentDetailDrawer.tsx` the deleted `GET /reports/dashboard?agent_id=`. Neither file was
+in Phase 7's or Phase 15's file list, so both had been calling dead endpoints since Phase 7.
+Reproduced live during the post-Phase-17 audit: on `OrgChartPage`, clicking an agent gave a
+completely blank drawer plus a red "Not found" toast, and clicking a team or branch gave an empty
+Breakdown table; `BranchesPage`'s drawer hit the same thing. Network capture showed
+`/api/reports/dashboard` → 404 and `/api/reports/breakdown` → 404.
 
-Practical effect: on `OrgChartPage`, clicking into a branch, a team, or an agent opens a drawer
-that errors (a `message.error` toast; the drawer itself doesn't crash, it just shows no data) or,
-for `AgentActivityPage.tsx`'s own lookup-options call to `GET /employees` when a non-manager
-somehow lands there directly, a similar silent-fail-with-toast. **This means Phase 15 shipping is
-*not* sufficient to safely deploy `revamp-integration` to `main`/production on its own** — the
-three org-chart drill-through drawers need a real fix first (either a new backend aggregate
-endpoint scoped the way `BreakdownTable` needs — dimension-pivoted, unlike the kept
-`/reports/agent-activity`/`/reports/trail`, which are row-level — or dropping the
-breakdown/dashboard-numbers drill-through in favor of the row-level ledger view already used
-everywhere else in this revamp). This is a genuine product decision, not a mechanical swap, and
-is explicitly **out of scope for Phase 15** (whose file list is `App.tsx`/`AppLayout.tsx` plus
-deletions only) — it needs its own phase or a deliberate scope addition to an existing one.
+Fixed by restoring `GET /reports/breakdown`. The important detail for anyone re-reading the Phase 7
+diff: **only the HTTP route was ever deleted** — `dimensionBreakdown()` in `report-service.ts`
+stayed live the whole time and is already reused by `GET /employees/org-hierarchy
+?with_performance=true`. So this is a thin re-exposure of a proven, already-scope-clamped
+aggregate, not a reimplementation, and it needed no change to `BreakdownTable` at all.
+`AgentDetailDrawer` now reads the single agent-dimension row from the same endpoint, so all three
+drawers share one endpoint and one clamp.
 
-**Still true regardless: do not merge `revamp-integration` into `main` (and do not deploy) until
-this is resolved** — ideally not until the whole revamp is done, per the user's explicit
-instruction. Phase 15 narrowed the blast radius (one screen's three drawers, not the entire portal)
-but did not close it.
+Worth recording why the row-level alternative was rejected: `BreakdownTable`'s columns (allocated,
+resolution/rollback/normalization/recovery %, target, achievement) are **not derivable** from
+`/reports/agent-activity` or `/reports/trail`, which are event feeds. "Repoint at a surviving
+endpoint" was only possible because the surviving thing was the aggregate service, not those feeds.
+
+Verified live after the fix: agent drawer shows Allocated 9.36L (6) / Collected 0.03L plus its
+activity timeline, team drawer shows a per-agent breakdown, branch drawer shows team details plus
+the agent-wise breakdown — all calls 200, no error toast.
+
+**This was the last item blocking a merge of `revamp-integration` into `main`.** That merge is now
+a product decision rather than a known-defect blocker; per the user's standing instruction it still
+happens only when they explicitly ask for it.
 
 ## 3. Housekeeping (not urgent, not part of the revamp)
 
@@ -346,7 +350,115 @@ A physical-device pass is still worth doing before a real production rollout to 
 but it is no longer a *blocker* discovered by this session -- everything automatable, plus a real
 live web QA pass across all three roles, is done and green.
 
-## 9. Format for adding new entries
+## 9. Full-product audit, 2026-09-06 — what it found
+
+A role-by-role pass through the live product (Docker Postgres + both dev servers), acting as owner,
+branch manager, telecaller and field agent, plus a static audit of all 118 backend endpoints and
+every source file in the three codebases. Everything below is either already fixed or recorded
+here deliberately.
+
+### 9a. [FIXED] Branch managers saw ZERO customers after an import
+The highest-severity find, and silent: the import reported "12 inserted, 0 errors" while leaving
+every branch manager blind to their whole book.
+
+`customer_branch` was seeded (migration `1787400000000`) with `is_core = false` **and** an explicit
+`is_enabled = false` `company_field_settings` row per company. `resolveFieldCatalog()` resolves
+enablement as `COALESCE(settings.is_enabled, definition.is_core)`, so the field was off for every
+company, never appeared in the import mapping dropdown, and `customers.branch_id` stayed NULL on
+every imported row. `customerBranchClamp()` matches on `c.branch_id` with a
+`custom_fields->>'branch'/'Branch'` fallback — and an Excel header of "Customer Branch" lands under
+the key `"Customer Branch"`, which that fallback never hits. So the clamp matched nothing.
+
+What made it hard to spot from the outside: the same branch manager still correctly saw their own
+*staff* (`GET /employees`, `/day-plan`, `/tracking/live` all scope via the agent, not the customer),
+so it looked like missing data rather than broken scoping. Reproduced: Pune BM saw 0 of 12; after
+enabling that one field and re-importing, exactly their own 6.
+
+Fixed in migration `1790000000000` + `CORE_FIELD_DEFINITIONS_SQL`: `customer_branch` is now core and
+enabled by default, and existing explicit-`false` rows are flipped. Deliberately **not** made
+required — a file with no branch column must still import, leaving `branch_id` NULL for those rows.
+
+**Residual gap, by the owner's explicit choice** (they picked "make it core by default" over
+"derive branch_id from the resolved agent"): rows imported *before* this fix still have
+`branch_id = NULL`, and a file with no branch column still produces NULL. If a production branch
+manager reports an empty list, the backfill is:
+```sql
+UPDATE customers c SET branch_id = u.branch_id
+  FROM users u
+ WHERE c.branch_id IS NULL
+   AND u.branch_id IS NOT NULL
+   AND (c.assigned_agent_id = u.id OR c.assigned_field_agent_id = u.id);
+```
+
+### 9b. [FIXED] Imports put field agents in the telecalling column
+`resolveAgents()` ignored the resolved user's type and always wrote `assigned_agent_id`, never
+`assigned_field_agent_id`, even though the two are parallel tracks with their own allocation
+endpoints (`/allocations/assign` vs `/allocations/assign-field-agent`). Worklist reads both columns
+so agents still saw their customers, which is why nothing looked broken. Now routed by
+`is_field_agent`, with the `allocation_logs` comparison, the `FOR UPDATE` select, the
+`import_row_backups` payload and the rollback allow-list all updated to match.
+
+### 9c. [FIXED] Dead code removed
+- `report-service.ts`: `collectedToday()`, `collectionByType()`, `collectionByChannel()`,
+  `filterOptions()` and their types — all written for the Management Dashboard that Phases 7/15
+  deleted, zero references anywhere (-141 lines). Also `isCurrentMonth()` and `liveConditions()`,
+  which lint had already been flagging as unreachable.
+- Four orphaned API surfaces with no caller in either client: `/api/dashboard-preferences`
+  (+ its route, test and the `dashboard_preferences` table, migration `1790100000000`),
+  `/api/setup-status`, `GET /reports/trend` (+ `collectionTrend()`), `POST /products/normalize`.
+- Frontend: `MetricBlock`/`MetricKey`/`DashboardData`/`METRIC_TITLES` from `dashboard/types.ts`
+  and `compactCount()`/`metricValue()` from `dashboard/format.ts`.
+
+**Deliberately KEPT despite having no caller today**, by the owner's decision:
+`GET /reports/deposits-range` and `GET /reports/exceptions`. Cash-deposit reconciliation by date
+range and anomalous-payment review are plausible near-term needs for a collections business; they
+are dormant, not dead. Don't "clean these up" without asking.
+
+There is **no dead code left in `frontend/src` or `mobile/lib`** — every file and every public
+widget class is reachable. (A naive scan flags eight mobile classes such as `AuthNotifier` and
+`TodayWorklistNotifier`; those are Riverpod notifiers referenced by their provider in the same
+file, i.e. false positives.)
+
+### 9d. Verified working (no action needed)
+Exercised against the live stack, not asserted: all **62 OC and 41 FV trail codes** log
+successfully; PTP auto-creation fires on exactly the promise codes and correctly skips
+broken-promise ones; `exits_agent_queue` returns the customer to the unallocated pool (7 codes);
+per-disposition required-field validation; remark composition with placeholder substitution plus
+free-text notes, and remark editing restricted to the author; idempotent replay via `client_key` on
+both call logs and payments; cross-branch writes blocked; punch in/out; GPS ping ingestion, live
+tracking, and route replay (self allowed, other agents 403, team map manager-only); field visits
+with embedded payments; correction requests end to end including allowed-field enforcement;
+reallocation requests; attachments; the customer-360 payload; employee CRUD with the
+"telecaller must report to a manager" rule and branch managers blocked from creating staff in
+another branch; the password-reset queue; deposit reconciliation; and the agent-activity report
+across 17 filter combinations plus xlsx export (admin and branch-manager-scoped).
+
+### 9e. Open observations — not bugs, but worth a decision
+1. **Login rate limit may be too tight for a real office.** `loginRateLimiter` allows 20 attempts
+   per 15 minutes **per IP**. A collection agency where 30+ agents log in from one NAT'd office
+   connection each morning would lock itself out; the comment claims the window is "generous enough
+   not to lock out a shared-NAT office network", which this audit's own usage disproved (hit it
+   just by testing). Consider keying on phone+IP, or raising the cap.
+2. **`attendance-records` has zero test coverage** despite being used by the web Attendance page.
+3. **`seed_demo.ts`'s customer import is broken** (stale column mapping, missing `mobile_number`) —
+   see §3. Dev tooling only.
+4. **Naming convention in `backend/src/jobs/` is undocumented**: kebab-case files hold the logic
+   (`purge-pings.ts`), snake_case files are thin CLI runners for the npm scripts
+   (`purge_old_location_pings.ts`). Consistent once you know, confusing until then.
+
+### 9f. Code quality assessment
+Genuinely good discipline for a codebase this size (~13.7k backend, ~12.9k frontend, ~7.6k mobile
+lines): **one** `TODO` in the entire tree, **zero** stray `console.log` in production paths, and
+only ~10 uses of `any` across both TypeScript codebases. Comments consistently explain *why* rather
+than restating the code, and several carry the history of a past bug — which is what made this
+audit's root-causing fast. Backend lint sits at 12 pre-existing errors (mostly `prefer-const` and
+unused test variables), down from 14.
+
+Complexity hotspots worth watching, none urgent: `report-service.ts` (~1.2k lines after the
+deletions), `routes/employees.ts` (1144), `pages/ImportPage.tsx` (1174), `pages/AllocationPage.tsx`
+(922).
+
+## 10. Format for adding new entries
 
 When a new phase surfaces a defect that isn't blocking that phase's own verification, add a dated
 subsection under the relevant number above (or a new `## N.` section for a new category) with:

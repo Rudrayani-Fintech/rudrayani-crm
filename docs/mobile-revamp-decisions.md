@@ -1330,3 +1330,58 @@ detail: `KNOWN-ISSUES.md` §8d.
 session has had.** `KNOWN-ISSUES.md` §2's `BreakdownTable`/`AgentDetailDrawer` gap remains the one
 other open item before `revamp-integration` is safe to merge into `main` -- a product decision, not
 something this phase resolves as a side effect.
+
+## Full-product audit (2026-09-06)
+
+The owner asked for a pass through the *whole* product rather than another phase: act as each role
+in turn, exercise the real flows, judge the business value of each piece of code, and remove what
+isn't used. Findings and the decisions taken are in `KNOWN-ISSUES.md` §9; this section records the
+reasoning behind the four judgement calls, since three of them changed product behaviour.
+
+**Why the branch-manager bug (§9a) mattered more than its size suggests.** The fix is one migration
+flipping one boolean, but the bug had all three properties that make a defect expensive: it was
+silent (the import reported "12 inserted, 0 errors"), it presented as missing *data* rather than
+broken *scoping* (the same manager still saw their own staff correctly, because employee/day-plan/
+tracking scope via the agent while customers scope via `c.branch_id`), and it was a repeat of a
+class this project had already been burned by -- `rudrayani-crm-project-state` memory records an
+almost identical July incident where branch managers saw zero data because a clamp matched on a
+column that was NULL in practice. The pattern to watch for: **a scope clamp keyed on a column that
+is only populated by an opt-in path.** Here `branch_id` was populated only if an admin had enabled a
+field that defaulted to off, which no one had.
+
+The owner chose "make `customer_branch` core by default" over "derive `branch_id` from the resolved
+agent". Both were offered with their trade-offs; the accepted option is simpler and keeps the
+Excel file as the single source of truth for which branch a customer belongs to, at the cost of
+leaving already-imported rows NULL. That residual is written up in §9a with a ready-to-run backfill
+rather than being quietly applied, because deciding whether an agent's current branch retroactively
+defines a customer's branch is the owner's call, not a cleanup detail.
+
+**Why the drill-down repair (§2) is a restore, not a rebuild.** The obvious reading of "rebuild on
+surviving endpoints" was to repoint the drawers at `/reports/agent-activity` and `/reports/trail`.
+That turned out to be impossible: those are row-level event feeds, and `BreakdownTable`'s columns
+(allocated, resolution/rollback/normalization/recovery %, target, achievement) are aggregates that
+cannot be derived from them. What made a clean fix available instead was noticing that Phase 7 had
+only deleted the *HTTP route* -- `dimensionBreakdown()` itself was never removed and is still used
+by `GET /employees/org-hierarchy?with_performance=true`. So the fix re-exposes a proven,
+already-scope-clamped aggregate in ~20 lines and needed no change to `BreakdownTable` at all. Worth
+remembering as a general move: before rebuilding a deleted feature, check whether the service layer
+outlived the route.
+
+**Why two unused endpoints were kept.** `/reports/deposits-range` and `/reports/exceptions` have no
+caller in either client and would have been deleted on a purely mechanical "remove what's unused"
+pass. They were surfaced to the owner separately from the obvious leftovers because cash-deposit
+reconciliation and anomalous-payment review are ordinary needs for a collections agency handling
+cash -- "no caller today" and "no business value" are different claims, and only the owner can tell
+them apart. They were kept. Everything else with no caller (`dashboard-preferences`,
+`setup-status`, `/reports/trend`, `POST /products/normalize`) was deleted with its table, tests and
+types.
+
+**What the audit says about the codebase generally.** The static findings were mostly reassuring --
+one `TODO` in ~34k lines, no stray `console.log`, almost no `any`, and no dead files or unreachable
+components in `frontend/src` or `mobile/lib` at all. Every real defect found was found by *using*
+the product, not by reading it: the branch-manager blindness, the field-agent assignment routing,
+the 404ing drill-downs and (in Phase 17) the two `agent-activity` bugs were all invisible to
+typecheck, lint and the test suite, and three of the four sat in code paths with no test coverage.
+The suite's 80 pre-existing failures (§1) are all fixture-shaped rather than product-shaped, which
+is consistent with that: this codebase's risk is concentrated in the paths nobody exercises
+end-to-end, not in the ones it asserts on.

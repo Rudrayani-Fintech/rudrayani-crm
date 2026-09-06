@@ -6,8 +6,9 @@ behind decisions already made, `docs/KNOWN-ISSUES.md` is the *what's already bro
 about* checklist. This file exists because a fresh session has none of the prior conversation
 context that produced those three documents.
 
-**Last updated:** 2026-09-06, after Phase 17 actually ran to completion (real backend suite, real
-web E2E for all three roles, two genuine pre-existing bugs found and fixed).
+**Last updated:** 2026-09-06, after Phase 17 completed and a full role-by-role product audit
+(§9 in `KNOWN-ISSUES.md`) that found and fixed four further real bugs, removed the dead code the
+revamp left behind, and closed §2 — the last defect blocking a merge to `main`.
 
 ---
 
@@ -23,14 +24,13 @@ web E2E for all three roles, two genuine pre-existing bugs found and fixed).
   (zero regressions across Phases 8-17), and a live web E2E pass across telecaller, branch manager,
   and owner roles found and fixed two genuine pre-existing bugs in `GET /reports/agent-activity`
   (§1g in KNOWN-ISSUES.md) that had zero prior test coverage.
-- **`main` is still NOT the integration branch for this work, and is still not safe to deploy
-  without one remaining product decision.** `origin/main` auto-deploys to production (Railway).
-  One reason left, already fully documented — read it before assuming otherwise:
-  - `KNOWN-ISSUES.md` §2: `components/dashboard/BreakdownTable.tsx` (`GET /reports/breakdown`) and
-    `components/AgentDetailDrawer.tsx` (`GET /reports/dashboard`) still call backend routes Phase 7
-    deleted, reachable via `OrgChartPage.tsx`'s drill-through drawers -- Phase 15 deliberately left
-    both in place (`OrgChartPage.tsx` needs them, and isn't in Phase 15's file list). This is a
-    genuine open gap, independent of Phase 17's own verification gate, which is otherwise clear.
+- **`main` is still NOT the integration branch for this work.** `origin/main` auto-deploys to
+  production (Railway), so merging into it stays an explicit, deliberate decision the user makes --
+  never something to do just because the checks are green. As of 2026-09-06 there is **no known
+  defect blocking that merge**: `KNOWN-ISSUES.md` §2 (the `BreakdownTable`/`AgentDetailDrawer`
+  drill-downs calling routes Phase 7 deleted) is fixed and verified live, and a full role-by-role
+  audit (§9) fixed two further real bugs — branch managers seeing zero customers after an import,
+  and imports writing field agents into the telecalling column.
 
   Every phase from Phase 8 onward lands on `revamp-integration`, not `main`. (Phases 0-7 *are* also
   present on local `main` in the primary checkout, from before this branch existed — that's a
@@ -42,9 +42,10 @@ web E2E for all three roles, two genuine pre-existing bugs found and fixed).
   out, see §4's git-workflow notes for the workaround used once already this session.
 - **The mobile app (`mobile/`) is done** (Phases 8-13). **Web's KPI/nav restructure and admin
   surfaces are done** (Phases 14-16). **Phase 17 verification is done** except the physical-device
-  pass. What's left before a real production rollout: (1) resolve the `BreakdownTable`/
-  `AgentDetailDrawer` gap above, (2) do a physical-device mobile pass when hardware is available.
-  Phases 0-7 were 100% backend.
+  pass. What's left before a real production rollout: (1) a physical-device mobile pass when
+  hardware is available (`KNOWN-ISSUES.md` §8d), (2) the owner's call on the two open items in
+  §9e — the login rate limit being tight enough to lock out a shared-NAT office, and whether to
+  backfill `branch_id` on customers imported before the §9a fix. Phases 0-7 were 100% backend.
 
 ## 2. Standing instructions from the user (do not relitigate these)
 

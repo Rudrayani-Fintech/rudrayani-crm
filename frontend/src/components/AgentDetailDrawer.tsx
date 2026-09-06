@@ -9,7 +9,16 @@ import dayjs from "dayjs";
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import { lakh, pctText } from "./dashboard/format";
-import type { DashboardData } from "./dashboard/types";
+import type { BreakdownRow } from "./dashboard/BreakdownTable";
+
+/** The subset of a BreakdownRow this drawer renders. */
+interface AgentPerformance {
+  allocated_amount: number;
+  allocated_count: number;
+  collected_amount: number;
+  target_amount: number | null;
+  achievement_pct: number | null;
+}
 
 interface AgentActivityRow {
   kind: "call" | "payment" | "ptp" | "field_visit";
@@ -35,18 +44,15 @@ const KIND_LABEL: Record<AgentActivityRow["kind"], string> = {
 };
 
 /**
- * Agent drill-down: own dashboard numbers (GET /reports/dashboard?agent_id=)
- * plus the recent-activity feed (GET /reports/agent-activity). Used from
- * OrgChartPage/TeamDetailDrawer click-through.
+ * Agent drill-down: this agent's allocated-vs-collected numbers plus their
+ * recent-activity feed. Used from OrgChartPage/TeamDetailDrawer click-through.
  *
- * KNOWN BROKEN since Phase 7 (backend): /reports/dashboard was deleted then;
- * this component was never in that phase's file list and has been calling a
- * 404 ever since. Phase 15 (web: delete the KPI surface) explicitly does NOT
- * touch this file either -- its own file list is App.tsx/AppLayout.tsx plus
- * an explicit instruction to keep BreakdownTable.tsx/format.ts/types.ts
- * because OrgChartPage still needs them, regardless of whether they still
- * work. See docs/KNOWN-ISSUES.md §2 for the full picture and what a fix
- * would need to look like.
+ * The performance half used to call GET /reports/dashboard, which Phase 7
+ * deleted -- this component was never in that phase's file list, so it 404'd
+ * (blank drawer + "Not found" toast) from then until an audit caught it. It
+ * now reads the single agent-dimension row from GET /reports/breakdown, the
+ * same aggregate the branch/team drawers use, so all three drill-downs share
+ * one endpoint and one scope clamp.
  */
 export default function AgentDetailDrawer({
   agentId,
@@ -61,7 +67,7 @@ export default function AgentDetailDrawer({
   open: boolean;
   onClose: () => void;
 }) {
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [performance, setPerformance] = useState<AgentPerformance | null>(null);
   const [activity, setActivity] = useState<AgentActivityRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -69,11 +75,29 @@ export default function AgentDetailDrawer({
     if (!agentId) return;
     setLoading(true);
     Promise.all([
-      api.get("/reports/dashboard", { params: { month, agent_id: agentId } }),
+      api.get("/reports/breakdown", {
+        params: { month, dimension: "agent", agent_id: agentId },
+      }),
       api.get("/reports/agent-activity", { params: { agent_id: agentId, limit: 20 } }),
     ])
-      .then(([dashRes, actRes]) => {
-        setDashboard(dashRes.data);
+      .then(([breakdownRes, actRes]) => {
+        // Scoped to one agent_id, so at most one row comes back. An agent with
+        // no allocated book for the month legitimately has none -- show the
+        // activity feed rather than an error.
+        const row: BreakdownRow | undefined = (breakdownRes.data.rows ?? []).find(
+          (r: BreakdownRow) => r.key === agentId,
+        ) ?? (breakdownRes.data.rows ?? [])[0];
+        setPerformance(
+          row
+            ? {
+                allocated_amount: row.allocated_amount,
+                allocated_count: row.allocated_count,
+                collected_amount: row.collected_amount,
+                target_amount: row.target_amount,
+                achievement_pct: row.achievement_pct,
+              }
+            : null,
+        );
         setActivity(actRes.data.activity);
       })
       .catch((err) => message.error(errorMessage(err)))
@@ -82,7 +106,7 @@ export default function AgentDetailDrawer({
 
   useEffect(() => {
     if (!open || !agentId) return;
-    setDashboard(null);
+    setPerformance(null);
     setActivity([]);
     load();
   }, [open, agentId, load]);
@@ -94,18 +118,29 @@ export default function AgentDetailDrawer({
           <Spin size="large" />
         </div>
       )}
-      {!loading && dashboard && (
+      {!loading && (
         <Space direction="vertical" style={{ width: "100%" }} size="large">
-          <Descriptions size="small" bordered column={2}>
-            <Descriptions.Item label="Allocated">
-              {lakh(dashboard.allocated.amount)} ({dashboard.allocated.count})
-            </Descriptions.Item>
-            <Descriptions.Item label="Collected (MTD)">{lakh(dashboard.collection.mtd_amount)}</Descriptions.Item>
-            <Descriptions.Item label="Target">
-              {dashboard.collection.target_amount != null ? lakh(dashboard.collection.target_amount) : "—"}
-            </Descriptions.Item>
-            <Descriptions.Item label="Achievement">{pctText(dashboard.collection.target_pct)}</Descriptions.Item>
-          </Descriptions>
+          {performance ? (
+            <Descriptions size="small" bordered column={2}>
+              <Descriptions.Item label="Allocated">
+                {lakh(performance.allocated_amount)} ({performance.allocated_count})
+              </Descriptions.Item>
+              <Descriptions.Item label="Collected (MTD)">
+                {lakh(performance.collected_amount)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Target">
+                {performance.target_amount != null ? lakh(performance.target_amount) : "—"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Achievement">
+                {pctText(performance.achievement_pct)}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : (
+            <Empty
+              description="No allocated book for this month"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+            />
+          )}
 
           <div>
             <Typography.Title level={5}>Recent Activity</Typography.Title>

@@ -12,22 +12,11 @@ export function lakh(value: number | null | undefined): string {
   return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(value);
 }
 
-export function compactCount(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}K`;
-  return String(value);
-}
-
 export function pctText(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   return `${value.toFixed(2).replace(/\.00$/, "")}%`;
 }
 
-/** Amount/Count toggle picks which field of a metric block a card shows. */
-export function metricValue(
-  amountMode: boolean,
-  amount: number | null | undefined,
-  count: number | null | undefined,
-): string {
-  return amountMode ? lakh(amount) : compactCount(count);
-}
+// compactCount() and metricValue() went with the Management Dashboard's
+// Amount/Count widget toggle (deleted in Phases 7/15); lakh() and pctText()
+// are still used widely across the surviving pages and drawers.

@@ -11,10 +11,12 @@ import { capabilitiesOf } from "../types/user";
 import {
   agentRecentActivity,
   depositsByRange,
+  dimensionBreakdown,
   exceptionPayments,
   overview,
   resolveReportScope,
   trailAnalytics,
+  type BreakdownDimension,
   type ReportFilters,
 } from "../services/report-service";
 
@@ -385,6 +387,44 @@ router.get(
     const { months, ...filters } = query;
     const result = await overview(req.user!, filters, full, months);
     res.json(result);
+  }),
+);
+
+/**
+ * Allocated-vs-collected performance pivoted by one dimension, scope-clamped
+ * the same way every other report is.
+ *
+ * Restored after an audit found the Org Chart's branch/team/agent drill-downs
+ * and the Branches page drawer had been 404ing since Phase 7 deleted this
+ * route: BreakdownTable.tsx and AgentDetailDrawer.tsx were never in that
+ * phase's file list and kept calling it, so a manager clicking any node got a
+ * blank drawer and a "Not found" toast. Only the HTTP route was ever deleted
+ * -- dimensionBreakdown() itself stayed live and is already reused by
+ * GET /employees/org-hierarchy?with_performance=true, so this is a thin
+ * re-exposure of a proven aggregate, not a reimplementation. Its columns
+ * (allocated, resolution/rollback/normalization/recovery %, target,
+ * achievement) are genuinely not derivable from the row-level
+ * /reports/agent-activity or /reports/trail feeds.
+ */
+router.get(
+  "/breakdown",
+  asyncHandler(async (req, res) => {
+    const query = filtersSchema
+      .extend({
+        dimension: z
+          .enum(["company", "product", "bucket", "branch", "team", "agent"])
+          .default("product"),
+      })
+      .parse(req.query);
+    const { dimension, ...filters } = query;
+    const full = await hasFullView(req);
+    const rows = await dimensionBreakdown(
+      req.user!,
+      filters,
+      full,
+      dimension as BreakdownDimension,
+    );
+    res.json({ dimension, rows });
   }),
 );
 

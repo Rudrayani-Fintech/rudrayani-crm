@@ -458,6 +458,25 @@ Complexity hotspots worth watching, none urgent: `report-service.ts` (~1.2k line
 deletions), `routes/employees.ts` (1144), `pages/ImportPage.tsx` (1174), `pages/AllocationPage.tsx`
 (922).
 
+### 9g. Merged to `main` and deployed to production, 2026-09-07
+
+Owner made the call: `revamp-integration` was a clean fast-forward of `main` (55 commits, zero
+divergence), pushed straight through. Railway's `preDeployCommand` (`npm run migrate:up`) ran
+against the production DB — first attempt hit a transient `ETIMEDOUT` connecting to Postgres
+(not a migration bug; the DB was reachable seconds later), `railway redeploy` succeeded on retry.
+All pending migrations through `1790100000000_drop-orphaned-dashboard-preferences` applied
+cleanly, including the `customer_branch` core-by-default fix and the `dashboard_preferences`
+`DROP TABLE`. Both `rudrayani-backend` and `rudrayani-web` confirmed `Online` post-deploy with
+live health checks. A production release APK (`flutter build apk --release --split-per-abi`,
+no `API_URL` override needed — defaults to the Railway URL) was built and handed to the owner
+the same session.
+
+**This means the two items in §9e are no longer staging concerns — they are live in production
+now**, still unresolved:
+1. Login rate limit (20/15min/IP) — could lock out a real shared-NAT office.
+2. `branch_id` backfill for customers imported before the §9a fix — ready-to-run SQL is in §9a,
+   not yet executed against production.
+
 ## 10. Format for adding new entries
 
 When a new phase surfaces a defect that isn't blocking that phase's own verification, add a dated

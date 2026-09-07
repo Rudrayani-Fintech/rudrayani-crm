@@ -21,7 +21,7 @@
          (Android 13+ requires this runtime grant; requested from
          TrackingService via FlutterForegroundTask.requestNotificationPermission()).
          Phase 13 removed the separate reminder-notification feature this
-         permission used to also serve (flutter_local_notifications) -- this
+         permission used to also serve (flutter_local_notifications); this
          declaration stays for the tracking notification, which is unrelated. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>

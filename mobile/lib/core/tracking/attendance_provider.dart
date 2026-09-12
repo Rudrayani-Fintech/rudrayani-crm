@@ -12,10 +12,15 @@ class AttendanceState {
   final DateTime? punchInAt;
   final bool busy;
   final String? error;
-  /// True when [error] is a permanent location-permission denial -- the OS
-  /// will never show the permission prompt again, so the only way forward
-  /// is the "Open Settings" action the punch-in screen shows for this case.
+  /// True when [error] means the fix is a trip to the OS Settings app --
+  /// a permanent location-permission denial, or background ("Allow all the
+  /// time") location not granted. Neither has an in-app dialog that can
+  /// grant them directly.
   final bool needsAppSettings;
+  /// True when [error] means battery optimization must be disabled. Unlike
+  /// [needsAppSettings], this has a direct OS dialog (see
+  /// TrackingService.requestIgnoreBatteryOptimization()) -- no Settings trip.
+  final bool needsBatteryAction;
 
   const AttendanceState({
     this.punchedIn = false,
@@ -23,6 +28,7 @@ class AttendanceState {
     this.busy = false,
     this.error,
     this.needsAppSettings = false,
+    this.needsBatteryAction = false,
   });
 
   AttendanceState copyWith({
@@ -31,6 +37,7 @@ class AttendanceState {
     bool? busy,
     String? error,
     bool needsAppSettings = false,
+    bool needsBatteryAction = false,
   }) =>
       AttendanceState(
         punchedIn: punchedIn ?? this.punchedIn,
@@ -38,6 +45,7 @@ class AttendanceState {
         busy: busy ?? this.busy,
         error: error,
         needsAppSettings: needsAppSettings,
+        needsBatteryAction: needsBatteryAction,
       );
 }
 
@@ -126,14 +134,11 @@ class AttendanceNotifier extends StateNotifier<AttendanceState> {
         state = state.copyWith(
           busy: false,
           error: TrackingService.messageFor(issue),
-          needsAppSettings: issue == LocationPermissionIssue.deniedForever,
+          needsAppSettings: TrackingService.needsSettingsNavigation(issue),
+          needsBatteryAction: TrackingService.needsBatteryAction(issue),
         );
         return;
       }
-      // X2: after location permission is granted and before tracking starts,
-      // so the OEM battery-optimization prompt (if shown) doesn't compete
-      // with the location-permission prompt above.
-      await TrackingService.requestIgnoreBatteryOptimization();
       // No fix (fresh or cached) is no longer fatal -- the server accepts a
       // punch-in with coordinates omitted rather than blocking the agent
       // indoors or on a cold GPS start.

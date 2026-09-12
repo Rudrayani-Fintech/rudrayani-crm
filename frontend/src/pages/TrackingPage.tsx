@@ -41,6 +41,41 @@ interface RoutePoint {
   recorded_at: string;
   lat: number;
   lng: number;
+  village?: string | null;
+  taluka?: string | null;
+  city?: string | null;
+  district?: string | null;
+  state?: string | null;
+}
+
+interface Shift {
+  punch_in_at: string;
+  punch_out_at: string | null;
+  in_lat: number | null;
+  in_lng: number | null;
+  in_village: string | null;
+  in_taluka: string | null;
+  in_city: string | null;
+  in_district: string | null;
+  in_state: string | null;
+  out_lat: number | null;
+  out_lng: number | null;
+  out_village: string | null;
+  out_taluka: string | null;
+  out_city: string | null;
+  out_district: string | null;
+  out_state: string | null;
+}
+
+/** Joined address hierarchy for display -- village/taluka/district/state,
+ * skipping whichever pieces Nominatim couldn't resolve for a given point. */
+function locationHierarchy(loc: {
+  village?: string | null;
+  taluka?: string | null;
+  district?: string | null;
+  state?: string | null;
+}): string {
+  return [loc.village, loc.taluka, loc.district, loc.state].filter(Boolean).join(", ");
 }
 
 const STATUS_META: Record<LiveAgent["status"], { color: string; label: string }> = {
@@ -129,6 +164,10 @@ function LiveMap() {
       ),
     },
     {
+      title: "Location",
+      render: (_: unknown, row: LiveAgent) => locationHierarchy(row) || "—",
+    },
+    {
       title: "Last ping",
       dataIndex: "last_ping_at",
       render: (v: string | null) => (v ? dayjs(v).format("HH:mm:ss") : "—"),
@@ -206,6 +245,12 @@ function LiveMap() {
                   <br />
                   Last ping: {a.last_ping_at ? dayjs(a.last_ping_at).format("HH:mm:ss") : "—"}
                   {a.accuracy_meters != null && ` (±${Math.round(a.accuracy_meters)}m)`}
+                  {locationHierarchy(a) && (
+                    <>
+                      <br />
+                      {locationHierarchy(a)}
+                    </>
+                  )}
                 </Popup>
               </Marker>
             ))}
@@ -235,6 +280,7 @@ function RouteReplay() {
     points: RoutePoint[];
     distance_meters: number;
     user: { full_name: string };
+    shifts: Shift[];
   } | null>(null);
 
   // Non-admin/ops users are scope-clamped server-side -- mirror that in the
@@ -282,6 +328,35 @@ function RouteReplay() {
   const positions = (route?.points ?? []).map((p) => [p.lat, p.lng] as [number, number]);
   const start = route?.points[0];
   const end = route?.points[route.points.length - 1];
+  // Prefer the shift's own punch-in/out coordinates (and their geocode) over
+  // the first/last *ping* -- close to, but not necessarily identical to,
+  // the punch-in/out spot.
+  const firstShift = route?.shifts[0];
+  const lastShift = route?.shifts.length ? route.shifts[route.shifts.length - 1] : undefined;
+  const startPos: [number, number] | undefined =
+    firstShift?.in_lat != null && firstShift?.in_lng != null
+      ? [firstShift.in_lat, firstShift.in_lng]
+      : start && [start.lat, start.lng];
+  const endPos: [number, number] | undefined =
+    lastShift?.out_lat != null && lastShift?.out_lng != null
+      ? [lastShift.out_lat, lastShift.out_lng]
+      : end && [end.lat, end.lng];
+  const startLoc = firstShift
+    ? locationHierarchy({
+        village: firstShift.in_village,
+        taluka: firstShift.in_taluka,
+        district: firstShift.in_district,
+        state: firstShift.in_state,
+      })
+    : "";
+  const endLoc = lastShift
+    ? locationHierarchy({
+        village: lastShift.out_village,
+        taluka: lastShift.out_taluka,
+        district: lastShift.out_district,
+        state: lastShift.out_state,
+      })
+    : "";
 
   return (
     <Space direction="vertical" style={{ width: "100%" }} size={16}>
@@ -328,27 +403,37 @@ function RouteReplay() {
             <FitBounds positions={positions} />
             {/* The travelled path, highlighted in brand navy */}
             <Polyline positions={positions} pathOptions={{ color: palette.navy, weight: 5, opacity: 0.85 }} />
-            {route.points.map((p, i) => (
-              <CircleMarker
-                key={p.recorded_at}
-                center={[p.lat, p.lng]}
-                radius={3}
-                pathOptions={{ color: palette.navy, fillOpacity: 0.9 }}
-              >
-                <Tooltip>{`${i + 1}. ${dayjs(p.recorded_at).format("HH:mm:ss")}`}</Tooltip>
-              </CircleMarker>
-            ))}
-            {start && (
-              <Marker position={[start.lat, start.lng]} icon={dotIcon(palette.emerald, false)}>
+            {route.points.map((p, i) => {
+              // Only a detected dwell-start point carries location fields --
+              // their presence IS the "this was a stop" signal.
+              const loc = locationHierarchy(p);
+              return (
+                <CircleMarker
+                  key={p.recorded_at}
+                  center={[p.lat, p.lng]}
+                  radius={3}
+                  pathOptions={{ color: palette.navy, fillOpacity: 0.9 }}
+                >
+                  <Tooltip>
+                    {`${i + 1}. ${dayjs(p.recorded_at).format("HH:mm:ss")}`}
+                    {loc && ` — ${loc}`}
+                  </Tooltip>
+                </CircleMarker>
+              );
+            })}
+            {startPos && (
+              <Marker position={startPos} icon={dotIcon(palette.emerald, false)}>
                 <Tooltip permanent direction="top" offset={[0, -10]}>
-                  Start {dayjs(start.recorded_at).format("HH:mm")}
+                  Start {dayjs(firstShift?.punch_in_at ?? start?.recorded_at).format("HH:mm")}
+                  {startLoc && ` · ${startLoc}`}
                 </Tooltip>
               </Marker>
             )}
-            {end && end !== start && (
-              <Marker position={[end.lat, end.lng]} icon={dotIcon(palette.destructive, false)}>
+            {endPos && (endPos[0] !== startPos?.[0] || endPos[1] !== startPos?.[1]) && (
+              <Marker position={endPos} icon={dotIcon(palette.destructive, false)}>
                 <Tooltip permanent direction="top" offset={[0, -10]}>
-                  End {dayjs(end.recorded_at).format("HH:mm")}
+                  End {dayjs(lastShift?.punch_out_at ?? end?.recorded_at).format("HH:mm")}
+                  {endLoc && ` · ${endLoc}`}
                 </Tooltip>
               </Marker>
             )}

@@ -1,5 +1,37 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
+
+// No test should ever hit real Nominatim: fixed geocode fields let the
+// assertions below check the "only current position / punch-in-out /
+// detected dwells, never every ping" scope decision without any network
+// dependency or throttle delay.
+vi.mock("../src/services/geocoding-service", () => ({
+  reverseGeocode: vi.fn(async () => ({
+    village: "Test Village",
+    taluka: "Test Taluka",
+    city: "Test City",
+    district: "Test District",
+    state: "Test State",
+  })),
+  reverseGeocodeCached: vi.fn(async () => ({
+    village: "Test Village",
+    taluka: "Test Taluka",
+    city: "Test City",
+    district: "Test District",
+    state: "Test State",
+  })),
+  reverseGeocodeAsync: vi.fn(() => {}),
+  reverseGeocodeMany: vi.fn(async (points: { lat: number; lng: number }[]) =>
+    points.map(() => ({
+      village: "Test Village",
+      taluka: "Test Taluka",
+      city: "Test City",
+      district: "Test District",
+      state: "Test State",
+    })),
+  ),
+}));
+
 import { createApp } from "../src/app";
 import { pool } from "../src/config/db";
 import { hashPassword } from "../src/services/auth-service";
@@ -253,6 +285,16 @@ describe("live view scoping", () => {
     expect(res.body.alerts.map((x: { user_id: string }) => x.user_id)).toContain(userIds.agentA);
   });
 
+  it("includes village/city/etc. for an agent's current position", async () => {
+    const res = await request(app)
+      .get("/api/tracking/live")
+      .set("Authorization", `Bearer ${tokens.admin}`);
+    const a = res.body.agents.find((x: { user_id: string }) => x.user_id === userIds.agentA);
+    expect(a.village).toBe("Test Village");
+    expect(a.city).toBe("Test City");
+    expect(a.state).toBe("Test State");
+  });
+
   it("a telecaller parked at their desk never alerts as stationary", async () => {
     const res = await request(app)
       .get("/api/tracking/live")
@@ -364,5 +406,52 @@ describe("route replay", () => {
     expect(res.status).toBe(200);
     expect(res.body.points).toEqual([]);
     expect(res.body.distance_meters).toBe(0);
+  });
+
+  it("geocodes punch-in and a detected dwell, but never an ordinary moving point", async () => {
+    // agentB's 3 pings (0m, 500m, 1000m apart) never form a dwell -- the
+    // scope decision means none of them should carry location fields.
+    const res = await request(app)
+      .get(`/api/tracking/route?user_id=${userIds.agentB}&date=${today}`)
+      .set("Authorization", `Bearer ${tokens.admin}`);
+    for (const p of res.body.points) {
+      expect(p.village).toBeUndefined();
+    }
+    expect(res.body.shifts[0].in_village).toBe("Test Village");
+    expect(res.body.shifts[0].in_city).toBe("Test City");
+    // agentB is never punched out in this suite -- no out location to geocode.
+    expect(res.body.shifts[0].out_village).toBeNull();
+  });
+
+  describe("with a detected dwell", () => {
+    const dwellPhone = "7900000048";
+    let dwellUserId: string;
+
+    beforeAll(async () => {
+      const hash = await hashPassword(PASSWORD);
+      const { rows } = await pool.query(
+        `INSERT INTO users (agency_id, full_name, phone, password_hash, is_field_agent, designation)
+         VALUES ($1, 'Track dwell', $2, $3, true, 'field_agent') RETURNING id`,
+        [agencyId, dwellPhone, hash],
+      );
+      dwellUserId = rows[0].id;
+      userIds.dwell = dwellUserId;
+
+      await punchIn(dwellUserId, 30);
+      // Stationary ~28 minutes (drift < 30m), well past the 20-minute/100m
+      // default threshold -- one dwell spanning the whole cluster.
+      for (let m = 28; m >= 0; m -= 2) await ping(dwellUserId, m, m);
+    });
+
+    it("geocodes only the dwell's start point, not every point inside it", async () => {
+      const res = await request(app)
+        .get(`/api/tracking/route?user_id=${dwellUserId}&date=${today}`)
+        .set("Authorization", `Bearer ${tokens.admin}`);
+      expect(res.status).toBe(200);
+      expect(res.body.points.length).toBe(15);
+      expect(res.body.points[0].village).toBe("Test Village");
+      expect(res.body.points[1].village).toBeUndefined();
+      expect(res.body.shifts[0].in_village).toBe("Test Village");
+    });
   });
 });

@@ -5,9 +5,24 @@ import { asyncHandler } from "../middleware/async-handler";
 import { authenticate, requirePermission } from "../middleware/authenticate";
 import { HttpError } from "../middleware/error-handler";
 import { capabilitiesHavePermission } from "../services/permission-service";
+import { findDwellStarts, type TimedPoint } from "../services/dwell-detection";
+import {
+  reverseGeocodeAsync,
+  reverseGeocodeCached,
+  reverseGeocodeMany,
+  type GeocodeResult,
+} from "../services/geocoding-service";
 import { scopeFilter } from "../services/scope";
 import { capabilitiesOf } from "../types/user";
 import { istToday } from "../utils/ist";
+
+const NULL_GEOCODE: GeocodeResult = {
+  village: null,
+  taluka: null,
+  city: null,
+  district: null,
+  state: null,
+};
 
 const router = Router();
 // Phase 7 (§4.8, S5): tracking.view alone is enough for every route here --
@@ -111,44 +126,64 @@ router.get(
     );
 
     const now = Date.now();
-    const agents = rows.map((r) => {
-      let status: string;
-      let stationaryMinutes: number | null = null;
-      if (!r.last_ping_at) {
-        status = "awaiting_first_ping";
-      } else if (now - new Date(r.last_ping_at).getTime() > NO_SIGNAL_MINUTES * 60_000) {
-        status = "no_signal";
-      } else {
-        // "Not moving" only means something for field agents — a telecaller
-        // works a desk all day and would alert permanently.
-        const dwellMin =
-          r.is_field_agent && r.stationary_since
-            ? (now - new Date(r.stationary_since).getTime()) / 60_000
-            : 0;
-        if (dwellMin >= minutes) {
-          status = "stationary";
-          stationaryMinutes = Math.floor(dwellMin);
+    // Only the agent's current position is geocoded (never the historical
+    // route) -- and only from the cache: a cold cache must never make the
+    // live map wait on Nominatim. A miss returns nulls for this poll cycle
+    // and is populated in the background, ready by the next 30s refresh.
+    const agents = await Promise.all(
+      rows.map(async (r) => {
+        let status: string;
+        let stationaryMinutes: number | null = null;
+        if (!r.last_ping_at) {
+          status = "awaiting_first_ping";
+        } else if (now - new Date(r.last_ping_at).getTime() > NO_SIGNAL_MINUTES * 60_000) {
+          status = "no_signal";
         } else {
-          status = "moving";
+          // "Not moving" only means something for field agents — a telecaller
+          // works a desk all day and would alert permanently.
+          const dwellMin =
+            r.is_field_agent && r.stationary_since
+              ? (now - new Date(r.stationary_since).getTime()) / 60_000
+              : 0;
+          if (dwellMin >= minutes) {
+            status = "stationary";
+            stationaryMinutes = Math.floor(dwellMin);
+          } else {
+            status = "moving";
+          }
         }
-      }
-      return {
-        user_id: r.user_id,
-        full_name: r.full_name,
-        phone: r.phone,
-        team_id: r.team_id,
-        team_name: r.team_name,
-        branch_name: r.branch_name,
-        punch_in_at: r.punch_in_at,
-        last_ping_at: r.last_ping_at,
-        lat: r.lat !== null ? Number(r.lat) : null,
-        lng: r.lng !== null ? Number(r.lng) : null,
-        accuracy_meters: r.accuracy_meters !== null ? Number(r.accuracy_meters) : null,
-        status,
-        stationary_since: status === "stationary" ? r.stationary_since : null,
-        stationary_minutes: stationaryMinutes,
-      };
-    });
+
+        const lat = r.lat !== null ? Number(r.lat) : null;
+        const lng = r.lng !== null ? Number(r.lng) : null;
+        let geo = NULL_GEOCODE;
+        if (lat !== null && lng !== null) {
+          geo = await reverseGeocodeCached(lat, lng);
+          reverseGeocodeAsync(lat, lng);
+        }
+
+        return {
+          user_id: r.user_id,
+          full_name: r.full_name,
+          phone: r.phone,
+          team_id: r.team_id,
+          team_name: r.team_name,
+          branch_name: r.branch_name,
+          punch_in_at: r.punch_in_at,
+          last_ping_at: r.last_ping_at,
+          lat,
+          lng,
+          accuracy_meters: r.accuracy_meters !== null ? Number(r.accuracy_meters) : null,
+          status,
+          stationary_since: status === "stationary" ? r.stationary_since : null,
+          stationary_minutes: stationaryMinutes,
+          village: geo.village,
+          taluka: geo.taluka,
+          city: geo.city,
+          district: geo.district,
+          state: geo.state,
+        };
+      }),
+    );
 
     res.json({
       agents,
@@ -235,17 +270,90 @@ router.get(
       [q.user_id, q.date],
     );
 
+    // Route-replay geocoding scope (deliberately narrow, per the Nominatim
+    // rate limit): only punch-in, punch-out, and detected stationary dwells
+    // -- never every ping. Dwells are found by reusing the same radius/
+    // minutes rule /live's dwell detection encodes (via agencyThresholds()),
+    // generalized from "the current dwell only" to "every dwell in the
+    // day" via an in-process linear scan over the day's already-fetched
+    // points -- a day's pings (a few hundred rows) is trivial to scan here,
+    // and avoids forcing /live's single-point lateral-join SQL to answer a
+    // materially heavier whole-day question.
+    const { minutes, radius } = await agencyThresholds(me.agency_id);
+    const timedPoints: TimedPoint[] = points.rows.map((p) => ({
+      lat: Number(p.lat),
+      lng: Number(p.lng),
+      recorded_at: p.recorded_at,
+    }));
+    const dwellStarts = new Set(findDwellStarts(timedPoints, radius, minutes));
+
+    const geocodeTargets: { lat: number; lng: number }[] = [];
+    const dwellTargetIndex = new Map<number, number>(); // index into timedPoints -> index into geocodeTargets
+    timedPoints.forEach((p, i) => {
+      if (dwellStarts.has(p)) {
+        dwellTargetIndex.set(i, geocodeTargets.length);
+        geocodeTargets.push({ lat: p.lat, lng: p.lng });
+      }
+    });
+
+    const shiftRows = shifts.rows as {
+      punch_in_at: string;
+      punch_out_at: string | null;
+      in_lat: number | null;
+      in_lng: number | null;
+      out_lat: number | null;
+      out_lng: number | null;
+    }[];
+    const shiftInTargetIndex = new Map<number, number>();
+    const shiftOutTargetIndex = new Map<number, number>();
+    shiftRows.forEach((s, i) => {
+      if (s.in_lat !== null && s.in_lng !== null) {
+        shiftInTargetIndex.set(i, geocodeTargets.length);
+        geocodeTargets.push({ lat: Number(s.in_lat), lng: Number(s.in_lng) });
+      }
+      if (s.out_lat !== null && s.out_lng !== null) {
+        shiftOutTargetIndex.set(i, geocodeTargets.length);
+        geocodeTargets.push({ lat: Number(s.out_lat), lng: Number(s.out_lng) });
+      }
+    });
+
+    const geocoded = geocodeTargets.length > 0 ? await reverseGeocodeMany(geocodeTargets) : [];
+
     res.json({
       user: target.rows[0],
       date: q.date,
-      points: points.rows.map((p) => ({
-        recorded_at: p.recorded_at,
-        lat: Number(p.lat),
-        lng: Number(p.lng),
-        accuracy_meters: p.accuracy_meters !== null ? Number(p.accuracy_meters) : null,
-      })),
+      points: points.rows.map((p, i) => {
+        const base = {
+          recorded_at: p.recorded_at,
+          lat: Number(p.lat),
+          lng: Number(p.lng),
+          accuracy_meters: p.accuracy_meters !== null ? Number(p.accuracy_meters) : null,
+        };
+        // Only dwell-start points carry location fields at all -- their
+        // absence on every other point IS the "not every ping" signal.
+        const targetIdx = dwellTargetIndex.get(i);
+        if (targetIdx === undefined) return base;
+        const geo = geocoded[targetIdx];
+        return { ...base, ...geo };
+      }),
       distance_meters: Math.round(Number(distance.rows[0].meters)),
-      shifts: shifts.rows,
+      shifts: shiftRows.map((s, i) => {
+        const inGeo = shiftInTargetIndex.has(i) ? geocoded[shiftInTargetIndex.get(i)!] : NULL_GEOCODE;
+        const outGeo = shiftOutTargetIndex.has(i) ? geocoded[shiftOutTargetIndex.get(i)!] : NULL_GEOCODE;
+        return {
+          ...s,
+          in_village: inGeo.village,
+          in_taluka: inGeo.taluka,
+          in_city: inGeo.city,
+          in_district: inGeo.district,
+          in_state: inGeo.state,
+          out_village: outGeo.village,
+          out_taluka: outGeo.taluka,
+          out_city: outGeo.city,
+          out_district: outGeo.district,
+          out_state: outGeo.state,
+        };
+      }),
     });
   }),
 );

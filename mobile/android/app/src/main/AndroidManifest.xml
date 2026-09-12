@@ -6,16 +6,19 @@
     <!-- Camera / gallery for payment photo proof -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
-    <!-- Duty-hours location tracking (brief Section 9). The service is started
-         while the app is in the foreground, so while-in-use permission plus a
-         location-type foreground service covers background pings. -->
+    <!-- Duty-hours location tracking (brief Section 9). While-in-use plus a
+         location-type foreground service was found to intermittently drop
+         background pings on OEM devices that throttle non-exempted apps, so
+         punch-in now requires background ("Allow all the time") location and
+         battery-optimization exemption, both enforced before punch-in
+         (tracking_service.dart's ensurePermissions()). -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
-    <!-- X2: on MIUI/ColorOS/FuntouchOS/One UI (most of the Indian budget-Android
-         market), the tracking foreground service gets throttled or killed without
-         this exemption, even though the location-type foreground service and
-         while-in-use permission are otherwise sufficient. -->
+    <!-- Battery-optimization exemption, now blocking (not best-effort) on
+         MIUI/ColorOS/FuntouchOS/One UI and any other OEM that throttles or
+         kills a background-tracking app without it. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- The tracking foreground service's persistent "On duty" notification
          (Android 13+ requires this runtime grant; requested from

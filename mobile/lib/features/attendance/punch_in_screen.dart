@@ -46,13 +46,35 @@ class _PunchInScreenState extends ConsumerState<PunchInScreen> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-                if (att.needsAppSettings)
+                if (att.needsAppSettings) ...[
                   // A permanently-denied permission means the OS will never
                   // show the prompt again -- without this, tapping Punch In
                   // did nothing, forever, with no way out of the screen.
+                  // Background location has the same "no in-app dialog"
+                  // problem on Android 11+, so it shares this button --
+                  // there's no direct deep link to the Location sub-screen,
+                  // only the general app-settings page.
+                  const Text(
+                    'On the next screen: Permissions → Location → Allow all the time.',
+                    style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
                   OutlinedButton(
                     onPressed: TrackingService.openAppSettings,
                     child: const Text('Open Settings'),
+                  ),
+                ],
+                if (att.needsBatteryAction)
+                  // Unlike background location, battery optimization has a
+                  // direct OS dialog -- re-run punchIn() right after so the
+                  // agent doesn't need a second tap once they grant it.
+                  OutlinedButton(
+                    onPressed: () async {
+                      await TrackingService.requestIgnoreBatteryOptimization();
+                      if (context.mounted) notifier.punchIn();
+                    },
+                    child: const Text('Disable Battery Optimization'),
                   ),
                 const SizedBox(height: 16),
               ],

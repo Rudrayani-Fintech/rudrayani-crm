@@ -18,6 +18,13 @@ const envSchema = z.object({
   OTP_MAX_VERIFY_ATTEMPTS: z.coerce.number().int().positive().default(5),
   UPLOAD_DIR: z.string().default("uploads"),
 
+  // Nominatim's usage policy requires a descriptive, identifying User-Agent
+  // (ideally with contact info) on every request -- overridable per
+  // deployment without a code change.
+  NOMINATIM_USER_AGENT: z
+    .string()
+    .default("RudrayaniFintechCRM/1.0 (contact: rudrayanifintechs@gmail.com)"),
+
   // Comma-separated list of allowed origins for the web portal (e.g.
   // "https://app.rudrayanifintechs.com"). Unset = every origin is allowed,
   // which is what this API ran with for a long time -- kept as the default

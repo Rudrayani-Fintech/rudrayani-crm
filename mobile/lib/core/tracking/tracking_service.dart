@@ -6,7 +6,18 @@ import 'tracking_task.dart';
 /// never show the prompt again -- only Settings can fix it) were collapsed
 /// into one message with no way to act on the second case. After a
 /// permanent denial, tapping Punch In did nothing, forever.
-enum LocationPermissionIssue { none, servicesDisabled, deniedTemporarily, deniedForever }
+///
+/// `backgroundNotGranted` and `batteryOptimizationOn` are both blocking, per
+/// the decision to require "Allow all the time" + battery optimization
+/// disabled rather than the previous while-in-use-only, best-effort setup.
+enum LocationPermissionIssue {
+  none,
+  servicesDisabled,
+  deniedTemporarily,
+  deniedForever,
+  backgroundNotGranted,
+  batteryOptimizationOn,
+}
 
 /// UI-side control of the background tracking foreground service.
 /// Punch-in starts it, punch-out stops it (brief §10: explicit, not implicit).
@@ -14,10 +25,12 @@ class TrackingService {
   /// Call once in main() before runApp.
   static void initCommunicationPort() => FlutterForegroundTask.initCommunicationPort();
 
-  /// Notification + location permissions. The service is started while the
-  /// app is in the foreground, so a `location`-type foreground service keeps
-  /// GPS access in the background with plain while-in-use permission —
-  /// no "Allow all the time" settings trip needed.
+  /// Notification + location permissions. Tracking must survive the app
+  /// going to the background for the whole shift, not just while it's the
+  /// foreground app -- so this now requires `always` (background) location
+  /// and battery-optimization exemption, both blocking. Each check
+  /// short-circuits on the first unmet requirement, so the punch-in screen
+  /// only ever shows one actionable message at a time.
   static Future<LocationPermissionIssue> ensurePermissions() async {
     await FlutterForegroundTask.requestNotificationPermission();
 
@@ -34,6 +47,16 @@ class TrackingService {
     if (perm == LocationPermission.denied) {
       return LocationPermissionIssue.deniedTemporarily;
     }
+    // On Android 11+, requestPermission() cannot itself grant `always` --
+    // there is no in-app dialog for it; the OS dialog only offers
+    // while-in-use here. Getting anything less than `always` means the
+    // agent still needs to visit Settings manually.
+    if (perm != LocationPermission.always) {
+      return LocationPermissionIssue.backgroundNotGranted;
+    }
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      return LocationPermissionIssue.batteryOptimizationOn;
+    }
     return LocationPermissionIssue.none;
   }
 
@@ -43,8 +66,27 @@ class TrackingService {
           'Location permission is required to punch in.',
         LocationPermissionIssue.deniedForever =>
           "Location permission was permanently denied. Open Settings to enable it — this app can't ask again.",
+        LocationPermissionIssue.backgroundNotGranted =>
+          'Location access is only allowed "while using the app." Field tracking needs '
+              '"Allow all the time" -- open Settings, then Permissions → Location → '
+              'Allow all the time.',
+        LocationPermissionIssue.batteryOptimizationOn =>
+          'Battery optimization for this app must be turned off so tracking keeps running '
+              'in the background.',
         LocationPermissionIssue.none => '',
       };
+
+  /// deniedForever and backgroundNotGranted both need a trip to Settings --
+  /// geolocator has no direct deep link to the Location permission
+  /// sub-screen, only the app's general settings page.
+  static bool needsSettingsNavigation(LocationPermissionIssue issue) =>
+      issue == LocationPermissionIssue.deniedForever ||
+      issue == LocationPermissionIssue.backgroundNotGranted;
+
+  /// Battery optimization, unlike background location, has a direct OS
+  /// dialog (requestIgnoreBatteryOptimization() below) -- no Settings trip.
+  static bool needsBatteryAction(LocationPermissionIssue issue) =>
+      issue == LocationPermissionIssue.batteryOptimizationOn;
 
   /// Wraps geolocator's settings deep-link so the UI layer never imports
   /// geolocator directly -- kept consistent with the rest of this class.

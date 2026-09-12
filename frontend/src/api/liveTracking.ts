@@ -14,6 +14,11 @@ export interface LiveAgent {
   status: "moving" | "stationary" | "no_signal" | "awaiting_first_ping";
   stationary_since: string | null;
   stationary_minutes: number | null;
+  village: string | null;
+  taluka: string | null;
+  city: string | null;
+  district: string | null;
+  state: string | null;
 }
 
 export interface TrackingAlert {
